@@ -1,17 +1,15 @@
-"""from preprocess.preprocess import PreprocessDialog
-from data_extractor.txt_to_csv import TxtToCsvDialog
-from pose.pose_estimation import PoseEstimationDialog"""
-#TODO : Remove it
 from installation_manager import MainInstallDialog
+from project_manager import ProjectManagerDialog
+from utils import TxtToCsvDialog
 
 class PipelineController:
     def run_installation(self):
         dialog = MainInstallDialog() 
         dialog.exec()
-        pass
 
     def run_project_manager(self):
-        pass
+        dialog = ProjectManagerDialog() 
+        dialog.exec()
 
     def run_video_preprocess(self):
         pass
@@ -20,4 +18,8 @@ class PipelineController:
         pass
 
     def data_extract(self):
+        dialog = TxtToCsvDialog()
+        dialog.exec()
+
+    def export_video(self):
         pass

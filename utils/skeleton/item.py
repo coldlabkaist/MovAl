@@ -11,7 +11,8 @@ class NodeItem(QGraphicsItem):
                       QGraphicsItem.GraphicsItemFlag.ItemIsMovable | 
                       QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
         self.setZValue(1)
-        # (openPropertiesCallback은 이후에 설정하여 더블클릭으로 속성창을 열 수 있게 함)
+        self.selectAvailable = True
+        self.r = 10
 
     def add_edge(self, edge_item):
         self.edges.append(edge_item)
@@ -29,14 +30,28 @@ class NodeItem(QGraphicsItem):
             h = fm.height()
             return QRectF(-w/2 - 2, -h/2 - 2, w + 4, h + 4)
         else:
-            r = 10
+            r = self.r
             th = self.node.thickness
-            extra = th / 2.0
+            extra = th / 2.0 + 3
             return QRectF(-r - extra, -r - extra, 2*r + 2*extra, 2*r + 2*extra)
 
     def paint(self, painter, option, widget=None):
         color = self.node.color
         thickness = self.node.thickness
+
+        if self.selectAvailable and self.isSelected():
+            hl_pen = QPen(QColor("red"), max(2, thickness + 1))
+            painter.setPen(hl_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+
+            r = self.r
+            if self.node.shape == "circle":
+                painter.drawEllipse(-r - 3, -r - 3, 2 * (r + 3), 2 * (r + 3))
+            elif self.node.shape == "square":
+                painter.drawRect(-r - 3, -r - 3, 2 * (r + 3), 2 * (r + 3))
+            else:
+                painter.drawRect(-r - 3, -r - 3, 2 * (r + 3), 2 * (r + 3))
+
         if self.node.shape == 'text':
             painter.setPen(QPen(color, 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -56,7 +71,6 @@ class NodeItem(QGraphicsItem):
                 painter.drawRect(-r, -r, 2*r, 2*r)
 
     def itemChange(self, change, value):
-        """아이템 상태 변경 시 호출 (이동 등)"""
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             newPos = value
             
@@ -83,8 +97,9 @@ class EdgeItem(QGraphicsLineItem):
         node1.add_edge(self)
         node2.add_edge(self)
 
-        pen = QPen(QColor("black"), 2)
-        self.setPen(pen)
+        self.normal_pen = QPen(QColor("black"), 2)
+        self.hl_pen     = QPen(QColor("red"),   3)
+        self.setPen(self.normal_pen)
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setZValue(-1)
 
@@ -92,3 +107,8 @@ class EdgeItem(QGraphicsLineItem):
         p1 = self.node1.scenePos()
         p2 = self.node2.scenePos()
         self.setLine(QLineF(p1, p2))
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self.setPen(self.hl_pen if self.isSelected() else self.normal_pen)
+        return super().itemChange(change, value)

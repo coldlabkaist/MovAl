@@ -5,6 +5,7 @@ import yaml
 import os
 import shutil 
 import threading
+from typing import Callable  
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeyEvent, QFont, QColor
@@ -22,6 +23,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QCheckBox,
     QLineEdit,
+    QComboBox
 )
 
 class _FileListWidget(QListWidget):
@@ -64,10 +66,19 @@ class _FileListWidget(QListWidget):
             item.setBackground(QColor("#fff9c4"))
 
 class ProjectManagerDialog(QDialog):
-    def __init__(self, parent: QDialog | None = None) -> None:
+    def __init__(
+        self, 
+        set_main_window_project: Optional[Callable[[str], None]] = None,
+        parent: QDialog | None = None,
+    ) -> None:
+
         super().__init__(parent)
         self.setWindowTitle("Create New Project")
         self.resize(800, 800)
+
+        self._preset_dir = os.path.join(os.getcwd(), "preset", "skeleton")
+        os.makedirs(self._preset_dir, exist_ok=True)
+        self.set_main_window_project = set_main_window_project
 
         layout = QHBoxLayout(self)
 
@@ -118,8 +129,11 @@ class ProjectManagerDialog(QDialog):
 
         self.step4_label = QLabel("<b>Step&nbsp;4.</b> Set skeleton")
         col1.addWidget(self.step4_label)
-        self.step4_button = QPushButton("Select Skeleton Setting …")
+        self.step4_combo = QComboBox(self)
+        self.load_combo_items()
+        self.step4_button = QPushButton("Skeleton Setting …")
         self.step4_button.clicked.connect(self._on_select_skeleton)
+        col1.addWidget(self.step4_combo)
         col1.addWidget(self.step4_button)
         col1.addSpacing(20)
         
@@ -199,9 +213,23 @@ class ProjectManagerDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, filetype)
             self.file_list._style_item(item, filetype)
 
+    def load_combo_items(self, selected: str | None = None):
+        self.step4_combo.clear()
+        os.makedirs(self._preset_dir, exist_ok=True)
+        files = sorted(f for f in os.listdir(self._preset_dir) if f.endswith(".yaml"))
+        self.step4_combo.addItems(files)
+
+        if selected == None:
+            self.step4_combo.setEditable(True)
+            self.step4_combo.setPlaceholderText("Select config file")
+            self.step4_combo.setEditable(False)
+        else:
+            idx = self.step4_combo.findText(selected, Qt.MatchFlag.MatchExactly)
+            self.step4_combo.setCurrentIndex(idx)
+
     def _on_select_skeleton(self):
         from project_manager import SkeletonManagerDialog
-        dialog = SkeletonManagerDialog() 
+        dialog = SkeletonManagerDialog(self) 
         dialog.exec()
             
     def _on_list_sort(self):
@@ -266,7 +294,7 @@ class ProjectManagerDialog(QDialog):
 
         subdirs = [
             "frames", "labels/csv", "labels/txt",
-            "masks", "runs", "raw_videos", "outputs"
+            "runs", "raw_videos", "outputs"
         ]   
         for sd in subdirs:
             _ensure_dir(os.path.join(proj_dir, sd))
@@ -309,10 +337,11 @@ class ProjectManagerDialog(QDialog):
 
         config_path = os.path.join(proj_dir, "config.yaml")
         config = {
+            "project_dir": proj_dir,
             "title": title,
             "num_animals": int(self.step1_spin.value()),
             "files": project_files,
-            "skeleton": None,
+            "skeleton": self.step4_combo.currentText(),
         }
 
         try:
@@ -332,6 +361,7 @@ class ProjectManagerDialog(QDialog):
             QMessageBox.information(self, "Done",
                                     f"Project folder created:\n{proj_dir}\n\nconfig.yaml saved.")
 
+        self.set_main_window_project(path=config_path)
         self.accept()
 
 def _ensure_dir(path: str | Path):

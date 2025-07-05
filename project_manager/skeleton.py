@@ -10,7 +10,7 @@ from utils.skeleton import SkeletonModel, SkeletonScene, NodeItem, EdgeItem
 import os, yaml
 
 class SkeletonManagerDialog(QDialog):
-    def __init__(self, parent: QDialog | None = None) -> None:
+    def __init__(self, main_window) -> None:
         super().__init__()
         self.setWindowTitle("Skeleton Manager")
         self.resize(800, 500)
@@ -18,6 +18,7 @@ class SkeletonManagerDialog(QDialog):
 
         self.model = SkeletonModel()
         self.scene = SkeletonScene(self.model, self)
+        self.scene.setSceneRect(-200, -200, 600, 350)
         self.view = QGraphicsView(self.scene)
         self.node_list = QListWidget()
         self.node_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
@@ -40,11 +41,8 @@ class SkeletonManagerDialog(QDialog):
         top_bar.addWidget(self.title_edit, 2)
         main_layout.addLayout(top_bar)
         
-        self._preset_dir = os.path.join(
-            os.path.dirname(os.path.abspath(os.getcwd())),
-            "preset", "skeleton"
-        )
-        os.makedirs(self._preset_dir, exist_ok=True)
+        self.main_window = main_window
+        self._preset_dir = main_window._preset_dir
         self._load_combo_items()
         self.combo.currentIndexChanged.connect(self._on_preset_changed)
 
@@ -141,7 +139,6 @@ class SkeletonManagerDialog(QDialog):
         for name, node in self.model.nodes.items():
             node_item = NodeItem(node)
             node_item.setPos(node.x, node.y)
-            node_item.openPropertiesCallback = self.open_node_properties
             self.scene.addItem(node_item)
             self.node_items[name] = node_item
             self.add_node_to_list(node)
@@ -168,8 +165,11 @@ class SkeletonManagerDialog(QDialog):
             self.scene.setBackgroundBrush(QBrush(pix))
 
     def _on_list_context_menu(self, pos):
-        menu = QMenu(self)
+        if not self.node_list.selectedItems():
+            event.ignore()
+            return
 
+        menu = QMenu(self)
         rename_act = menu.addAction("Rename node")
         delete_act = menu.addAction("Delete selected")
 
@@ -204,6 +204,27 @@ class SkeletonManagerDialog(QDialog):
         for itm in matches:
             itm.setText(new_name)
         node_item.update()
+
+    def _delete_selected_scene_items(self):
+        items = self.scene.selectedItems()
+        if not items:
+            return
+
+        for it in [i for i in items if isinstance(i, EdgeItem)]:
+            n1, n2 = it.node1.node.name, it.node2.node.name
+            self.model.remove_edge(n1, n2)
+            it.node1.remove_edge(it); it.node2.remove_edge(it)
+            self.scene.removeItem(it)
+
+        names = [i.node.name for i in items if isinstance(i, NodeItem)]
+        if names:
+            self._sync_list = False
+            self.node_list.clearSelection()
+            for nm in names:
+                for li in self.node_list.findItems(nm, Qt.MatchFlag.MatchExactly):
+                    li.setSelected(True)
+            self._sync_list = True
+            self._delete_selected_nodes()
 
     def _delete_selected_nodes(self):
         selected_items = self.node_list.selectedItems()
@@ -253,12 +274,6 @@ class SkeletonManagerDialog(QDialog):
                 node_item.setSelected(True)
         self._sync_scene = True
 
-    def open_node_properties(self, node):
-        if node.name in self.node_items:
-            node_item = self.node_items[node.name]
-            dlg = NodePropertiesDialog(node, node_item)
-            dlg.exec()
-
     def _on_mode_toggled(self):
         if self.add_node_radio.isChecked():
             self.scene.setMode('add_node')
@@ -279,7 +294,10 @@ class SkeletonManagerDialog(QDialog):
         try:
             self.model.save_to_yaml(path)
             QMessageBox.information(self, "Save Complete", f"The preset has been saved to\n{path}\n.")
+            
+            self.main_window.load_combo_items(title)
             self.accept()
+            
         except ValueError as ve:
             QMessageBox.warning(
                 self,

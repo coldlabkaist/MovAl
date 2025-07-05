@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (
-    QGraphicsScene, QGraphicsLineItem, QGraphicsItem
+    QGraphicsScene, QGraphicsLineItem, QGraphicsItem, QMenu
 )
 from PyQt6.QtCore import Qt, QLineF
 from PyQt6.QtGui  import QPen, QColor, QTransform
@@ -26,12 +26,10 @@ class SkeletonScene(QGraphicsScene):
             if self.mode == 'add_node':
                 if self.itemAt(event.scenePos(), QTransform()) is None:
                     node = self.model.add_node()
-                    node.x = event.scenePos().x()
-                    node.y = event.scenePos().y()
+                    pos    = event.scenePos()
                     
                     node_item = NodeItem(node)
-                    node_item.setPos(node.x, node.y)
-                    node_item.openPropertiesCallback = self.main_window.open_node_properties
+                    node_item.setPos(pos)
                     self.addItem(node_item)
                     
                     self.main_window.node_items[node.name] = node_item
@@ -94,3 +92,26 @@ class SkeletonScene(QGraphicsScene):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.main_window._delete_selected_scene_items()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event):
+        if not self.selectedItems():
+            event.ignore()
+            return
+
+        menu = QMenu()
+        rename_act = menu.addAction("Rename node")
+        delete_act = menu.addAction("Delete selected")
+        act = menu.exec(event.screenPos())
+
+        if act == rename_act:
+            if len(self.selectedItems()) == 1:
+                self.main_window._rename_selected_node()
+        elif act == delete_act:
+            self.main_window._delete_selected_scene_items()

@@ -4,6 +4,8 @@
 ## Cutie / YOLO ##
 Cutie/
 example/
+preset/
+*.pt
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

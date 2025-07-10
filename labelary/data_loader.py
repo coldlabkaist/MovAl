@@ -1,42 +1,43 @@
 import pandas as pd
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union, Optional, List
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QDialog, QPushButton, QVBoxLayout
+from utils.skeleton import SkeletonModel
 
 class DataLoader:
-    """Singleton‑style loader that keeps a global DataFrame (`data`) and the
-    current runtime skeleton (`skeleton_data`).  The public method names remain
-    identical to the original code so no other module breaks.
-    """
 
     # --------------------------------------------------------------------- state
+    parent: Optional[QDialog] = None
+
     data: Optional[pd.DataFrame] = None      # 로드된 DataFrame (또는 None)
-    skeleton_data: dict = {}                 # track → [(kp1,kp2), …]
     csv_path: Optional[str] = None
-    kp_order: list[str] = [] 
+    skeleton_model: "SkeletonModel" = None
+    kp_order: list = None
+    _skeleton_loaded: bool = False  # Skeleton loaded flag
 
     img_width: Optional[int] = None   # 현재 로드된 영상 해상도
     img_height: Optional[int] = None
     _coords_normalized: bool = False
-    norm_src_w: Optional[int] = None     # ← 정규화에 사용한 “이전” 해상도
-    norm_src_h: Optional[int] = None
-    # --------------------------------------------------------------------- CSV/TXT 로더
+
+    # --------------------------------------------------- skeleton helpers
+    @classmethod
+    def load_skeleton_info(cls, skeleton_model: "SkeletonModel") -> None:
+        """Register skeleton keypoint order. Call once after loading YAML skeleton."""
+        if cls._skeleton_loaded:
+            return
+        cls.skeleton_model = skeleton_model
+        cls.kp_order = list(skeleton_model.nodes)
+        cls._skeleton_loaded = True
+
+    @classmethod
+    def _ensure_skeleton(cls) -> None:
+        if not cls._skeleton_loaded:
+            raise RuntimeError("Skeleton information has not been loaded. Call load_skeleton_info() first.")
 
     @classmethod
     def set_image_dims(cls, w: int, h: int) -> None:
         cls.img_width, cls.img_height = w, h
         if cls.data is None:
-            return
-
-        # ─ 이미 0-1 좌표 → 새 해상도로 재-정규화 ─
-        if cls._coords_normalized and cls.norm_src_w:
-            if (w, h) != (cls.norm_src_w, cls.norm_src_h):
-                fx, fy = cls.norm_src_w / w, cls.norm_src_h / h
-                for kp in cls.kp_order:
-                    cls.data[f"{kp}.x"] *= fx
-                    cls.data[f"{kp}.y"] *= fy
-                cls.norm_src_w, cls.norm_src_h = w, h
-                print(f"🔄 좌표를 {w}×{h} 기준으로 재-정규화 완료")
             return
 
         # ─ 픽셀 좌표 → 이번 해상도로 최초 정규화 ─
@@ -45,10 +46,12 @@ class DataLoader:
 
     @classmethod
     def load_csv_data(cls, file_path: Union[str, Path]) -> bool:
+        cls._ensure_skeleton()
         return cls._load_generic(file_path, read_func=pd.read_csv)
 
     @classmethod
     def load_txt_data(cls, path: Union[str, Path], sep: str = "\s+") -> bool:
+        cls._ensure_skeleton()
         path = Path(path)
 
         # ───── 1. 폴더인 경우: 내부 *.txt 모두 결합 ─────
@@ -94,6 +97,11 @@ class DataLoader:
 
         # ----- 열 이름 생성 -----
         kp_n   = (raw.shape[1] - 5) // 3           # 5개 이후 세개씩 (x,y,vis)
+        if cls.kp_order and kp_n != len(cls.kp_order):
+            raise ValueError(
+                f"TXT file '{fp.name}' contains {kp_n} key-points, "
+                f"but skeleton expects {len(cls.kp_order)}."
+            )
         if not cls.kp_order:
             # 최초 호출: kp_order 재구성
             cls.kp_order = [f"kp{i+1}" for i in range(kp_n)]
@@ -118,9 +126,26 @@ class DataLoader:
 
     # ------------------------------------------------------------------ 내부 공통 루틴
     @classmethod
+    def create_new_data(cls, n_tracks: int = 1) -> bool:
+        """Prepare an empty DataFrame template in memory matching the current skeleton."""
+        cls._ensure_skeleton()
+        base_cols = ["track", "frame.idx"]
+        cols = ["track", "frame.idx", "instance.visibility"]
+        for kp in cls.kp_order:
+            cols += [f"{kp}.x", f"{kp}.y", f"{kp}.visibility"]
+        # 빈 DataFrame 생성
+        df = pd.DataFrame(columns=cols)
+        cls.data = df
+        cls.csv_path = None
+        cls._coords_normalized = False
+        print("🆕 New label template prepared in memory")
+        return True
+
+    @classmethod
     def _load_generic(cls, src, read_func=None, *, from_dataframe: bool = False) -> bool:
         """read_func: pd.read_csv 또는 pd.read_table"""
         try:
+            # 이 코드 검토할것. 현재 문제상황 : csv가 로드가 안됨!!!!! (TODO)
             # ── A. 데이터 획득 ─────────────────────────────────────────
             if from_dataframe:
                 df = src                                # DataFrame 그대로
@@ -185,8 +210,7 @@ class DataLoader:
         except Exception as e:
             print(f"❌ Failed to load data: {e}")
             return False
-
-    # ───────── 내부 유틸 ─────────
+    
     @staticmethod
     def _first_frame_row(df):
         try:
@@ -194,7 +218,7 @@ class DataLoader:
             return df[df["frame.idx"] == first_idx].iloc[0]
         except Exception:
             return None
-
+            
     @classmethod
     def _needs_normalize(cls, row):
         # “.x” 컬럼 중 값이 1보다 큰 것이 하나라도 있으면 픽셀 좌표로 간주
@@ -205,6 +229,70 @@ class DataLoader:
                     return True
         return False
 
+    # ------------------------------------------------------------------ skeleton check
+    @classmethod
+    def _check_skeleton_compat(cls, df: pd.DataFrame, parent=None) -> None:
+        if not cls.kp_order:
+            return
+
+        file_kps = list()
+        for c in df.columns:
+            if isinstance(c, str):
+                if c.endswith(".x"):
+                    file_kps.append(c.split(".")[0])
+        skel_kps = list(cls.skeleton_model.nodes)
+
+        if file_kps != skel_kps:
+            QMessageBox.critical(
+                cls.parent,
+                "Skeleton Mismatch",
+                "The skeleton information in this data does not match the project configuration.\n"
+                "Please select a different label or review the project file."
+            )
+
+    @classmethod
+    def reset_data(cls):
+        cls.data = None
+        cls.csv_path = None
+        cls._coords_normalized = False
+        print("🗑️ DataLoader 상태 초기화 완료")
+
+    @classmethod
+    def get_keypoint_coordinates_by_frame(cls, frame_idx):
+        if cls.is_empty(cls.data):
+            return {}
+
+        try:
+            frame_df = cls.data.xs(frame_idx, level="frame.idx")   # track 이 인덱스
+        except KeyError:
+            return {t: {} for t in cls.data["track"].unique()}
+
+        coords = {t: {} for t in cls.data["track"].unique()}
+        for track, group in frame_df.groupby(level="track"):       # ← 여기 수정
+            row = group.iloc[0]                                    # 1행만 사용
+            for kp in cls.kp_order:
+                xcol, ycol, scol = f"{kp}.x", f"{kp}.y", f"{kp}.visibility"
+                if xcol in row and ycol in row and scol in row:
+                    coords[track][kp] = (row[xcol], row[ycol], row[scol])
+
+        return coords
+
+    def is_empty(obj) -> bool:
+        """DataFrame·시퀀스·None 모두 안전하게 검사."""
+        # 1) None 자체
+        if obj is None:
+            return True
+        
+        # 2) pandas.DataFrame - 전용 속성 .empty 사용
+        if isinstance(obj, pd.DataFrame):
+            return obj.empty
+        
+        # 3) 길이를 가질 수 있는(Sized) 객체
+        if isinstance(obj, Sized):
+            return len(obj) == 0
+        
+        # 4) 그 밖의 객체 – 길이나 empty 개념이 없으므로 ‘비어 있지 않다’고 간주
+        return False
 
     @classmethod
     def _normalize_df(cls):
@@ -220,141 +308,3 @@ class DataLoader:
             cls.data[f"{kp}.x"] /= cls.img_width
             cls.data[f"{kp}.y"] /= cls.img_height
         cls._coords_normalized = True
-        cls.norm_src_w, cls.norm_src_h = cls.img_width, cls.img_height
-        print(f"✅ (0-1) 정규화 완료 — 기준 {cls.norm_src_w}×{cls.norm_src_h}")
-
-
-    # ------------------------------------------------------------------ skeleton check
-    @classmethod
-    def _check_skeleton_compat(cls, df: pd.DataFrame) -> None:
-        """Reset skeleton if the loaded file is incompatible."""
-        if not cls.skeleton_data:
-            return  # skeleton 없음 → 자유롭게 유지
-
-        file_kps = {c.split(".")[0] for c in df.columns if c.endswith(".x") or c.endswith(".y")}
-        skel_kps = {kp for edges in cls.skeleton_data.values() for pair in edges for kp in pair}
-        if not skel_kps.issubset(file_kps):
-            try:
-                from skeleton import SkeletonManager
-                SkeletonManager.reset_skeleton_info()
-                print("⚠️  Skeleton reset: incompatible with new file")
-            except ImportError:
-                cls.skeleton_data = {}
-
-
-    # ------------------------------------------------------------------ keypoint helpers (원본 유지)
-    @classmethod
-    def get_keypoints(cls):
-        if cls.data is None:
-            return []
-        keypoints = []
-        tracks = cls.data["track"].unique()          # 입력 순서 유지
-        for idx, track in enumerate(tracks, start=1):
-            keypoints.append(f"<b>▶ Animal {idx}</b>")
-            for kp in cls.kp_order:                  # ★엑셀 순서
-                keypoints.append(f"  {kp}")
-        return keypoints
-
-    """@classmethod
-    def get_keypoint_coordinates(cls):
-        if cls.data is None:
-            return {}
-        coords = {}
-        for track in sorted(cls.data["track"].unique()):
-            row = cls.data[cls.data["track"] == track].iloc[0]
-            track_coords = {}
-            for col in [c for c in cls.data.columns if ".x" in c]:
-                base = col.replace(".x", "")
-                if f"{base}.y" in cls.data.columns:
-                    track_coords[base] = (row[col], row[f"{base}.y"])
-            coords[track] = track_coords
-        return coords"""
-
-    @classmethod
-    def get_keypoint_coordinates_by_frame(cls, frame_idx):
-        """{track: {kp:(x,y)…}}  track 이름 그대로, 누락 트랙은 빈 dict"""
-        if cls.data is None:
-            return {}
-
-        try:
-            frame_df = cls.data.xs(frame_idx, level="frame.idx")   # track 이 인덱스
-        except KeyError:
-            return {t: {} for t in cls.data["track"].unique()}
-
-        coords = {t: {} for t in cls.data["track"].unique()}
-        for track, group in frame_df.groupby(level="track"):       # ← 여기 수정
-            row = group.iloc[0]                                    # 1행만 사용
-            for kp in cls.kp_order:
-                xcol, ycol = f"{kp}.x", f"{kp}.y"
-                if xcol in row and ycol in row:
-                    coords[track][kp] = (row[xcol], row[ycol])
-
-        return coords
-
-    @classmethod
-    def update_point(cls, track, frame_idx, keypoint, norm_x, norm_y):
-        if cls.data is None:
-            print("DataLoader.update_point: No data loaded.")
-            return
-        mask = (cls.data["track"] == track) & (cls.data["frame.idx"] == frame_idx)
-        if mask.sum() == 0:
-            print(f"DataLoader.update_point: No row for track={track}, frame={frame_idx}")
-            return
-        col_x, col_y = f"{keypoint}.x", f"{keypoint}.y"
-        if col_x not in cls.data.columns or col_y not in cls.data.columns:
-            print(f"DataLoader.update_point: Columns {col_x} or {col_y} not found.")
-            return
-        cls.data.loc[mask, [col_x, col_y]] = [norm_x, norm_y]
-        print(f"✅ Updated {col_x}, {col_y} to ({norm_x:.4f}, {norm_y:.4f})")
-
-    @classmethod
-    def update_visibility(cls, track, frame_idx, keypoint, visibility):
-        if cls.data is None:
-            print("DataLoader.update_visibility: No data loaded.")
-            return
-        mask = (cls.data["track"] == track) & (cls.data["frame.idx"] == frame_idx)
-        if mask.sum() == 0:
-            print(f"DataLoader.update_visibility: No row for track={track}, frame={frame_idx}")
-            return
-        v_col = f"{keypoint}.visibility"
-        if v_col not in cls.data.columns:
-            print(f"DataLoader.update_visibility: Column {v_col} not found.")
-            return
-        cls.data.loc[mask, v_col] = visibility
-        print(f"✅ Updated {v_col} to {visibility} (track={track}, frame={frame_idx})")
-
-    @classmethod
-    def reset_data(cls):
-        cls.data = None
-        cls.csv_path = None
-        cls._coords_normalized = False
-        cls.norm_src_w = cls.norm_src_h = None
-        print("🗑️ DataLoader 상태 초기화 완료")
-
-
-# --------------------------------------------------------------------- simple dialog wrappers
-class LoadDataDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Select Data Format")
-        self.setFixedSize(300, 150)
-        layout = QVBoxLayout(self)
-        self.csv_button = QPushButton("Load CSV")
-        self.txt_button = QPushButton("Load TXT")
-        layout.addWidget(self.csv_button)
-        layout.addWidget(self.txt_button)
-        self.csv_button.clicked.connect(self.load_csv)
-        self.txt_button.clicked.connect(self.load_txt)
-
-    def load_csv(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV (*.csv)")
-        if path and DataLoader.load_csv_data(path):
-            self.accept()
-
-    def load_txt(self):
-        # 폴더 하나만 선택               ▼ 기존 getOpenFileName → getExistingDirectory
-        dir_path = QFileDialog.getExistingDirectory(
-            self, "Open TXT Folder", "", QFileDialog.Option.ShowDirsOnly
-        )
-        if dir_path and DataLoader.load_txt_data(dir_path):   # 폴더 경로 그대로 전달
-            self.accept()

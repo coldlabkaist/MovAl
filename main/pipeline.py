@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
 from installation_manager import MainInstallDialog
 from project_manager import ProjectManagerDialog
 from video_preprocess import PreprocessDialog
-from labelary import run_labelary
+from labelary import run_labelary_with_project
 from pose import PoseEstimationDialog
 from utils import TxtToCsvDialog
 
@@ -29,7 +29,10 @@ class PipelineController:
         dialog.exec()
 
     def run_labelary(self):
-        run_labelary()
+        if self.current_project == None:
+            QMessageBox.warning(None, "Project not found", "Please Select Project")
+            return
+        run_labelary_with_project(self.current_project)
 
     def run_pose_estimation(self):
         dialog = PoseEstimationDialog()

@@ -16,8 +16,9 @@ class KeyboardController(QObject):
                 if current > 0:
                     self.video_player.move_to_frame(current - 1)
                 return True
-            elif key == Qt.Key.Key_Space:
+            elif key == Qt.Key.Key_Space and not event.isAutoRepeat():
                 self.video_player.toggle_playback()
+                return True
 
             # -------------------------- TODO --------------------------
             elif (key == Qt.Key.Key_S and

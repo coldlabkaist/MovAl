@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel, QMessageBox
 from .segment import CutieDialog
-from .cutie_based_contour import ContourDialog
+from .cutie_based_contour import BatchContourProcessor
 
 class PreprocessDialog(QDialog):
     def __init__(self, parent=None, current_project = None):
@@ -32,5 +32,17 @@ class PreprocessDialog(QDialog):
         dialog.exec()
 
     def open_contour(self):
-        dialog = ContourDialog(self)
-        dialog.exec()
+        reply = QMessageBox.question(
+            self,
+            "Generate Contours",
+            "Would you like to generate contour frames?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            processor = BatchContourProcessor(self, self.current_project, max_threads=4)
+            processor.any_error.connect(lambda msg: QMessageBox.critical(self, "Error", msg))
+            processor.progress.connect(lambda done, total: print(f"[Batch] {done}/{total} videos finished")) 
+            processor.all_done.connect(lambda: QMessageBox.information(self, "Batch", "All contours finished."))
+            processor.start()

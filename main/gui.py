@@ -74,6 +74,12 @@ class MainWindow(QMainWindow):
         
         self.setup_buttons()
 
+        # TODO : remove -------------------------------------------------------------
+        path = r"example\3-animal-with-labels\config.yaml"
+        self.current_project = ProjectInformation.from_yaml(path)
+        self.controller.current_project = self.current_project
+        self.proj_name.setText(self.current_project.title or Path(path).stem)
+
     def setup_buttons(self):
         installation_label = QLabel("Installation (Cutie / YOLO)")
         installation_label.setStyleSheet("font-weight: bold; margin-top: 10px;")

@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QLabel, QComboBox, QLineEdit, QSplitter, QFrame, QFileDialog, QInputDialog
 )
 from PyQt6.QtGui     import QBrush, QPixmap, QImage
-from utils.skeleton import SkeletonModel, SkeletonScene, NodeItem, EdgeItem
+from utils.skeleton import SkeletonModel, SkeletonScene, NodeItem, EdgeItem, NodeVisualSettingDialog
 import os, yaml
 
 class SkeletonManagerDialog(QDialog):
@@ -171,6 +171,7 @@ class SkeletonManagerDialog(QDialog):
 
         menu = QMenu(self)
         rename_act = menu.addAction("Rename node")
+        visual_act = menu.addAction("visuialization option")
         delete_act = menu.addAction("Delete selected")
 
         action = menu.exec(self.node_list.mapToGlobal(pos))
@@ -178,14 +179,17 @@ class SkeletonManagerDialog(QDialog):
         if action == rename_act:
             if len(self.node_list.selectedItems()) == 1:
                 self._rename_selected_node()
+        elif action == visual_act:
+            if len(self.selectedItems()) == 1:
+                self.main_window._visualization_setting()
         elif action == delete_act:
             self._delete_selected_nodes()
 
     def _rename_selected_node(self):
-        selected_nodes = [obj for obj in self.scene.selectedItems() if isinstance(obj, NodeItem)]
-        if len(selected_nodes) != 1:
+        items = self.scene.selectedItems()
+        if len(items) != 1:
             return
-        node_item = selected_nodes[0]
+        node_item = items[0]
         old_name  = node_item.node.name
 
         new_name, ok = QInputDialog.getText(self, "Rename node", "New name:", text=old_name)
@@ -204,6 +208,18 @@ class SkeletonManagerDialog(QDialog):
         for itm in matches:
             itm.setText(new_name)
         node_item.update()
+
+    def _visualization_setting(self):
+        items = self.scene.selectedItems()
+        if len(items) != 1:
+            return
+        node_item = items[0]
+        
+        dialog = NodeVisualSettingDialog(node_item.node) 
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            dialog.apply_changes()
+            node_item.update()
+            self.scene.update()
 
     def _delete_selected_scene_items(self):
         items = self.scene.selectedItems()

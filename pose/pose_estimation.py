@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel
 from pose.data_converter import DataConverter
-from pose.yolo_use import YOLODialog
+from pose.yolo_use import YOLODialog, YoloInferenceDialog
 
 class PoseEstimationDialog(QDialog):
     def __init__(self, parent=None):
@@ -18,10 +18,17 @@ class PoseEstimationDialog(QDialog):
 
         layout.addSpacing(10)
         layout.addWidget(QLabel("Step 2"))
-        yolo_btn = QPushButton("Pose estimation")
-        yolo_btn.setFixedHeight(40)
-        yolo_btn.clicked.connect(self.open_yolo)
-        layout.addWidget(yolo_btn)
+        train_btn = QPushButton("Train Model")
+        train_btn.setFixedHeight(40)
+        train_btn.clicked.connect(self.train_yolo)
+        layout.addWidget(train_btn)
+
+        layout.addSpacing(10)
+        layout.addWidget(QLabel("Step 3"))
+        inf_btn = QPushButton("Pose estimation")
+        inf_btn.setFixedHeight(40)
+        inf_btn.clicked.connect(self.pose_estimation)
+        layout.addWidget(inf_btn)
 
         self.setLayout(layout)
 
@@ -29,6 +36,10 @@ class PoseEstimationDialog(QDialog):
         dialog = DataConverter(self)
         dialog.exec()
 
-    def open_yolo(self):
+    def train_yolo(self):
         dialog = YOLODialog(self)
+        dialog.exec()
+        
+    def pose_estimation(self):
+        dialog = YoloInferenceDialog(self)
         dialog.exec()

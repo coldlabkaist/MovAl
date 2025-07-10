@@ -1,7 +1,6 @@
-from .labelary import run_labelary
+from .labelary import run_labelary_with_project
 from .data_loader import DataLoader
-from .color import ColorManager, ColorDialog
 
 __all__ = [
-    "run_labelary", "DataLoader", "ColorManager", "ColorDialog"
+    "run_labelary_with_project", "DataLoader"
 ]

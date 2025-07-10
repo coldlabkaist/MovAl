@@ -41,7 +41,7 @@ class SkeletonScene(QGraphicsScene):
                 if isinstance(item, NodeItem):
                     self.temp_edge_start = item
                     self.temp_line = QGraphicsLineItem(QLineF(item.scenePos(), item.scenePos()))
-                    pen = QPen(QColor("gray"), 2, Qt.PenStyle.DashLine)
+                    pen = QPen(QColor("grey"), 2, Qt.PenStyle.DashLine)
                     self.temp_line.setPen(pen)
                     self.temp_line.setZValue(-1)
                     self.addItem(self.temp_line)
@@ -107,11 +107,15 @@ class SkeletonScene(QGraphicsScene):
 
         menu = QMenu()
         rename_act = menu.addAction("Rename node")
+        visual_act = menu.addAction("visuialization option")
         delete_act = menu.addAction("Delete selected")
         act = menu.exec(event.screenPos())
 
         if act == rename_act:
             if len(self.selectedItems()) == 1:
                 self.main_window._rename_selected_node()
+        elif act == visual_act:
+            if len(self.selectedItems()) == 1:
+                self.main_window._visualization_setting()
         elif act == delete_act:
             self.main_window._delete_selected_scene_items()

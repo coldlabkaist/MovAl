@@ -15,6 +15,7 @@ class SkeletonModel:
     def __init__(self):
         self.nodes = {}
         self.edges = set() 
+        self.syms = set() 
         self.node_counter = 0
 
     def add_node(self, shape='circle', color='#666666', thickness=1, filled=False, x=0, y=0, text=None):
@@ -33,6 +34,9 @@ class SkeletonModel:
         edges_to_remove = [e for e in self.edges if name in e]
         for e in edges_to_remove:
             self.edges.remove(e)
+        syms_to_remove = [e for e in self.syms if name in e]
+        for e in syms_to_remove:
+            self.syms.remove(e)
         del self.nodes[name]
 
     def rename_node(self, old, new):
@@ -64,14 +68,31 @@ class SkeletonModel:
             return True
         return False
 
+    def add_sym(self, name1, name2):
+        if name1 == name2:
+            return False
+        if name1 not in self.nodes or name2 not in self.nodes:
+            return False
+        for syms in self.syms:
+            if name1 in syms or name2 in syms:
+                return False
+        key = frozenset({name1, name2})
+        self.syms.add(key)
+        return True
+
     def remove_edge(self, name1, name2):
         key = frozenset({name1, name2})
         if key in self.edges:
             self.edges.remove(key)
 
-    def save_to_yaml(self, filepath):
+    def remove_sym(self, name1, name2):
+        key = frozenset({name1, name2})
+        if key in self.syms:
+            self.syms.remove(key)
+
+    def save_to_yaml(self, filepath): # TODO
         import yaml
-        data = {"nodes": [], "connections": []}
+        data = {"nodes": [], "connections": [], "symmetry": []}
         node_names = []
         for name, node in self.nodes.items():
             node_names.append(name)
@@ -92,6 +113,10 @@ class SkeletonModel:
             if len(edge) == 2:
                 n1, n2 = list(edge)
                 data["connections"].append([n1, n2])
+        for sym in self.syms:
+            if len(sym) == 2:
+                n1, n2 = list(sym)
+                data["symmetry"].append([n1, n2])
         with open(filepath, 'w') as f:
             yaml.safe_dump(data, f)
 
@@ -101,6 +126,7 @@ class SkeletonModel:
             data = yaml.safe_load(f)
         self.nodes.clear()
         self.edges.clear()
+        self.syms.clear()
         self.node_counter = 0
         for node_data in data.get("nodes", []):
             name = node_data["name"]
@@ -125,3 +151,8 @@ class SkeletonModel:
                 n1, n2 = conn[0], conn[1]
                 if n1 in self.nodes and n2 in self.nodes:
                     self.edges.add(frozenset({n1, n2}))
+        for conn in data.get("symmetry", []):
+            if len(conn) == 2:
+                n1, n2 = conn[0], conn[1]
+                if n1 in self.nodes and n2 in self.nodes:
+                    self.syms.add(frozenset({n1, n2}))

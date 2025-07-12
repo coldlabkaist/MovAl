@@ -55,17 +55,5 @@ class ProjectInformation:
             files=file_entries,
         )
 
-    def get_title(self) -> str:
-        return self.title
-
-    def get_num_animals(self) -> int:
-        return self.num_animals
-
     def get_video_list(self) -> List[str]:
         return [f.video for f in self.files]
-
-    def get_skeleton_name(self) -> str:
-        return skeleton_name
-
-    def get_skeleton_path(self) -> "Path":
-        return skeleton_yaml

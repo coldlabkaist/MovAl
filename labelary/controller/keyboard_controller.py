@@ -1,23 +1,24 @@
 from PyQt6.QtCore import QObject, Qt, QEvent
 
 class KeyboardController(QObject):
-    def __init__(self, video_player, parent=None):
+    def __init__(self, video_loader, parent=None):
         super().__init__(parent)
-        self.video_player = video_player
+        self.video_loader = video_loader
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Right:
-                self.video_player.next_frame()
+                current = self.video_loader.current_frame
+                self.video_loader.move_to_frame(current + 1)
                 return True
             elif key == Qt.Key.Key_Left:
-                current = self.video_player.current_frame
+                current = self.video_loader.current_frame
                 if current > 0:
-                    self.video_player.move_to_frame(current - 1)
+                    self.video_loader.move_to_frame(current - 1)
                 return True
             elif key == Qt.Key.Key_Space and not event.isAutoRepeat():
-                self.video_player.toggle_playback()
+                self.video_loader.toggle_playback()
                 return True
 
             # -------------------------- TODO --------------------------

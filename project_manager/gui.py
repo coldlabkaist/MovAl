@@ -122,9 +122,6 @@ class ProjectManagerDialog(QDialog):
         self.step3_buttons_row.addWidget(self.step3_button_txt)
         col1.addWidget(self.step3_label)
         col1.addLayout(self.step3_buttons_row)
-        self.step3_check = QCheckBox("Create a copy of the file (Recommended)")
-        self.step3_check.setChecked(True)
-        col1.addWidget(self.step3_check)
         col1.addSpacing(20)
 
         self.step4_label = QLabel("<b>Step&nbsp;4.</b> Set skeleton")
@@ -293,14 +290,14 @@ class ProjectManagerDialog(QDialog):
         _ensure_dir(proj_dir)
 
         subdirs = [
-            "frames", "labels/csv", "labels/txt",
+            "frames", "labels", 
             "runs", "raw_videos", "outputs"
-        ]   
+        ]
         for sd in subdirs:
             _ensure_dir(os.path.join(proj_dir, sd))
 
         copy_videos = self.step2_check.isChecked()
-        copy_labels = self.step3_check.isChecked() 
+        copy_labels = True
         project_files: list[dict] = []
         current_vid: dict | None = None
         errors: list[str] = []
@@ -321,13 +318,16 @@ class ProjectManagerDialog(QDialog):
                     path_str = _safe_copy(path_str, os.path.join(proj_dir, "raw_videos"))
                 current_vid = {"video": path_str, "csv": [], "txt": []}
                 project_files.append(current_vid)
+                _ensure_dir(os.path.join(proj_dir, "labels", Path(path_str).stem, "csv"))
+                _ensure_dir(os.path.join(proj_dir, "labels", Path(path_str).stem, "txt"))
+                current_video_name = Path(path_str).stem
             else:
                 if current_vid is None:
                     errors.append(f"{path_str} → appears before any video")
                     continue
                 if copy_labels:
                     sub = "csv" if ftype == "csv" else "txt"
-                    path_str = _safe_copy(path_str, os.path.join(proj_dir, f"labels/{sub}"))
+                    path_str = _safe_copy(path_str, os.path.join(proj_dir, "labels", current_video_name, sub))
                 current_vid[ftype].append(path_str)
 
         if not project_files:

@@ -7,6 +7,7 @@ class NodeItem(QGraphicsItem):
         super().__init__()
         self.node = node
         self.edges = [] 
+        self.syms = [] 
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable | 
                       QGraphicsItem.GraphicsItemFlag.ItemIsMovable | 
                       QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
@@ -20,6 +21,13 @@ class NodeItem(QGraphicsItem):
     def remove_edge(self, edge_item):
         if edge_item in self.edges:
             self.edges.remove(edge_item)
+            
+    def add_sym(self, edge_item):
+        self.syms.append(edge_item)
+
+    def remove_sym(self, edge_item):
+        if edge_item in self.syms:
+            self.syms.remove(edge_item)
 
     def boundingRect(self) -> QRectF:
         if self.node.shape == 'text':
@@ -28,7 +36,8 @@ class NodeItem(QGraphicsItem):
             text = self.node.text if self.node.text is not None else self.node.name
             w = fm.horizontalAdvance(text)
             h = fm.height()
-            return QRectF(-w/2 - 2, -h/2 - 2, w + 4, h + 4)
+            extra = max(self.node.thickness / 2 + 5, 6) 
+            return QRectF(-w/2 - extra, -h/2 - extra, w + 2*extra, h + 2*extra)
         else:
             r = self.r
             th = self.node.thickness
@@ -79,6 +88,8 @@ class NodeItem(QGraphicsItem):
             
             for edge in list(self.edges):
                 edge.update_line()
+            for sym in list(self.syms):
+                sym.update_line()
         return super().itemChange(change, value)
 
     def mouseDoubleClickEvent(self, event):
@@ -99,6 +110,32 @@ class EdgeItem(QGraphicsLineItem):
 
         self.normal_pen = QPen(QColor("black"), 2)
         self.hl_pen     = QPen(QColor("red"),   3)
+        self.setPen(self.normal_pen)
+        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setZValue(-1)
+
+    def update_line(self):
+        p1 = self.node1.scenePos()
+        p2 = self.node2.scenePos()
+        self.setLine(QLineF(p1, p2))
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self.setPen(self.hl_pen if self.isSelected() else self.normal_pen)
+        return super().itemChange(change, value)
+
+class SymItem(QGraphicsLineItem):
+    def __init__(self, node1: NodeItem, node2: NodeItem):
+        super().__init__()
+        self.node1 = node1
+        self.node2 = node2
+        self.update_line()
+        
+        node1.add_sym(self)
+        node2.add_sym(self)
+
+        self.normal_pen = QPen(QColor("cyan"), 1, Qt.PenStyle.DashLine)
+        self.hl_pen     = QPen(QColor("blue"), 2, Qt.PenStyle.DashLine)
         self.setPen(self.normal_pen)
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setZValue(-1)

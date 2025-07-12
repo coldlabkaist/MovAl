@@ -2,16 +2,26 @@ from __future__ import annotations
 import colorsys
 from typing import Dict, List, Optional, Tuple
 
-from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRectF
-from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen, QBrush, QPixmap
+from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRectF, pyqtSignal
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen, QBrush, QPixmap, QFontMetrics
 from PyQt6.QtWidgets import QLabel
 
-from ..data_loader import DataLoader
+from ..IO.data_loader import DataLoader
 
 from labelary.controller import MouseController
 
+CUTIE_COLOR_BASE = ["#ab1f24", "#36ae37", "#b9b917", "#063391", "#983a91",
+                    "#20b6b5", "#c1c0bf", "#5c0d11", "#e71f19", "#60b630",
+                    "#f4ba19", "#503390", "#ca4392", "#5eb7b7", "#f6bcbc"]
+
+SKELETON_COLOR_SET = {"cutie_light" : (QColor("white"), 0.5),
+                        "cutie_dark" : (QColor("black"), 0.4),
+                        "white" : (QColor("white"), 1),
+                        "black" : (QColor("black"), 1)}
 
 class ClickableImageLabel(QLabel):
+    node_selected = pyqtSignal(str, str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -32,6 +42,8 @@ class ClickableImageLabel(QLabel):
         self.click_enabled = False
 
         self.skeleton_model = None
+
+        self.skeleton_color_mode = "cutie_light"
 
     def setImage(self, pix: QPixmap, reset: bool):
         self.original_pixmap = pix
@@ -82,22 +94,19 @@ class ClickableImageLabel(QLabel):
         act = self.base_scale * self.current_scale
         ow, oh = self.original_pixmap.width(), self.original_pixmap.height()
 
-        self._paint_skeleton(p, ow, oh, act)
+        self._paint_skeleton_model(p, ow, oh, act)
 
-
-    def _paint_skeleton(self, painter: QPainter, ow: int, oh: int, act: float) -> None:
-        # ── 트랙(= 한 개체) 단위 순회 ─────────────────────────────
-        for idx, (track, pts) in enumerate(self.csv_points.items()):
-            if not pts:        # 좌표가 없으면 건너뜀
+    def _paint_skeleton_model(self, painter: QPainter, ow: int, oh: int, act: float) -> None:
+        for track_idx, (track, pts) in enumerate(self.csv_points.items()):
+            if not pts:
                 continue
 
-            # ── 1) 스켈레톤 “선” ────────────────────────────────
-            edge_pen = QPen(self._skeleton_color(track, idx), 1)
+            edge_pen = QPen(self._skeleton_color(track_idx), 1)
             edge_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             edge_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             painter.setPen(edge_pen)
 
-            for edge in self.skeleton_model.edges:          # edge = frozenset({'A','B'})
+            for edge in self.skeleton_model.edges:
                 a, b = tuple(edge)
                 if a not in pts or b not in pts:
                     continue
@@ -112,7 +121,6 @@ class ClickableImageLabel(QLabel):
                 )
                 painter.drawLine(p1, p2)
 
-            # ── 2) 노드(모양·색 반영) ───────────────────────────
             for node_name, node in self.skeleton_model.nodes.items():
                 if node_name not in pts:
                     continue
@@ -121,10 +129,7 @@ class ClickableImageLabel(QLabel):
                 cy = pts[node_name][1] * oh * act + self.translation.y()
                 vis = pts[node_name][2]
 
-                # 기본 반지름(또는 반쪽 변) : 스케일에 비례
-                r = 10 * act
-
-                # 펜·브러시 설정
+                r = 5 * (act**0.5)
                 base_color = node.color
                 pen   = QPen(base_color, node.thickness)
                 brush = QBrush(base_color if node.filled else Qt.BrushStyle.NoBrush)
@@ -133,21 +138,28 @@ class ClickableImageLabel(QLabel):
 
                 shape = node.shape.lower()
                 if vis == 1:
-                    painter.drawLine(QPointF(x - 5, y - 5), QPointF(x + 5, y + 5))
-                    painter.drawLine(QPointF(x - 5, y + 5), QPointF(x + 5, y - 5))
+                    d = r
+                    painter.drawLine(QPointF(cx - d, cy - d), QPointF(cx + d, cy + d))
+                    painter.drawLine(QPointF(cx - d, cy + d), QPointF(cx + d, cy - d))
                 elif shape == "circle":
                     painter.drawEllipse(QPointF(cx, cy), r, r)
                 elif shape == "square":
                     painter.drawRect(QRectF(cx - r, cy - r, 2*r, 2*r))
                 elif shape == "text":
                     txt = node.text or node.name
-                    fm  = painter.fontMetrics()
-                    w   = fm.horizontalAdvance(txt)
-                    h   = fm.height()
-                    painter.drawText(QPointF(cx - w/2, cy + h/4), txt)
-                else:   # 모르는 모양 → 원으로 대체
-                    painter.drawEllipse(QPointF(cx, cy), r, r)
+                    painter.save()
 
+                    font = painter.font()
+                    font.setPixelSize(int(max(r * 3, 8)))
+                    painter.setFont(font)
+                    fm = QFontMetrics(font)
+                    w  = fm.horizontalAdvance(txt)
+                    h  = fm.height()
+
+                    painter.drawText(QPointF(cx - w / 2, cy + h / 4), txt)
+                    painter.restore()
+                else:
+                    painter.drawEllipse(QPointF(cx, cy), r, r)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -164,7 +176,10 @@ class ClickableImageLabel(QLabel):
                                   (self.height() - th) // 2)
         self.update()
 
-    def _skeleton_color(self, track: str, idx: int) -> QColor:# TODO 이 코드 정리할것 0708
-        _gray_color = ["#FFFFFF", "#F2F2F2", "#D9D9D9", "#BFBFBF", "#9E9E9E", "#7A7A7A", "#545454", "#2E2E2E"]
-
-        return QColor(_gray_color[idx*3%8])
+    def _skeleton_color(self, track_idx: int) -> QColor:
+        color = QColor(CUTIE_COLOR_BASE[track_idx])
+        other, t = SKELETON_COLOR_SET[self.skeleton_color_mode]
+        
+        return QColor(round(color.red()*(1-t)+other.red()*t),
+                  round(color.green()*(1-t)+other.green()*t),
+                  round(color.blue()*(1-t)+other.blue()*t))

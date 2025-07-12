@@ -13,7 +13,9 @@ def ContouredVideoProduction(
 
     low_threshold = 1
     high_threshold = 256
-    # 안전장치 여러개 추가 필요 0708 (폴더생성도)
+
+    os.makedirs(output_dir, exist_ok=True)
+
     for i in range(len(segmented_frames)):
         original_image = cv2.imread(segmented_frames[i])
         mask = cv2.imread(masks[i])
@@ -23,16 +25,14 @@ def ContouredVideoProduction(
         
         contoured_image = np.where(colored_edges > 0, (255, 255, 255), original_image).astype(np.uint8)
         base_name  = os.path.splitext(os.path.basename(segmented_frames[i]))[0]
-        #print(output_dir, output_video_name)
-        save_path  = os.path.join(output_dir,
-                                f"{output_video_name}_{base_name[2:]}.jpg")
+        """save_path  = os.path.join(output_dir,
+                                f"{output_video_name}_{base_name[2:]}.jpg")"""
+        save_path = os.path.join(output_dir, f"{base_name}.jpg")
 
-        #print(save_path)
-        
         cv2.imwrite(save_path, contoured_image)
         
         if progress_callback:
             progress_callback(i + 1)
 
-    print(f"[{len(segmented_frames)} 장의 컨투어 이미지가 "
-      f"'{output_dir}'에 저장되었습니다.")
+    print(f"[{len(segmented_frames)} contour images are saved to "
+            f"'{output_dir}'")

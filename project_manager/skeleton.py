@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QLabel, QComboBox, QLineEdit, QSplitter, QFrame, QFileDialog, QInputDialog
 )
 from PyQt6.QtGui     import QBrush, QPixmap, QImage
-from utils.skeleton import SkeletonModel, SkeletonScene, NodeItem, EdgeItem, NodeVisualSettingDialog
+from utils.skeleton import SkeletonModel, SkeletonScene, NodeItem, EdgeItem, SymItem, NodeVisualSettingDialog
 import os, yaml
 
 class SkeletonManagerDialog(QDialog):
@@ -81,7 +81,7 @@ class SkeletonManagerDialog(QDialog):
         self.node_list.customContextMenuRequested.connect(self._on_list_context_menu)
 
         self.add_node_radio = QRadioButton("Add keypoint")
-        self.add_skeleton_radio = QRadioButton("Add skeleton")
+        self.add_skeleton_radio = QRadioButton("Add skeleton / Symmetry")
         self.add_node_radio.setChecked(True)
         right_layout.addWidget(self.add_node_radio)
         right_layout.addWidget(self.add_skeleton_radio)
@@ -146,6 +146,7 @@ class SkeletonManagerDialog(QDialog):
         for n1, n2 in (tuple(edge) for edge in self.model.edges):
             if n1 in self.node_items and n2 in self.node_items:
                 edge_item = EdgeItem(self.node_items[n1], self.node_items[n2])
+                edge_item.setZValue(3)
                 self.scene.addItem(edge_item)
 
     def add_node_to_list(self, node):
@@ -229,7 +230,14 @@ class SkeletonManagerDialog(QDialog):
         for it in [i for i in items if isinstance(i, EdgeItem)]:
             n1, n2 = it.node1.node.name, it.node2.node.name
             self.model.remove_edge(n1, n2)
-            it.node1.remove_edge(it); it.node2.remove_edge(it)
+            it.node1.remove_edge(it)
+            it.node2.remove_edge(it)
+            self.scene.removeItem(it)
+        for it in [i for i in items if isinstance(i, SymItem)]:
+            n1, n2 = it.node1.node.name, it.node2.node.name
+            self.model.remove_sym(n1, n2)
+            it.node1.remove_sym(it)
+            it.node2.remove_sym(it)
             self.scene.removeItem(it)
 
         names = [i.node.name for i in items if isinstance(i, NodeItem)]
@@ -253,8 +261,14 @@ class SkeletonManagerDialog(QDialog):
             node_item = self.node_items[name]
             for edge in list(node_item.edges):
                 self.scene.removeItem(edge)
-                edge.node1.remove_edge(edge); edge.node2.remove_edge(edge)
+                edge.node1.remove_edge(edge)
+                edge.node2.remove_edge(edge)
                 self.model.remove_edge(edge.node1.node.name, edge.node2.node.name)
+            for sym in list(node_item.syms):
+                self.scene.removeItem(sym)
+                sym.node1.remove_sym(sym)
+                sym.node2.remove_sym(sym)
+                self.model.remove_sym(sym.node1.node.name, sym.node2.node.name)
             self.scene.removeItem(node_item)
             self.model.remove_node(name)
             del self.node_items[name]

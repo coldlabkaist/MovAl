@@ -6,7 +6,7 @@ from project_manager import ProjectManagerDialog
 from video_preprocess import PreprocessDialog
 from labelary import run_labelary_with_project
 from pose import PoseEstimationDialog
-from utils import TxtToCsvDialog
+from utils import TxtToCsvDialog, DataConverterDialog
 
 class PipelineController:
     def __init__(self):    
@@ -36,6 +36,10 @@ class PipelineController:
 
     def run_pose_estimation(self):
         dialog = PoseEstimationDialog()
+        dialog.exec()
+
+    def data_convert(self):
+        dialog = DataConverterDialog()
         dialog.exec()
 
     def data_extract(self):

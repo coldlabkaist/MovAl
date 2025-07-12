@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QLineF
 from PyQt6.QtGui  import QPen, QColor, QTransform
-from .item import NodeItem, EdgeItem
+from .item import NodeItem, EdgeItem, SymItem
 
 class SkeletonScene(QGraphicsScene):
     def __init__(self, model, main_window):
@@ -12,7 +12,8 @@ class SkeletonScene(QGraphicsScene):
         self.main_window = main_window
         self.mode = 'add_node'
         self.temp_edge_start = None  
-        self.temp_line = None  
+        self.temp_line = None 
+        self.temp_line_is = None 
 
     def setMode(self, mode):
         self.mode = mode
@@ -41,10 +42,25 @@ class SkeletonScene(QGraphicsScene):
                 if isinstance(item, NodeItem):
                     self.temp_edge_start = item
                     self.temp_line = QGraphicsLineItem(QLineF(item.scenePos(), item.scenePos()))
-                    pen = QPen(QColor("grey"), 2, Qt.PenStyle.DashLine)
+                    pen = QPen(QColor("grey"), 2, Qt.PenStyle.SolidLine)
                     self.temp_line.setPen(pen)
                     self.temp_line.setZValue(-1)
                     self.addItem(self.temp_line)
+                    self.temp_line_is = "Edge"
+                    event.accept()
+                    return
+        if event.button() == Qt.MouseButton.RightButton:
+            if self.mode == 'add_edge':
+                item = self.itemAt(event.scenePos(), QTransform())
+                if isinstance(item, NodeItem):
+                    self.temp_edge_start = item
+                    self.temp_line = QGraphicsLineItem(QLineF(item.scenePos(), item.scenePos()))
+                    self.temp_line.setZValue(2)
+                    pen = QPen(QColor("cyan"), 1, Qt.PenStyle.DashLine)
+                    self.temp_line.setPen(pen)
+                    self.temp_line.setZValue(-1)
+                    self.addItem(self.temp_line)
+                    self.temp_line_is = "Sym"
                     event.accept()
                     return
         super().mousePressEvent(event)
@@ -76,18 +92,26 @@ class SkeletonScene(QGraphicsScene):
                         if dist2 < 400 and dist2 < min_dist2:
                             min_dist2 = dist2
                             nearest_item = obj
-
                 target_node_item = nearest_item
             if target_node_item:
-                name1 = self.temp_edge_start.node.name
-                name2 = target_node_item.node.name
-                if self.model.add_edge(name1, name2):
-                    edge_item = EdgeItem(self.temp_edge_start, target_node_item)
-                    self.addItem(edge_item)
+                if self.temp_line_is == "Edge":
+                    name1 = self.temp_edge_start.node.name
+                    name2 = target_node_item.node.name
+                    if self.model.add_edge(name1, name2):
+                        edge_item = EdgeItem(self.temp_edge_start, target_node_item)
+                        self.addItem(edge_item)
+                elif self.temp_line_is == "Sym":
+                    name1 = self.temp_edge_start.node.name
+                    name2 = target_node_item.node.name
+                    if self.model.add_sym(name1, name2):
+                        sym_item = SymItem(self.temp_edge_start, target_node_item)
+                        sym_item.setZValue(1)
+                        self.addItem(sym_item)
 
             if self.temp_line:
                 self.removeItem(self.temp_line)
                 self.temp_line = None
+                self.temp_line_is = None
             self.temp_edge_start = None
             event.accept()
         else:

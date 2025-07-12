@@ -6,10 +6,10 @@ from PyQt6.QtWidgets import (
     QColorDialog, QGridLayout, QTreeWidgetItem, QComboBox, QHeaderView, QStyledItemDelegate,
 )
 from .gui import UI_LabelaryDialog
-from .video_loader import VideoLoader
+from .IO.video_loader import VideoLoader
 from .widget.image_label import ClickableImageLabel
-from .data_loader import DataLoader
-from .file_saver import save_modified_csv
+from .IO.data_loader import DataLoader
+from .IO.save_files import save_modified_data
 from .controller.keyboard_controller import KeyboardController
 from utils.skeleton import SkeletonModel
 
@@ -17,92 +17,97 @@ from typing import Union, Optional, List
 from pathlib import Path
 import sys
 
-def _make_chip(col: QColor, size: int = 12) -> QIcon:
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-
-    p = QPainter(pm)
-    p.fillRect(0, 0, size, size, col)
-    pen = QPen(Qt.GlobalColor.black, 1)
-    p.setPen(pen)
-    p.drawRect(0, 0, size - 1, size - 1)
-    p.end()
-    return QIcon(pm)
-
 class LabelaryDialog(QDialog, UI_LabelaryDialog):
     def __init__(self, project, parent= None):
         super().__init__(parent)
-        self.project = project
         self.setupUi(self)
-        self.load_skeleton()
 
-        self.video_player = VideoLoader(self.video_label, self.frame_slider, self.frame_label)
+        self.project = project
+        self.load_skeleton_model()
+        self.load_video_combo()
+        self.load_mode_combo()
+
+        self.video_loader = VideoLoader(self, self.skeleton_video_viewer, self.frame_slider, self.frame_number_label)
         DataLoader.parent = self
 
-        self.play_button.clicked.connect(self.video_player.toggle_playback)
-        self.frame_slider.valueChanged.connect(self.video_player.move_to_frame)
+        orig = self.kpt_list
+        self.gridLayout.replaceWidget(orig, self.kpt_list)
+        orig.deleteLater()
+        self.skeleton_video_viewer.node_selected.connect(self.kpt_list.highlight)
+
+        self.play_button.clicked.connect(self.video_loader.toggle_playback)
+        self.frame_slider.valueChanged.connect(self.video_loader.move_to_frame)
         self.load_data_button.clicked.connect(self.on_show_clicked)
-        '''self.load_video_button.clicked.connect(self.load_video)
-        self.load_data_button.clicked.connect(self.open_load_data_dialog)'''
-        
-        self.video_combo.addItems(self.project.get_video_list())
-        self.video_combo.currentIndexChanged.connect(self.on_video_selected)
-        self.on_video_selected(0)
+
+        self.video_combo.currentIndexChanged.connect(self.update_label_combo)
+        self.file_entry_idx = 0
+        self.update_label_combo(video_index = self.file_entry_idx)
 
         self.edit_radio.clicked.connect(self.enableCorrectionMode)
         self.show_radio.clicked.connect(self.disableCorrectionMode)
-        """self.add_skeleton_button.clicked.connect(self.open_skeleton_dialog)
-        self.color_button.clicked.connect(self.open_color_dialog)"""
-        self.save_button.clicked.connect(lambda: save_modified_csv(self))
-        #self.reset_button.clicked.connect(self.reset_loaded_data)
+        self.save_button.clicked.connect(lambda: save_modified_data(self))
 
-    """def open_load_data_dialog(self):
-        dialog = LoadDataDialog(self)
-        dialog.exec()"""
-
-    '''def load_data(self):
-        self.video_player.load_video()
-        self.update_keypoint_list()
-        self.update_csv_points_on_image()'''
-
-    def load_skeleton(self):
+    def load_skeleton_model(self):
         self.skeleton = SkeletonModel()
         try:
             self.skeleton.load_from_yaml(self.project.skeleton_yaml)
             DataLoader.load_skeleton_info(self.skeleton)
-            self.video_label.load_skeleton_model(self.skeleton)
+            self.skeleton_video_viewer.load_skeleton_model(self.skeleton)
         except Exception as e:
             QMessageBox.warning(
                 self,
                 "Skeleton Load Error",
-                f"스켈레톤 설정 파일을 불러오지 못했습니다:\n{e}"
+                f"Skeleton settings file not loaded:\n{e}"
             )
             self.accept()
 
-    def on_video_selected(self, index):
-        file_entry = self.project.files[index]
+    def load_video_combo(self):
+        for video in self.project.get_video_list():
+            p = Path(video)
+            self.video_combo.addItem(p.name, p)
+
+    def load_mode_combo(self):
+        for display_mode in ["images", "davis", "contour"]:
+            self.mode_combo.addItem(display_mode)
+        self.mode_combo.setCurrentIndex(1)
+
+    def update_label_combo(self, video_index = None, set_text = None):
+        if video_index == None:
+            video_index = self.file_entry_idx
+        target = Path(set_text).stem if set_text else None
+        selected_idx = -1
+
+        file_entry = self.project.files[video_index]
         self.label_combo.clear()
         for csv_path in file_entry.csv:
-            self.label_combo.addItem(csv_path)
+            p = Path(csv_path)
+            if target and p.stem == target:
+                selected_idx = self.label_combo.count()
+            self.label_combo.addItem(p.name, p) 
         for txt_path in file_entry.txt:
-            self.label_combo.addItem(txt_path)
+            p = Path(txt_path)
+            if target and p.stem == target:
+                selected_idx = self.label_combo.count()
+            self.label_combo.addItem(p.name, p) 
         self.label_combo.addItem("Create new label")
 
-        self.label_combo.setEditable(True)
-        self.label_combo.setPlaceholderText("Select label file")
-        self.label_combo.setEditable(False)
+        if selected_idx != -1:
+            self.label_combo.setCurrentIndex(selected_idx)
+        else:
+            self.label_combo.setEditable(True)
+            self.label_combo.setPlaceholderText("Select label file")
+            self.label_combo.setEditable(False)
 
     def on_show_clicked(self):
-        video_path = Path(self.project.project_dir) / self.video_combo.currentText()
-        self.video_player.load_video(video_path)
+        video_path = self.video_combo.currentData(Qt.ItemDataRole.UserRole)
+        display_mode = self.mode_combo.currentText()
+        self.video_loader.load_video(video_path, display_mode)
 
         label_name = self.label_combo.currentText()
-
         if label_name == "Create new label":
             self.create_new_label()
-
         else:
-            label_path = Path(self.project.project_dir) / label_name
+            label_path = Path(self.label_combo.currentData(Qt.ItemDataRole.UserRole))
             if label_path.is_dir():
                 self.load_txt(label_path)
             elif label_path.suffix.lower() == ".csv":
@@ -129,78 +134,31 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         DataLoader.create_new_data()
 
     def update_csv_points_on_image(self):
-        current_frame = self.video_player.current_frame
+        current_frame = self.video_loader.current_frame
         coords_dict = DataLoader.get_keypoint_coordinates_by_frame(current_frame + 1)
-        self.video_label.setCSVPoints(coords_dict)
+        self.skeleton_video_viewer.setCSVPoints(coords_dict)
         
     def update_keypoint_list(self):
-        """QListWidget을 색상 칩(검은 1-px 테두리 포함)과 함께 재구성""" 
         self.kpt_list.clear()
-        if DataLoader.data is None:
+        if DataLoader.loaded_data is None:
             return
-
-        tracks = list(DataLoader.data["track"].unique())
-        nodes = DataLoader.skeleton_model.nodes
-        for t_idx, tr in enumerate(tracks):
-            # ─ Track 헤더 ─────────────────
-            col = QColor("#FFFFFF") # 0708 TODO
-            hdr = QListWidgetItem(f"Animal {t_idx+1} ({tr})")
-            fnt = hdr.font(); fnt.setBold(True); hdr.setFont(fnt)
-            hdr.setIcon(_make_chip(col))                 # ← 아이콘으로 설정# 트랙 헤더
-            hdr.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.kpt_list.addItem(hdr)
-
-            # ─ Key-points ────────────────
-            for k_idx, kp in enumerate(DataLoader.kp_order):
-                c = nodes[kp].color
-                it = QListWidgetItem(f"    {kp}")
-                it.setIcon(_make_chip(c))
-                it.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                self.kpt_list.addItem(it)
+        tracks = list(DataLoader.loaded_data["track"].unique())
+        self.kpt_list.build(tracks, DataLoader.kp_order, self.skeleton)
 
     def enableCorrectionMode(self):
-        self.video_label.click_enabled = True
+        self.skeleton_video_viewer.click_enabled = True
         print("Correction mode enabled: Click events are active.")
 
     def disableCorrectionMode(self):
-        self.video_label.click_enabled = False
+        self.skeleton_video_viewer.click_enabled = False
         print("Show mode enabled: Click events are disabled.")
-
-    def open_skeleton_dialog(self):
-        pass
-
-    def open_color_dialog(self):
-        pass
-
-    def reset_loaded_data(self):
-        """영상·프레임·UI를 초기 상태로 되돌린다. (Skeleton 은 유지)"""
-
-        # 1) 비디오 정지 및 VideoPlayer 내부 상태 초기화
-        if self.video_player.timer.isActive():
-            self.video_player.timer.stop()
-        self.video_player.video_path = None
-        self.video_player.total_frames = 0
-        self.video_player.current_frame = 0
-        self.video_player.frame_dir = None
-        self.video_player.slider.setMaximum(0)
-
-        # 2) 영상 영역 클리어
-        self.video_label.clear_all()        # 이미지·좌표 초기화
-
-        # 3) 부수 UI 초기화
-        self.frame_label.setText("0 / 0")
-        self.kpt_list.clear()
-
-        print("🔁 영상·UI 초기화")
 
 def run_labelary_with_project(current_project, parent=None):
     app = QApplication.instance() or QApplication(sys.argv)
 
     dlg = LabelaryDialog(current_project, parent) 
-    keyboard_controller = KeyboardController(dlg.video_player)
+    keyboard_controller = KeyboardController(dlg.video_loader)
     app.installEventFilter(keyboard_controller)
     
-
     dlg.exec()  
-
     return 

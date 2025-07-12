@@ -13,7 +13,8 @@ class MainWindow(QMainWindow):
     def __init__(self, controller=None):
         super().__init__()
         self.setWindowTitle("Move Altogether: MoVal")
-        self.setGeometry(100, 100, 500, 400) 
+        self.setGeometry(100, 100, 650, 550) 
+        self.setFixedSize(self.size())
 
         self.controller = controller
 
@@ -34,9 +35,9 @@ class MainWindow(QMainWindow):
         self.proj_name.setReadOnly(True)
         self.proj_name.setPlaceholderText("No project loaded")
         proj_bar.addWidget(self.proj_name, 1) 
-        btn_load_yaml = QPushButton("Load YAML…", self)
-        btn_load_yaml.clicked.connect(self.on_load_yaml_clicked)
-        proj_bar.addWidget(btn_load_yaml)
+        self.btn_load_yaml = QPushButton("Load YAML…", self)
+        self.btn_load_yaml.clicked.connect(self.on_load_yaml_clicked)
+        proj_bar.addWidget(self.btn_load_yaml)
         outer_layout.addLayout(proj_bar)
 
         self.current_project = None
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
 
         image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "background_image.png"))
         pixmap = QPixmap(image_path)
-        self.image_label.setPixmap(pixmap.scaledToWidth(380, Qt.TransformationMode.SmoothTransformation))
+        self.image_label.setPixmap(pixmap.scaledToWidth(450, Qt.TransformationMode.SmoothTransformation))
 
         right_layout.addWidget(self.image_label)
 
@@ -75,65 +76,70 @@ class MainWindow(QMainWindow):
         self.setup_buttons()
 
         # TODO : remove -------------------------------------------------------------
-        path = r"example\3-animal-with-labels\config.yaml"
+        path = r"example\test_0710\config.yaml"
         self.current_project = ProjectInformation.from_yaml(path)
         self.controller.current_project = self.current_project
         self.proj_name.setText(self.current_project.title or Path(path).stem)
 
     def setup_buttons(self):
         installation_label = QLabel("Installation (Cutie / YOLO)")
-        installation_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        installation_label.setStyleSheet("margin-top: 10px;")
         self.button_layout.addWidget(installation_label)
-        installation_btn = QPushButton("Installation")
-        installation_btn.setFixedHeight(25)
-        installation_btn.setMinimumWidth(120)
-        installation_btn.clicked.connect(self.controller.run_installation)
-        self.button_layout.addWidget(installation_btn)
+        self.installation_btn = QPushButton("Installation")
+        self.installation_btn.setFixedHeight(25)
+        self.installation_btn.setMinimumWidth(180)
+        self.installation_btn.clicked.connect(self.controller.run_installation)
+        self.button_layout.addWidget(self.installation_btn)
 
         step1_label = QLabel("Step 1")
         step1_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         self.button_layout.addWidget(step1_label)
-        create_project_btn = QPushButton("Create Project")
-        create_project_btn.setFixedHeight(25)
-        create_project_btn.setMinimumWidth(120)
-        create_project_btn.clicked.connect(self.controller.run_project_manager)
-        self.button_layout.addWidget(create_project_btn)
+        self.create_project_btn = QPushButton("Create Project")
+        self.create_project_btn.setFixedHeight(25)
+        self.create_project_btn.setMinimumWidth(180)
+        self.create_project_btn.clicked.connect(self.controller.run_project_manager)
+        self.button_layout.addWidget(self.create_project_btn)
 
         step2_label = QLabel("Step 2")
         step2_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         self.button_layout.addWidget(step2_label)
-        preprocess_btn = QPushButton("Preprocess")
-        preprocess_btn.setFixedHeight(25)
-        preprocess_btn.setMinimumWidth(120)
-        preprocess_btn.clicked.connect(self.controller.run_video_preprocess)
-        self.button_layout.addWidget(preprocess_btn)
+        self.preprocess_btn = QPushButton("Preprocess")
+        self.preprocess_btn.setFixedHeight(25)
+        self.preprocess_btn.setMinimumWidth(180)
+        self.preprocess_btn.clicked.connect(self.controller.run_video_preprocess)
+        self.button_layout.addWidget(self.preprocess_btn)
 
         step3_label = QLabel("Step 3")
         step3_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         self.button_layout.addWidget(step3_label)
-        label_btn = QPushButton("Labelary")
-        label_btn.setFixedHeight(25)
-        label_btn.setMinimumWidth(120)
-        label_btn.clicked.connect(self.controller.run_labelary)
-        self.button_layout.addWidget(label_btn)
+        self.label_btn = QPushButton("Labelary")
+        self.label_btn.setFixedHeight(25)
+        self.label_btn.setMinimumWidth(180)
+        self.label_btn.clicked.connect(self.controller.run_labelary)
+        self.button_layout.addWidget(self.label_btn)
         
         step4_label = QLabel("Step 4")
         step4_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         self.button_layout.addWidget(step4_label)
-        pose_btn = QPushButton("Pose Estimation")
-        pose_btn.setFixedHeight(25)
-        pose_btn.setMinimumWidth(120)
-        pose_btn.clicked.connect(self.controller.run_pose_estimation)
-        self.button_layout.addWidget(pose_btn)
+        self.pose_btn = QPushButton("Pose Estimation")
+        self.pose_btn.setFixedHeight(25)
+        self.pose_btn.setMinimumWidth(180)
+        self.pose_btn.clicked.connect(self.controller.run_pose_estimation)
+        self.button_layout.addWidget(self.pose_btn)
 
         optional_label = QLabel("Additional Tools")
-        optional_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        optional_label.setStyleSheet("margin-top: 10px;")
         self.button_layout.addWidget(optional_label)
-        extract_btn = QPushButton("Data Extract (txt_to_csv)")
-        extract_btn.setFixedHeight(25)
-        extract_btn.setMinimumWidth(120)
-        extract_btn.clicked.connect(self.controller.data_extract)
-        self.button_layout.addWidget(extract_btn)
+        self.convert_btn = QPushButton("Data Convert\n(DLC/SLEAP to TXT)")
+        self.convert_btn.setFixedHeight(40)
+        self.convert_btn.setMinimumWidth(180)
+        self.convert_btn.clicked.connect(self.controller.data_convert)
+        self.button_layout.addWidget(self.convert_btn)
+        self.extract_btn = QPushButton("Data Extract\n(TXT to CSV)")
+        self.extract_btn.setFixedHeight(40)
+        self.extract_btn.setMinimumWidth(180)
+        self.extract_btn.clicked.connect(self.controller.data_extract)
+        self.button_layout.addWidget(self.extract_btn)
 
     def on_load_yaml_clicked(
         self,

@@ -8,6 +8,8 @@ from utils.project import ProjectInformation
 from pathlib import Path
 from typing import Union, Optional
 import os
+from utils import __version__
+import warnings
 
 class MainWindow(QMainWindow):
     def __init__(self, controller=None):
@@ -76,7 +78,7 @@ class MainWindow(QMainWindow):
         self.setup_buttons()
 
         # TODO : remove -------------------------------------------------------------
-        path = r"example\test_0710\config.yaml"
+        path = r"example\test_config_0713\config.yaml"
         self.current_project = ProjectInformation.from_yaml(path)
         self.controller.current_project = self.current_project
         self.proj_name.setText(self.current_project.title or Path(path).stem)
@@ -167,3 +169,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "File not found", str(fnf))
         except Exception as e:
             QMessageBox.critical(self, "Load Error", str(e))
+
+        if __version__ != self.current_project.moval_version:
+            warning.warn("This project was created in a previous version of moval. The files may not be compatible.", UserWarning)

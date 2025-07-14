@@ -1,11 +1,26 @@
 from __future__ import annotations
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QStyledItemDelegate
-from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFontMetrics
+from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFontMetrics, QFont
 from PyQt6.QtCore import Qt, QSize
 
 CUTIE_COLOR_BASE = ["#ab1f24", "#36ae37", "#b9b917", "#063391", "#983a91",
                     "#20b6b5", "#c1c0bf", "#5c0d11", "#e71f19", "#60b630",
                     "#f4ba19", "#503390", "#ca4392", "#5eb7b7", "#f6bcbc"]
+
+def _background_color_track(idx) -> QColor:
+    color = QColor(CUTIE_COLOR_BASE[idx])
+    other, t = QColor("white"), 0.3
+    return QColor(round(color.red()*(1-t)+other.red()*t),
+                round(color.green()*(1-t)+other.green()*t),
+                round(color.blue()*(1-t)+other.blue()*t))
+
+def _background_color_kpt(idx) -> QColor:
+    color = QColor(CUTIE_COLOR_BASE[idx])
+    other, t = QColor("white"), 0.7
+    return QColor(round(color.red()*(1-t)+other.red()*t),
+                round(color.green()*(1-t)+other.green()*t),
+                round(color.blue()*(1-t)+other.blue()*t))
+
 
 class NodePreviewDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option, index):
@@ -75,14 +90,27 @@ class KeypointListWidget(QListWidget):
 
         self._item_map: dict[tuple[str, str], QListWidgetItem] = {}
         self._header_map: dict[str, QListWidgetItem] = {}
+        
+        self.mouse_controller = None
+
+        self._track_order: list[str] = []
+        self._kp_order:    list[str] = []
 
     def build(self, tracks, kp_order, skeleton_model):
         self.clear()
         self._item_map.clear()
         self._header_map.clear()
 
+        self._track_order = [str(t) for t in tracks]
+        self._kp_order    = list(kp_order)
+
         for idx, track in enumerate(tracks):
-            hdr = QListWidgetItem(f"Animal {idx + 1} ({track})")
+            hdr = QListWidgetItem(track)
+            base_font = self.font()
+            bold_font = QFont(base_font.family(),
+                    base_font.pointSize(),
+                    QFont.Weight.Bold)
+            hdr.setFont(bold_font)
             hdr.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.addItem(hdr)
             self._header_map[str(track)] = hdr
@@ -98,9 +126,44 @@ class KeypointListWidget(QListWidget):
 
                 self._item_map[(str(track), kp)] = it
 
-    def highlight(self, track, kp):
-        item = self._item_map.get((str(track), kp))
-        if item is None:
+    def highlight(self, track: str | None, kp: str | None):
+        if not self._track_order or not self._kp_order:
             return
-        self.setCurrentItem(item)
-        self.scrollToItem(item)
+        
+        for it in self._item_map.values():
+            it.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        for it in self._header_map.values():
+            it.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+
+        if track:
+            track = str(track)
+            track_idx = self._track_order.index(track)
+            try:
+                base_idx = track_idx * (len(self._kp_order) + 1)
+            except ValueError:
+                return 
+            if kp:
+                try:
+                    offset = 1 + self._kp_order.index(kp)
+                except ValueError:
+                    return
+            else:
+                offset = 0
+            row = base_idx + offset
+
+            kpt_item = self.item(row)
+            if kpt_item:
+                kpt_item.setBackground(_background_color_kpt(track_idx))
+            track_item = self.item(base_idx)
+            if track_item:
+                track_item.setBackground(_background_color_track(track_idx))
+
+            """self.setCurrentRow(row)
+            self.scrollToItem(track_item)"""
+
+    def update_list_visibility(self, coords: dict[str, dict[str, tuple]]):
+        for (tr, kp), item in self._item_map.items():
+            if kp in coords.get(tr, {}):
+                item.setForeground(QBrush(QColor("black")))
+            else:
+                item.setForeground(QBrush(QColor("lightgray")))

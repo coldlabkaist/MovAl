@@ -1,8 +1,9 @@
 from PyQt6.QtCore import QObject, Qt, QEvent
 
 class KeyboardController(QObject):
-    def __init__(self, video_loader, parent=None):
+    def __init__(self, main_dialog, video_loader, parent=None):
         super().__init__(parent)
+        self.main_dialog = main_dialog
         self.video_loader = video_loader
 
     def eventFilter(self, obj, event):
@@ -18,7 +19,7 @@ class KeyboardController(QObject):
                     self.video_loader.move_to_frame(current - 1)
                 return True
             elif key == Qt.Key.Key_Space and not event.isAutoRepeat():
-                self.video_loader.toggle_playback()
+                self.main_dialog.play_or_pause()
                 return True
 
             # -------------------------- TODO --------------------------

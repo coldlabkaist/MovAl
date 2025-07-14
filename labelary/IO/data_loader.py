@@ -1,8 +1,12 @@
 import pandas as pd
 from pathlib import Path
 from typing import Union, Optional, List
-from PyQt6.QtWidgets import QFileDialog, QMessageBox, QDialog, QPushButton, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QFileDialog, QMessageBox, QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
+    QComboBox
+)
 from utils.skeleton import SkeletonModel
+from typing import Optional
 
 class DataLoader:
     parent: Optional[QDialog] = None
@@ -16,6 +20,10 @@ class DataLoader:
     img_width: Optional[int] = None 
     img_height: Optional[int] = None
     _coords_normalized: bool = False
+
+    max_animals = 0
+    animals_name = None
+    track_mapping: dict[str, str] = {}
 
     ### Skeleton ###
 
@@ -98,15 +106,18 @@ class DataLoader:
 
     @classmethod
     def get_keypoint_coordinates_by_frame(cls, frame_idx):
-        if cls.is_empty(cls.loaded_data):
+        if cls.loaded_data is None or cls.loaded_data.empty:
             return {}
+        coords = {t: {} for t in cls.animals_name}
         try:
             frame_df = cls.loaded_data.xs(frame_idx, level="frame.idx")
         except KeyError:
-            return {t: {} for t in cls.loaded_data["track"].unique()}
+            return coords
 
         coords = {t: {} for t in cls.loaded_data["track"].unique()}
         for track, group in frame_df.groupby(level="track"): 
+            if track not in coords:
+                continue
             row = group.iloc[0]
             for kp in cls.kp_order:
                 xcol, ycol, scol = f"{kp}.x", f"{kp}.y", f"{kp}.visibility"
@@ -127,20 +138,20 @@ class DataLoader:
     ### Update ###
 
     @classmethod
-    def update_visibility(cls, track, frame_idx, keypoint, visibility):
+    def update_kpt_visibility(cls, track, frame_idx, keypoint, visibility):
         if cls.loaded_data is None:
-            print("DataLoader.update_visibility: No data loaded.")
+            print("DataLoader.update_kpt_visibility: No data loaded.")
             return
         mask = (cls.loaded_data["track"] == track) & (cls.loaded_data["frame.idx"] == frame_idx)
         if mask.sum() == 0:
-            print(f"DataLoader.update_visibility: No row for track={track}, frame={frame_idx}")
+            print(f"DataLoader.update_kpt_visibility: No row for track={track}, frame={frame_idx}")
             return
         col_v = f"{keypoint}.visibility"
         if col_v not in cls.loaded_data.columns:
-            print(f"DataLoader.update_visibility: Column {col_v} not found.")
+            print(f"DataLoader.update_kpt_visibility: Column {col_v} not found.")
             return
         cls.loaded_data.loc[mask, col_v] = visibility
-        print(f"✅ Updated {col_v} to {cls.loaded_data.loc[mask, col_v]} (track={track}, frame={frame_idx})")
+        #print(f"Updated {col_v} to {cls.loaded_data.loc[mask, col_v]} (track={track}, frame={frame_idx})")
         return cls.loaded_data.loc[mask]
 
     @classmethod
@@ -157,10 +168,10 @@ class DataLoader:
             print(f"DataLoader.update_point: Columns {col_x} or {col_y} not found.")
             return
         cls.loaded_data.loc[mask, [col_x, col_y]] = [norm_x, norm_y]
-        print(f"✅ Updated {col_x}, {col_y} to ({cls.loaded_data.loc[mask, [col_x, col_y]]})")
+        #print(f"Updated {col_x}, {col_y} to ({cls.loaded_data.loc[mask, [col_x, col_y]]})")
         return cls.loaded_data.loc[mask]
 
-    ### Create Label ###
+    ### Modify Label ###
 
     @classmethod
     def create_new_data(cls, n_tracks: int = 1) -> bool:
@@ -172,6 +183,139 @@ class DataLoader:
         cls.loaded_data = df
         cls.csv_path = None
         cls._coords_normalized = True
+        return True
+
+    @classmethod
+    def _to_project_name(cls, raw_track: str) -> str:
+        return cls.track_mapping.get(raw_track, raw_track)
+
+    @classmethod
+    def add_skeleton_instance(cls,
+                              frame_idx: int,
+                              track_name: str,
+                              anchor_xy: "tuple[float, float] | None" = None,
+                              nearby_range: int = 300) -> bool:
+        cls._ensure_skeleton()
+        if cls.loaded_data is None:
+            return False
+        track_name = cls._to_project_name(track_name)
+
+        frame_df = cls.loaded_data[cls.loaded_data["frame.idx"] == frame_idx]
+        if frame_df["track"].nunique() >= getattr(cls, "max_animals", 1):
+            print("⚠️ Cannot add new skeleton: maximum instances reached for this frame.")
+            return False
+
+        if ((cls.loaded_data["track"] == track_name) &
+            (cls.loaded_data["frame.idx"] == frame_idx)).any():
+            return False
+
+        new_row = {"track": track_name, "frame.idx": frame_idx}
+        if "instance.visibility" in cls.loaded_data.columns:
+            new_row["instance.visibility"] = 2
+
+        init_coords: dict[str, tuple[float, float, int]] = {}
+        mask = ((cls.loaded_data["track"] == track_name) &
+                (cls.loaded_data["frame.idx"].between(frame_idx - nearby_range,
+                                                      frame_idx + nearby_range)))
+        if not cls.loaded_data[mask].empty:
+            near_df = cls.loaded_data[mask]
+            idx_nearest = (near_df["frame.idx"] - frame_idx).abs().idxmin()
+            src = near_df.loc[idx_nearest]
+            for kp in cls.kp_order:
+                xcol, ycol, vcol = f"{kp}.x", f"{kp}.y", f"{kp}.visibility"
+                init_coords[kp] = (src[xcol], src[ycol], src.get(vcol, 2))
+
+        if not init_coords:
+            ax, ay = anchor_xy if anchor_xy is not None else (0.5, 0.5)
+            xs = [n.x for n in cls.skeleton_model.nodes.values()]
+            ys = [n.y for n in cls.skeleton_model.nodes.values()]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            w0, h0       = max_x - min_x, max_y - min_y
+            cx, cy       = (min_x + max_x) / 2, (min_y + max_y) / 2
+
+            target_size  = 0.125
+            scale        = target_size / max(w0, h0) if max(w0, h0) else 1.0
+
+            for kp, node in cls.skeleton_model.nodes.items():
+                nx = ax + (node.x - cx) * scale
+                ny = ay + (node.y - cy) * scale
+                nx = max(0.0, min(nx, 1.0))
+                ny = max(0.0, min(ny, 1.0))
+                init_coords[kp] = (nx, ny, 2)
+
+        for kp in cls.kp_order:
+            xcol, ycol, vcol = f"{kp}.x", f"{kp}.y", f"{kp}.visibility"
+            nx, ny, vis = init_coords.get(kp, (0.5, 0.5, 1))
+            new_row[xcol], new_row[ycol], new_row[vcol] = nx, ny, vis
+
+        try:
+            cls.loaded_data = pd.concat([cls.loaded_data,
+                                         pd.DataFrame([new_row])],
+                                        ignore_index=True)
+        except Exception as e:
+            print(f"❌ Failed to add new skeleton row: {e}")
+            return False
+
+        if not cls.loaded_data.empty:
+            cls.loaded_data = (cls.loaded_data
+                               .set_index(["frame.idx", "track"], drop=False)
+                               .sort_index())
+
+        print(f"✅ Added new skeleton for {track_name} at frame {frame_idx}")
+        return True
+
+    @classmethod
+    def swap_or_rename_instance(cls,
+                                frame_idx: int,
+                                old_track: str,
+                                new_track: str) -> bool:
+        if cls.loaded_data is None or cls.loaded_data.empty:
+            return False
+        if old_track == new_track:
+            return True
+
+        m_old = (cls.loaded_data["frame.idx"] == frame_idx) & (cls.loaded_data["track"] == old_track)
+        m_new = (cls.loaded_data["frame.idx"] == frame_idx) & (cls.loaded_data["track"] == new_track)
+
+        if m_old.sum() == 0:
+            return False 
+        if m_new.sum() > 0:
+            tmp_name = "__tmp_track__"
+            cls.loaded_data.loc[m_new, "track"] = tmp_name
+            cls.loaded_data.loc[m_old, "track"] = new_track
+            cls.loaded_data.loc[cls.loaded_data["track"] == tmp_name, "track"] = old_track
+        else:
+            cls.loaded_data.loc[m_old, "track"] = new_track
+        cls.loaded_data = (
+            cls.loaded_data
+            .set_index(["frame.idx", "track"], drop=False)
+            .sort_index()
+        )
+        return True
+
+    @classmethod
+    def delete_instance(cls, frame_idx: int, track: str) -> bool:
+        if cls.loaded_data is None or cls.loaded_data.empty:
+            return False
+
+        before = len(cls.loaded_data)
+        cls.loaded_data = cls.loaded_data[
+            ~((cls.loaded_data["frame.idx"] == frame_idx) &
+              (cls.loaded_data["track"] == track))
+        ]
+        after = len(cls.loaded_data)
+        if after == before:
+            print(f"DeleteInstance: nothing to delete ({track}@{frame_idx})")
+            return False
+
+        if not cls.loaded_data.empty:
+            cls.loaded_data = (
+                cls.loaded_data
+                .set_index(["frame.idx", "track"], drop=False)
+                .sort_index()
+            )
+        print(f"Deleted {track} @ frame {frame_idx}")
         return True
 
     ### Load Label ###
@@ -202,7 +346,8 @@ class DataLoader:
                     continue
 
                 single_frame_df = cls._txt_to_df(single_frame_txt, sep=sep, frame_idx=f_idx)
-                frames.append(single_frame_df)
+                if not single_frame_df.empty:
+                    frames.append(single_frame_df)
 
             if not frames:
                 print("There is no readable txt.")
@@ -259,6 +404,22 @@ class DataLoader:
 
             cls._check_skeleton_compat(df)
 
+            unique_tracks = df["track"].unique().tolist()
+            if len(unique_tracks) > cls.max_animals:
+                QMessageBox.critical(
+                    None,
+                    "Load Error",
+                    f"The total number of tracks ({len(unique_tracks)}) exceeds the maximum allowed ({cls.max_animals})."
+                )
+                return False
+            if set(unique_tracks) != set(cls.animals_name):
+                mapping = cls._match_tracks(unique_tracks, cls.animals_name)
+                if mapping is None:
+                    return False
+                df["track"] = df["track"].map(mapping)
+                cls.track_mapping = mapping
+
+
             for col in list(df.columns):
                 if col.endswith(".score"):
                     vis = col.replace(".score", ".visibility")
@@ -307,3 +468,65 @@ class DataLoader:
         except Exception as e:
             print(f"❌ Failed to load data: {e}")
             return False
+            
+    @classmethod
+    def _match_tracks(cls, tracks: list[str], animal_names: list[str]):
+        dlg = TrackMatchDialog(tracks, animal_names)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg.get_mapping()
+        return None
+
+class TrackMatchDialog(QDialog):
+    def __init__(self, tracks: list[str], animal_names: list[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Track mapping")
+        self.comboboxes: dict[str, QComboBox] = {}
+
+        layout = QVBoxLayout(self)
+        for t in tracks:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(t))
+
+            cb = QComboBox()
+            cb.addItems(animal_names)
+            if t in animal_names:
+                cb.setCurrentIndex(animal_names.index(t))
+            else:
+                cb.setEditable(True)
+                cb.setPlaceholderText("select name")
+                cb.setEditable(False)
+                cb.setCurrentIndex(-1)
+            row.addWidget(cb, 1)
+
+            layout.addLayout(row)
+            self.comboboxes[t] = cb
+
+        btn_row = QHBoxLayout()
+        ok_btn = QPushButton("Okay")
+        cancel_btn = QPushButton("Cancel")
+        ok_btn.clicked.connect(self._validate_and_accept)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+
+        note = QLabel("The label file and the project config animal name do not match.\n"
+                        "Match the names using the dialog below.\n"
+                        "Or, press Cancel to cancel loading.")
+        layout.addWidget(note)
+        layout.addLayout(btn_row)
+
+    def _validate_and_accept(self):
+        mapping = {track: cb.currentText() for track, cb in self.comboboxes.items()}
+        names = list(mapping.values())
+        if len(names) != len(set(names)):
+            QMessageBox.warning(self,
+                                "Warning",
+                                "Please select without duplication")
+            return
+        self.accept()
+
+    def get_mapping(self) -> dict[str,str]:
+        return {
+            track: combo.currentText()
+            for track, combo in self.comboboxes.items()
+        }

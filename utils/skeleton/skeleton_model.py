@@ -156,3 +156,7 @@ class SkeletonModel:
                 n1, n2 = conn[0], conn[1]
                 if n1 in self.nodes and n2 in self.nodes:
                     self.syms.add(frozenset({n1, n2}))
+
+    def create_training_information(self):
+        nkpt = 
+        kpt_names = list(self.nodes)

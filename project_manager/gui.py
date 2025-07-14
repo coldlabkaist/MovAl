@@ -23,8 +23,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QCheckBox,
     QLineEdit,
-    QComboBox
+    QComboBox,
+    QScrollArea,
+    QWidget,
 )
+from utils import __version__
 
 class _FileListWidget(QListWidget):
 
@@ -92,15 +95,32 @@ class ProjectManagerDialog(QDialog):
         self.title_edit.setFixedWidth(250) 
         col1.addWidget(self.title_label)
         col1.addWidget(self.title_edit)
-        col1.addSpacing(20)
+        col1.addSpacing(10)
 
         self.step1_label = QLabel("<b>Step&nbsp;1.</b> Set number of animal")
         self.step1_spin = QSpinBox()
-        self.step1_spin.setRange(1, 100)
+        self.step1_spin.setRange(1, 15) # Note : Change the range to work on projects with more than 15 animals
         self.step1_spin.setValue(2)
         col1.addWidget(self.step1_label)
         col1.addWidget(self.step1_spin)
-        col1.addSpacing(20)
+
+        self.instance_area = QScrollArea()
+        self.instance_area.setFixedWidth(250) 
+        row_h = self.step1_spin.sizeHint().height() + 4
+        self.instance_area.setFixedHeight(row_h * 5 + 10)
+        self.instance_area.setWidgetResizable(True)
+        self.instance_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.instance_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.instance_container = QWidget()
+        self.instance_layout = QVBoxLayout(self.instance_container)
+        self.instance_layout.setContentsMargins(10, 10, 10, 10)
+        self.instance_layout.setSpacing(4)
+        self.instance_area.setWidget(self.instance_container)
+        col1.addWidget(self.instance_area) 
+        self._instance_fields: list[QLineEdit] = []
+        self.step1_spin.valueChanged.connect(self._generate_instance_fields)
+        self._generate_instance_fields(self.step1_spin.value())
+        col1.addSpacing(10)
 
         self.step2_label = QLabel("<b>Step&nbsp;2.</b> Load videos")
         self.step2_button = QPushButton("Select videos …")
@@ -110,7 +130,7 @@ class ProjectManagerDialog(QDialog):
         self.step2_check = QCheckBox("Create a copy of the file (Recommended)")
         self.step2_check.setChecked(True)
         col1.addWidget(self.step2_check)
-        col1.addSpacing(20)
+        col1.addSpacing(10)
 
         self.step3_label = QLabel("<b>Step&nbsp;3.</b> Load txt/csv (Optional)")
         self.step3_buttons_row = QHBoxLayout()
@@ -122,7 +142,7 @@ class ProjectManagerDialog(QDialog):
         self.step3_buttons_row.addWidget(self.step3_button_txt)
         col1.addWidget(self.step3_label)
         col1.addLayout(self.step3_buttons_row)
-        col1.addSpacing(20)
+        col1.addSpacing(10)
 
         self.step4_label = QLabel("<b>Step&nbsp;4.</b> Set skeleton")
         col1.addWidget(self.step4_label)
@@ -132,8 +152,9 @@ class ProjectManagerDialog(QDialog):
         self.step4_button.clicked.connect(self._on_select_skeleton)
         col1.addWidget(self.step4_combo)
         col1.addWidget(self.step4_button)
-        col1.addSpacing(20)
+        col1.addSpacing(10)
         
+        col1.addSpacing(30)
         col1.addStretch()
 
         col2 = QVBoxLayout()
@@ -141,6 +162,7 @@ class ProjectManagerDialog(QDialog):
         layout.addLayout(col2, 0)
 
         self.file_list = _FileListWidget()
+        self.file_list.setMinimumWidth(250) 
         col2.addWidget(self.file_list)
 
         self.list_buttons_row = QHBoxLayout()
@@ -162,6 +184,33 @@ class ProjectManagerDialog(QDialog):
         self.create_button = QPushButton("Create Project")
         self.create_button.clicked.connect(self._create_project)
         col1.addWidget(self.create_button)
+
+    def _generate_instance_fields(self, count: int):
+        old_texts = [e.text().strip() for e in self._instance_fields]
+        while self.instance_layout.count():
+            child = self.instance_layout.takeAt(0)
+            if w := child.widget():
+                w.setParent(None)
+        self._instance_fields.clear()
+
+        for idx in range(count):
+            if idx < len(old_texts) and old_texts[idx]:
+                default_name = old_texts[idx]
+            else:
+                default_name = f"track_{idx}"
+
+            row_widget = QWidget()
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            label = QLabel(f"Animal {idx+1}:")
+            edit  = QLineEdit(default_name)
+            row.addWidget(label)
+            row.addWidget(edit, 1)
+
+            self.instance_layout.addWidget(row_widget)
+            self._instance_fields.append(edit)
+        self.instance_layout.addStretch(1)
 
     def _on_select_videos(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -269,6 +318,19 @@ class ProjectManagerDialog(QDialog):
             QMessageBox.warning(self, "No files",
                                 "Please add at least one video / txt / csv file.")
             return
+
+        instance_names = [
+            (e.text().strip() or f"track_{i}")
+            for i, e in enumerate(self._instance_fields)
+        ]
+        if len(instance_names) != len(set(instance_names)):
+            QMessageBox.warning(
+                self,
+                "Duplicate animal name",
+                f"Set animal names without duplication.",
+            )
+            return
+            
         if not (title := self.title_edit.text().strip()):
             QMessageBox.warning(self, "No title", "Please enter a project title.")
             return
@@ -335,17 +397,18 @@ class ProjectManagerDialog(QDialog):
                                 "The list must start with at least one video file.")
             return
 
-        config_path = os.path.join(proj_dir, "config.yaml")
+        project_config_path = os.path.join(proj_dir, "config.yaml")
         config = {
+            "moval_version": __version__,
             "project_dir": proj_dir,
             "title": title,
             "num_animals": int(self.step1_spin.value()),
+            "animals_name": instance_names,
             "files": project_files,
             "skeleton": self.step4_combo.currentText(),
         }
-
         try:
-            with open(config_path, "w", encoding="utf-8") as f:
+            with open(project_config_path, "w", encoding="utf-8") as f:
                 yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save YAML:\n{e}")
@@ -361,7 +424,7 @@ class ProjectManagerDialog(QDialog):
             QMessageBox.information(self, "Done",
                                     f"Project folder created:\n{proj_dir}\n\nconfig.yaml saved.")
 
-        self.set_main_window_project(path=config_path)
+        self.set_main_window_project(path=project_config_path)
         self.accept()
 
 def _ensure_dir(path: str | Path):
@@ -398,18 +461,3 @@ def _copy_file_rename(src_file: str, dst_dir: str) :
         shutil.copy2(src_file, dst_path)
 
     return dst_path
-
-if __name__ == "__main__":
-    import sys
-    from PyQt6.QtWidgets import QApplication
-
-    app = QApplication.instance()
-    owns_app = False
-    if app is None:
-        app = QApplication(sys.argv)  
-        owns_app = True  
-    dlg = ProjectManagerDialog()
-    dlg.show() 
-
-    if owns_app:
-        sys.exit(app.exec())

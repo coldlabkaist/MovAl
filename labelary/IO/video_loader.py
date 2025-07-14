@@ -9,9 +9,17 @@ from .data_loader import DataLoader
 import warnings
 
 class VideoLoader:
-    def __init__(self, parent, skeleton_video_viewer, frame_slider, frame_number_label, frame_display_mode = "davis"):
+    def __init__(self, 
+                parent, 
+                skeleton_video_viewer, 
+                kpt_list, 
+                frame_slider, 
+                frame_number_label, 
+                frame_display_mode = "davis"):
+
         self.parent = parent
         self.skeleton_video_viewer = skeleton_video_viewer
+        self.kpt_list = kpt_list
         self.frame_slider = frame_slider
         self.frame_number_label = frame_number_label
         self.frame_display_mode = frame_display_mode
@@ -53,20 +61,25 @@ class VideoLoader:
                     print(f"✅ First frame displayed: {first_frame_path}")
                 else:
                     print("❌ Could not load first frame.")
+                    return False
             else:
                 print("❌ Could not load first frame.")
+                return False
         except FileNotFoundError as e:
             QMessageBox.warning( 
                 self.parent,
                 "File Not Found",
                 f"Video file not loaded:\n{e}"
             )
+            return False
         except Exception as e:
             QMessageBox.critical(
                 self.parent,
                 "Error",
                 f"An error occurred while loading the video:\n{e}"
             )
+            return False
+        return True
 
     def _ensure_display_mode(self, display_mode):
         if display_mode not in ["images", "davis", "contour"]:
@@ -99,12 +112,15 @@ class VideoLoader:
 
         csv_points = DataLoader.get_keypoint_coordinates_by_frame(self.current_frame + 1)
         self.skeleton_video_viewer.setCSVPoints(csv_points)
+        self.kpt_list.update_list_visibility(csv_points)
 
     def toggle_playback(self):
         if self.timer.isActive():
             self.timer.stop()
+            return True
         else:
             self.timer.start(self.fps*self.play_rate)
+            return False
 
     def play_next_frame(self):
         if self.current_frame + 1 < self.total_frames:

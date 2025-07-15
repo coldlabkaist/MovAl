@@ -18,6 +18,7 @@ class VideoLoader:
                 frame_display_mode = "davis"):
 
         self.parent = parent
+        self.project_path = parent.project.project_dir
         self.skeleton_video_viewer = skeleton_video_viewer
         self.kpt_list = kpt_list
         self.frame_slider = frame_slider
@@ -42,13 +43,9 @@ class VideoLoader:
             warnings.warn(f"Unable to load video from project: {path}. Video playback fps is fixed to 30.", UserWarning)
             self.fps = 30
 
-        new_parent = Path(
-            str(path.parent).replace(
-                f"{os.sep}raw_videos", f"{os.sep}frames"
-            )
-        )
+        frame_base_path = os.path.join(self.project_path, "frames")
         self.frame_display_mode = frame_display_mode
-        path = new_parent / path.stem / self._ensure_display_mode(frame_display_mode)
+        path = os.path.join(frame_base_path, path.stem, self._ensure_display_mode(frame_display_mode))
         self.frame_dir = path
         try:
             frame_list = [f for f in os.listdir(path) if f.endswith(".jpg")]
@@ -108,7 +105,7 @@ class VideoLoader:
         self.skeleton_video_viewer.current_frame = self.current_frame
 
         self.frame_slider.setValue(self.current_frame)
-        self.frame_number_label.setText(f"{self.current_frame} / {self.total_frames}")
+        self.frame_number_label.setText(f"{self.current_frame+1} / {self.total_frames}")
 
         csv_points = DataLoader.get_keypoint_coordinates_by_frame(self.current_frame + 1)
         self.skeleton_video_viewer.setCSVPoints(csv_points)

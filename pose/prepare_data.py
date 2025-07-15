@@ -212,8 +212,8 @@ class DataSplitDialog(QDialog):
                     orig_num_str   = m.group(1)
                     digits_len     = 7
                     base_digit_len = len(orig_num_str)
-                    frame_idx      = int(orig_num_str) - 1
-                    frame_num      = f"{frame_idx:0{digits_len}d}"
+                    frame_idx      = int(orig_num_str) 
+                    frame_num      = f"{frame_idx- 1:0{digits_len}d}"
                     base_name      = f"{video_name}_{frame_idx:0{base_digit_len}d}"
 
                     img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
@@ -245,7 +245,6 @@ class DataSplitDialog(QDialog):
             lbl_dst_root = dataset_dir / split / "labels"
 
             for lbl_path, img_path, base in pairs:
-                print(lbl_path, img_path, base, base_digit_len)
                 shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
                 img_ext = img_path.suffix.lower()
                 shutil.copy(img_path, img_dst_root / f"{base}{img_ext}")

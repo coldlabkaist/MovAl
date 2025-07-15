@@ -434,18 +434,17 @@ class ProjectManagerDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to save project YAML:\n{e}")
             return
 
-        training_config_path = os.path.join(proj_dir, "runs", "traing_config.yaml")
+        training_config_path = os.path.join(proj_dir, "runs", "training_config.yaml")
         training_base_dir = os.path.join(proj_dir, "runs", "dataset")
         _ensure_dir(training_base_dir)
         skeleton_model_dir = os.path.join(os.getcwd(), "preset", "skeleton", self.step4_combo.currentText())
         skeleton_model = SkeletonModel()
         skeleton_model.load_from_yaml(skeleton_model_dir)
         nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
-        print(training_base_dir)
         config = {
-            "train_dir": os.path.join(training_base_dir, "train"),
-            "val_dir": os.path.join(training_base_dir, "valid"),
-            "test_dir": os.path.join(training_base_dir, "test"),
+            "train": os.path.join(training_base_dir, "train"),
+            "val": os.path.join(training_base_dir, "val"),
+            "test": os.path.join(training_base_dir, "test"),
             "nc": 3,
             "names": {i: n for i, n in enumerate(instance_names)},
             "nkpt": nkpt,

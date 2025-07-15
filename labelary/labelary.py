@@ -105,6 +105,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             p = Path(txt_path)
             self.label_combo.addItem(p.name, p)
         self.label_combo.addItem("Create new label", "Create new label")
+        self.label_combo.addItem("Load inference result", "Load inference result")
 
         if set_text:
             target_stem = Path(set_text).stem
@@ -131,6 +132,15 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         label_name = self.label_combo.currentText()
         if label_name == "Create new label":
             self.create_new_label()
+        elif label_name == "Load inference result":
+            dir_path = QFileDialog.getExistingDirectory(
+                self,
+                "Select inference result directory",
+                str(self.current_project.project_dir)
+            )
+            if not dir_path:
+                return
+            self.load_txt(dir_path)
         else:
             label_path = Path(self.label_combo.currentData(Qt.ItemDataRole.UserRole))
             if label_path.is_dir():

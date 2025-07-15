@@ -19,7 +19,7 @@ class YOLODialog(QDialog):
         self.setFixedSize(1000, 800)
 
         self.current_project = current_project
-        self.yaml_path = os.path.join(current_project.project_dir, runs, "training_config.yaml")
+        self.yaml_path = os.path.join(current_project.project_dir, "runs", "training_config.yaml")
 
         main_layout = QVBoxLayout(self)
 
@@ -52,8 +52,7 @@ class YOLODialog(QDialog):
 
         right_layout = QVBoxLayout()
         right_layout.addWidget(self.create_group_box("Training Options", {
-            "cache": False, "device": 0, "workers": 8, "project": "None",
-            "name": "None", "pretrained": True, "deterministic": True, "fraction": 1
+            "cache": False, "device": 0, "workers": 8, "pretrained": True, "deterministic": True, "fraction": 1
         }))
         right_layout.addWidget(self.create_group_box("Augmentation", {
             "hsv_h": 0.015, "hsv_s": 0.7, "hsv_v": 0.4, "degrees": 90,
@@ -117,22 +116,22 @@ class YOLODialog(QDialog):
         import os
 
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        weights_dir = os.path.join(project_root, "weights")
+        models_dir = os.path.join(project_root, "models")
 
         model_type = self.model_combo.currentText().lower()
 
         if model_type in ("yolov11", "yolov8"):
             model_size = self.size_combo.currentText()
             model_name = f"yolo11{model_size}-pose.pt" if model_type == "yolov11" else f"{model_type}{model_size}-pose.pt"
-            model_path = os.path.join(weights_dir, model_name)
+            model_path = os.path.join(models_dir, model_name)
             if not os.path.exists(model_path):
                 QMessageBox.warning(self, "Error", f"{model_path} not found!\nPlease download the model first.")
                 return
-        elif model_type == "pretrained":
+        elif model_type == "use pretrained model":
             model_path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select pretrained model file",
-                weights_dir,
+                project_root,
                 "PyTorch model (*.pt);;All Files (*)"
             )
             if not model_path:
@@ -150,16 +149,11 @@ class YOLODialog(QDialog):
             )
             return
 
-        yaml_path = self.yaml_path.text()
-        if yaml_path == "No file selected":
-            QMessageBox.warning(self, "Error", "Please select YAML file")
-            return
-
+        yaml_path = self.yaml_path
         params = {
             "model": model_path,
             "data": yaml_path,
         }
-
         group_names = [
             "Hyper Parameters",
             "Loss Design",
@@ -189,9 +183,11 @@ class YOLODialog(QDialog):
                     value = field_widget.value()
                     params[key] = int(value) if value == int(value) else value
 
-        ts = datetime.now().strftime("%y%m%d_%H%M%S")
+        ts = datetime.now()
+        ts_date = ts.strftime("%y%m%d")
+        ts_time = ts.strftime("%H%M%S")
         params["project"] = os.path.join(self.current_project.project_dir, "runs")
-        params["name"]    = ts
+        params["name"]    = "train_{ts_date}_{ts_time}"
 
         command = "yolo pose train"
         for key, value in params.items():
@@ -262,7 +258,7 @@ class YoloInferenceDialog(QDialog):
 
         visualization_params = {
             "show": False,
-            "save": False,
+            "save": True,
             "save_txt": True,
             "show_labels": True,
             "show_conf": True,
@@ -370,7 +366,9 @@ class YoloInferenceDialog(QDialog):
         sources = [s.strip() for s in sources.split(";") if s.strip()]
         self.command_queue = [] 
 
-        ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now()
+        ts_date = ts.strftime("%y%m%d")
+        ts_time = ts.strftime("%H%M%S")
         base_out= os.path.join(self.current_project.project_dir, "predicts")
 
         for src in sources:
@@ -379,7 +377,7 @@ class YoloInferenceDialog(QDialog):
                 command = f"yolo track model={model_path} tracker={tracker_name} source={src}"
             else:
                 command = f"yolo pose predict model={model_path} source={src}"
-            command += f" project={base_out} name={ts}"
+            command += f" project={base_out} name=predict_{ts_date}_{ts_time}"
             for k, v in infer_params.items():
                 if k == "source" or v in ["", "None"]:
                     continue

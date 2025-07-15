@@ -157,6 +157,14 @@ class SkeletonModel:
                 if n1 in self.nodes and n2 in self.nodes:
                     self.syms.add(frozenset({n1, n2}))
 
-    def create_training_information(self):
-        nkpt = 
-        kpt_names = list(self.nodes)
+    def create_training_config(self):
+        kpt_names    = list(self.nodes.keys())
+        idx_map  = { name: idx for idx, name in enumerate(kpt_names) }
+        kpt_perm     = list(range(len(kpt_names)))
+
+        for pair in self.syms:
+            n1, n2 = tuple(pair)
+            i1, i2 = idx_map[n1], idx_map[n2]
+            kpt_perm[i1], kpt_perm[i2] = kpt_perm[i2], kpt_perm[i1]
+
+        return len(kpt_names), kpt_perm, kpt_names

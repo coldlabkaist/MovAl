@@ -10,9 +10,9 @@ from .thread import ContourWorker
 from pathlib import Path
 
 class BatchContourProcessor(QObject):
-    all_done   = pyqtSignal()        # 전체 작업 종료 시
-    any_error  = pyqtSignal(str)     # 에러 메시지 전달용
-    progress   = pyqtSignal(int,int) # (완료 폴더 수, 총 폴더 수)
+    all_done   = pyqtSignal()       
+    any_error  = pyqtSignal(str) 
+    progress   = pyqtSignal(int,int) 
 
     def __init__(self, parent, current_project, max_threads: int = 4):
         super().__init__(parent)

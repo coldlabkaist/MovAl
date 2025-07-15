@@ -8,35 +8,31 @@ import subprocess
 import os
 from .thread import TrainThread, InferenceThread
 import sys
+from datetime import datetime
+import yaml
+from pathlib import Path
 
 class YOLODialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("YOLO Train Config")
         self.setFixedSize(1000, 800)
+
+        self.current_project = current_project
+        self.yaml_path = os.path.join(current_project.project_dir, runs, "training_config.yaml")
 
         main_layout = QVBoxLayout(self)
 
         config_group = QGroupBox("Training Config")
         config_layout = QFormLayout()
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["YOLOv8", "YOLOv11"])
+        self.model_combo.addItems(["YOLOv8", "YOLOv11", "use pretrained model"])
 
         self.size_combo = QComboBox()
         self.size_combo.addItems(["n", "s", "m", "l", "x"])
 
-        self.yaml_path = QLineEdit("No file selected")
-        self.yaml_path.setReadOnly(True)
-        yaml_btn = QPushButton("Select YAML")
-        yaml_btn.clicked.connect(self.select_yaml)
-
-        yaml_layout = QHBoxLayout()
-        yaml_layout.addWidget(self.yaml_path)
-        yaml_layout.addWidget(yaml_btn)
-
         config_layout.addRow("Model", self.model_combo)
         config_layout.addRow("Model Size", self.size_combo)
-        config_layout.addRow("Select YAML", yaml_layout)
         config_group.setLayout(config_layout)
         main_layout.addWidget(config_group)
 
@@ -44,14 +40,14 @@ class YOLODialog(QDialog):
 
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.create_group_box("Hyper Parameters", {
-            "batch": 4, "epochs": 100, "imgsz": 640, "patience": 10,
-            "lr0": 0.01, "optimizer": "SGD", "weight_decay": 0.0005,
-            "cos_lr": False, "amp": True, "lrf": 0.01, "momentum": 0.937,
-            "dropout": 0.1
+            "batch": 32, "epochs": 400, "imgsz": 640, "patience": 100,
+            "lr0": 0.001, "optimizer": "AdamW", "weight_decay": 0.0005,
+            "cos_lr": True, "amp": True, "lrf": 0.001, "momentum": 0.937,
+            "dropout": 0.35
         }))
         left_layout.addWidget(self.create_group_box("Loss Design", {
-            "box": 7.5, "cls": 0.5, "dfl": 1.5, "pose": 12,
-            "kobj": 2, "nbs": 64
+            "box": 7.5, "cls": 0.5, "dfl": 1.5, "pose": 18,
+            "kobj": 5, "nbs": 64
         }))
 
         right_layout = QVBoxLayout()
@@ -60,8 +56,8 @@ class YOLODialog(QDialog):
             "name": "None", "pretrained": True, "deterministic": True, "fraction": 1
         }))
         right_layout.addWidget(self.create_group_box("Augmentation", {
-            "hsv_h": 0.015, "hsv_s": 0.7, "hsv_v": 0.4, "degrees": 0.0,
-            "scale": 0.5, "shear": 0.0, "translate": 0.1, "flipud": 0.0,
+            "hsv_h": 0.015, "hsv_s": 0.7, "hsv_v": 0.4, "degrees": 90,
+            "scale": 0.5, "shear": 0.0, "translate": 0.1, "flipud": 0.3,
             "fliplr": 0.5, "erasing": 0.4, "crop_fraction": 0.1
         }))
 
@@ -104,7 +100,7 @@ class YOLODialog(QDialog):
                 widget.setSingleStep(1)
                 widget.setValue(default)
 
-            else:  # float
+            else: 
                 widget = QDoubleSpinBox()
                 widget.setDecimals(4)
                 widget.setMinimum(0.0)
@@ -116,11 +112,6 @@ class YOLODialog(QDialog):
 
         group.setLayout(form)
         return group
-
-    def select_yaml(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select YAML File", "", "YAML Files (*.yaml *.yml)")
-        if file_path:
-            self.yaml_path.setText(file_path)
             
     def run_train(self):
         import os
@@ -129,12 +120,34 @@ class YOLODialog(QDialog):
         weights_dir = os.path.join(project_root, "weights")
 
         model_type = self.model_combo.currentText().lower()
-        model_size = self.size_combo.currentText()
-        model_name = f"yolo11{model_size}-pose.pt" if model_type == "yolov11" else f"{model_type}{model_size}-pose.pt"
-        model_path = os.path.join(weights_dir, model_name)
 
-        if not os.path.exists(model_path):
-            QMessageBox.warning(self, "Error", f"{model_path} not found!\nPlease download the model first.")
+        if model_type in ("yolov11", "yolov8"):
+            model_size = self.size_combo.currentText()
+            model_name = f"yolo11{model_size}-pose.pt" if model_type == "yolov11" else f"{model_type}{model_size}-pose.pt"
+            model_path = os.path.join(weights_dir, model_name)
+            if not os.path.exists(model_path):
+                QMessageBox.warning(self, "Error", f"{model_path} not found!\nPlease download the model first.")
+                return
+        elif model_type == "pretrained":
+            model_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select pretrained model file",
+                weights_dir,
+                "PyTorch model (*.pt);;All Files (*)"
+            )
+            if not model_path:
+                QMessageBox.warning(
+                    self,
+                    "No model selected",
+                    "Please select a pre-trained model"
+                )
+                return
+        else:
+            QMessageBox.critical(
+                self,
+                "Invalid model type",
+                f"Unknown model_type: {model_type}"
+            )
             return
 
         yaml_path = self.yaml_path.text()
@@ -176,6 +189,10 @@ class YOLODialog(QDialog):
                     value = field_widget.value()
                     params[key] = int(value) if value == int(value) else value
 
+        ts = datetime.now().strftime("%y%m%d_%H%M%S")
+        params["project"] = os.path.join(self.current_project.project_dir, "runs")
+        params["name"]    = ts
+
         command = "yolo pose train"
         for key, value in params.items():
             if value in ["", "None"]:
@@ -195,10 +212,12 @@ class YOLODialog(QDialog):
         self.train_thread.start()
 
 class YoloInferenceDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("YOLO Inference Config")
         self.setFixedSize(800, 450)
+
+        self.current_project = current_project
 
         main_layout = QVBoxLayout(self)
 
@@ -231,9 +250,9 @@ class YoloInferenceDialog(QDialog):
         inference_params = {
             "source": "",
             "imgsz": 640,
-            "conf": 0.25,
+            "conf": 0.5,
             "iou": 0.7,
-            "max_det": 300,
+            "max_det": 15,
             "augment": False,
             "classes": "",
             "half": False,
@@ -242,13 +261,13 @@ class YoloInferenceDialog(QDialog):
         self.inference_group = self.create_group_box("Inference Config", inference_params, is_inference=True)
 
         visualization_params = {
-            "show": True,
-            "save": True,
+            "show": False,
+            "save": False,
             "save_txt": True,
             "show_labels": True,
             "show_conf": True,
             "show_boxes": True,
-            "kpt_radius": 5
+            "kpt_radius": 4
         }
         self.visualization_group = self.create_group_box("Visualization", visualization_params)
 
@@ -351,13 +370,16 @@ class YoloInferenceDialog(QDialog):
         sources = [s.strip() for s in sources.split(";") if s.strip()]
         self.command_queue = [] 
 
+        ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_out= os.path.join(self.current_project.project_dir, "predicts")
+
         for src in sources:
             if self.tracking_radio.isChecked():
                 tracker_name = self.track_method_combo.currentText() + ".yaml"
                 command = f"yolo track model={model_path} tracker={tracker_name} source={src}"
             else:
                 command = f"yolo pose predict model={model_path} source={src}"
-
+            command += f" project={base_out} name={ts}"
             for k, v in infer_params.items():
                 if k == "source" or v in ["", "None"]:
                     continue
@@ -378,11 +400,11 @@ class YoloInferenceDialog(QDialog):
     
     def run_next_command(self):
         if not self.command_queue:
-            print("✅ All inference tasks completed.")
+            print("All inference tasks completed.")
             return
 
         command = self.command_queue.pop(0)
-        print("▶️ Executing:", command)
+        print("▶Executing:", command)
 
         self.infer_thread = InferenceThread(command)
         self.infer_thread.finished.connect(self.run_next_command) 

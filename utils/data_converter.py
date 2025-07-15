@@ -173,7 +173,7 @@ class DlcToCocoDialog(QDialog):
         self.update_track_list(track_list)
         self.update_keypoint_list(keypoints)
 
-        self.status_label.setText("✔️ Config + Folder loaded successfully.")
+        self.status_label.setText("Config + Folder loaded successfully.")
 
     def find_valid_video_folders(self):
         return [
@@ -239,25 +239,25 @@ class DlcToCocoDialog(QDialog):
             folder = Path(self.folder_path) / video
             h5_files = list(folder.glob("*CollectedData*.h5"))
             if not h5_files:
-                print(f"❌ No .h5 file: {folder}")
+                print(f"No .h5 file: {folder}")
                 continue
             df = pd.read_hdf(h5_files[0])
             for img_index in df.index:
                 image_file = img_index if isinstance(img_index, str) else img_index[-1]
                 img_path = folder / image_file
                 if not img_path.exists():
-                    print(f"⚠️ image omission: {img_path}")
+                    print(f"image omission: {img_path}")
                     continue
 
                 img = cv2.imread(str(img_path))
                 if img is None:
-                    print(f"⚠️ OpenCV failed: {img_path}")
+                    print(f"OpenCV failed: {img_path}")
                     continue
                 unique_name = f"{video}_{Path(image_file).stem}.jpg"
                 dst_path = output_dir / unique_name
                 cv2.imwrite(str(dst_path), img)
 
-        QMessageBox.information(self, "Success", f"✅ {len(selected_videos)} extract complete!")
+        QMessageBox.information(self, "Success", f"{len(selected_videos)} extract complete!")
 
     def extract_json(self):
         if not self.folder_path:
@@ -371,7 +371,7 @@ class DlcToCocoDialog(QDialog):
                 "categories": categories
             }, f, indent=4)
 
-        QMessageBox.information(self, "Success", f"✅ JSON save complete: {output_path}")
+        QMessageBox.information(self, "Success", f"JSON save complete: {output_path}")
         
 class JsonToTxtDialog(QDialog):
     def __init__(self, parent=None):

@@ -58,12 +58,12 @@ class VideoLoader:
                 frame = cv2.imread(first_frame_path)
                 if frame is not None:
                     self.display_video(frame, len(frame_list))
-                    print(f"✅ First frame displayed: {first_frame_path}")
+                    print(f"First frame displayed: {first_frame_path}")
                 else:
-                    print("❌ Could not load first frame.")
+                    print("Could not load first frame.")
                     return False
             else:
-                print("❌ Could not load first frame.")
+                print("Could not load first frame.")
                 return False
         except FileNotFoundError as e:
             QMessageBox.warning( 
@@ -131,8 +131,8 @@ class VideoLoader:
         else:
             self.timer.stop()
 
-    def move_to_frame(self, frame_idx):
-        if self.timer.isActive():
+    def move_to_frame(self, frame_idx, force = False):
+        if self.timer.isActive() and not force:
             return
         if 0 <= frame_idx < self.total_frames:
             self.current_frame = frame_idx

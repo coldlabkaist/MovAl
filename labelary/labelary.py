@@ -38,22 +38,22 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         DataLoader.animals_name = self.project.animals_name
         self.skeleton_video_viewer.current_project = project
 
-        self.install_mouse_controller()
+        self.install_controller()
 
         self.play_button.clicked.connect(self.play_or_pause)
         self.frame_slider.valueChanged.connect(self.video_loader.move_to_frame)
+        self.frame_slider.sliderPressed.connect(self.on_frame_slider_pressed)
+        self.frame_slider.sliderReleased.connect(self.on_frame_slider_released)
         self.load_data_button.clicked.connect(self.on_show_clicked)
 
         self.video_combo.currentIndexChanged.connect(self.update_label_combo)
         self.file_entry_idx = 0
         self.update_label_combo(video_index = self.file_entry_idx)
 
-        """self.edit_radio.clicked.connect(self.enableCorrectionMode)
-        self.show_radio.clicked.connect(self.disableCorrectionMode)"""
         self.set_color_combo()
         self.color_combo.currentIndexChanged.connect(self.set_color_mode)
 
-        self.save_button.clicked.connect(lambda: save_modified_data(self))
+        self.save_button.clicked.connect(self.open_save_dialog)
 
     def load_skeleton_model(self):
         self.skeleton = SkeletonModel()
@@ -69,12 +69,16 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             )
             self.accept()
     
-    def install_mouse_controller(self):
+    def install_controller(self):
         mouse_controller = MouseController(self.skeleton_video_viewer, self.kpt_list)
         self.mouse_controller = mouse_controller
         self.skeleton_video_viewer.mouse_controller = mouse_controller
         self.skeleton_video_viewer.installEventFilter(mouse_controller)
         self.kpt_list.mouse_controller = mouse_controller
+
+        keyboard_controller = KeyboardController(self, self.video_loader, mouse_controller=mouse_controller)
+        self.keyboard_controller = keyboard_controller
+        QApplication.instance().installEventFilter(keyboard_controller)
 
     def load_video_combo(self):
         for video in self.project.get_video_list():
@@ -137,11 +141,12 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 QMessageBox.warning(
                     self,
                     "Unsupported Format",
-                    f"지원하지 않는 파일/폴더입니다:\n{label_path}"
+                    f"Unsupported file/folder:\n{label_path}"
                 )
                 return
 
         self.mouse_controller.enable_control = True
+        self.is_video_paused = True
         self.update_keypoint_list()
         self.update_csv_points_on_image()
 
@@ -155,9 +160,17 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         DataLoader.create_new_data()
 
     def play_or_pause(self):
-        enable_control = self.video_loader.toggle_playback()
-        self.mouse_controller.enable_control = enable_control
-        #self.frame_slider.setEnabled(enable_control)
+        self.is_video_paused = self.video_loader.toggle_playback()
+        self.mouse_controller.enable_control = self.is_video_paused
+
+    def on_frame_slider_pressed(self):
+        if not self.is_video_paused:
+            self.video_loader.toggle_playback()
+        self.video_loader.move_to_frame(self.frame_slider.value())
+
+    def on_frame_slider_released(self):
+        if not self.is_video_paused:
+            self.video_loader.toggle_playback()
 
     def update_csv_points_on_image(self):
         current_frame = self.video_loader.current_frame
@@ -183,12 +196,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         color_mode = self.color_combo.currentText()
         self.skeleton_video_viewer.set_skeleton_color_mode(color_mode)
 
+    def open_save_dialog(self):
+        save_modified_data(self)
+
 def run_labelary_with_project(current_project, parent=None):
     app = QApplication.instance() or QApplication(sys.argv)
-
     dlg = LabelaryDialog(current_project, parent) 
-    keyboard_controller = KeyboardController(dlg, dlg.video_loader)
-    app.installEventFilter(keyboard_controller)
-    
     dlg.exec()  
     return 

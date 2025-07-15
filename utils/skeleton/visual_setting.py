@@ -40,7 +40,7 @@ class NodeVisualSettingDialog(QDialog):
 
         colour_row = QHBoxLayout()
         colour_row.addWidget(QLabel("Colour:"))
-        self.colour_btn = QPushButton("   ")  # wide blank button that shows clr
+        self.colour_btn = QPushButton("   ") 
         self._update_colour_btn(node.color)
         self.colour_btn.clicked.connect(self._choose_colour)
         colour_row.addWidget(self.colour_btn, 0)
@@ -79,7 +79,6 @@ class NodeVisualSettingDialog(QDialog):
         self.node.thickness = self.thickness_spin.value()
 
     def _update_colour_btn(self, colour: QColor):
-        """Update the button's background to *colour*."""
         if not isinstance(colour, QColor):
             colour = QColor(colour)
         self.colour_btn.setStyleSheet(f"background-color: {colour.name()}; border: 1px solid #666;")

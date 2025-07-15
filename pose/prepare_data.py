@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
-    QTextEdit, QLabel,
+    QTextEdit, QLabel, QScrollArea, QComboBox,
     QDialog, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout, QSlider, QCheckBox, QLineEdit, QWidget
 )
 from PyQt6.QtCore import Qt
@@ -12,76 +12,29 @@ import random
 import shutil
 import yaml
 import cv2
+import re
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from .yaml_maker import YamlMaker
-
-
-class PrepareDataDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Prepare Data")
-        self.setFixedSize(300, 150)
-
-        main_layout = QVBoxLayout()
-
-        step1_label = QLabel("Step 1")
-        self.data_split_btn = QPushButton("Data Split")
-        self.data_split_btn.setFixedHeight(40)
-        self.data_split_btn.clicked.connect(self.open_data_split)
-        main_layout.addWidget(step1_label)
-        main_layout.addWidget(self.data_split_btn)
-
-        step2_label = QLabel("Step 2")
-        self.make_yaml_btn = QPushButton("Make YAML")
-        self.make_yaml_btn.setFixedHeight(40)
-        self.make_yaml_btn.clicked.connect(self.open_yaml_maker)
-        main_layout.addWidget(step2_label)
-        main_layout.addWidget(self.make_yaml_btn)
-
-        self.setLayout(main_layout)
-        
-    def open_data_split(self):
-        dialog= DataSplitDialog(self)
-        dialog.exec()
-        
-    def open_yaml_maker(self):
-        dialog = YamlMaker(self)
-        dialog.exec()
    
 class DataSplitDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Data Split")
         self.setFixedSize(500, 400)
 
-        
-
-        self.label_dir = ""
-        self.image_dir = ""
+        self.current_project = current_project
+        self.files = current_project.files
 
         layout = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner_widget = QWidget()
+        self.files_lay = QVBoxLayout(inner_widget)
+        scroll.setWidget(inner_widget)
+        layout.addWidget(scroll)
 
-        label_layout = QHBoxLayout()
-        self.label_path_label = QLabel("No folder selected")
-        self.load_label_btn = QPushButton("Load Labels")
-        self.load_label_btn.setFixedWidth(100)
-        self.load_label_btn.clicked.connect(self.load_labels)
-        
-        label_layout.addWidget(self.label_path_label)
-        label_layout.addWidget(self.load_label_btn)
-        layout.addLayout(label_layout)
-
-        image_layout = QHBoxLayout()
-        self.image_path_label = QLabel("No folder selected")
-        self.load_image_btn = QPushButton("Load Images")
-        self.load_image_btn.setFixedWidth(100)
-        self.load_image_btn.clicked.connect(self.load_images)
-        
-        image_layout.addWidget(self.image_path_label)
-        image_layout.addWidget(self.load_image_btn)
-        layout.addLayout(image_layout)
+        self._populate_file_items()
 
         layout.addSpacing(40) 
         self.count_label = QLabel("Label number: 0 / Image number: 0")
@@ -129,6 +82,11 @@ class DataSplitDialog(QDialog):
 
         layout.addSpacing(20)
 
+        self.frame_type_combo = QComboBox()
+        self.frame_type_combo.addItem("davis")
+        self.frame_type_combo.addItem("contour")
+        layout.addWidget(self.frame_type_combo)
+
         self.run_btn = QPushButton("Run")
         layout.addWidget(self.run_btn)
         self.run_btn.clicked.connect(self.run_split)
@@ -136,88 +94,167 @@ class DataSplitDialog(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
+    def _populate_file_items(self) -> None:
+        for fe in self.files:
+            video_path = Path(fe.video)
+            if not video_path.is_absolute():
+                video_path = self.current_project.project_dir / video_path
+
+            cap = cv2.VideoCapture(str(video_path))
+            frame_cnt = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.isOpened() else 0
+            cap.release()
+
+            label_cnt = 0
+            for txt_rel in fe.txt:
+                txt_full = Path(txt_rel)
+                if not txt_full.is_absolute():
+                    txt_full = self.current_project.project_dir / txt_full
+
+                if txt_full.is_dir():
+                    label_cnt += sum(1 for _ in txt_full.glob("*.txt"))
+                elif txt_full.is_file():
+                    label_cnt += 1
+
+            row_lay = QHBoxLayout()
+            chk = QCheckBox()
+            chk.stateChanged.connect(self._update_selection_count)
+            chk._frame_cnt  = frame_cnt
+            chk._label_cnt  = label_cnt
+            chk._file_entry = fe
+
+            name_lbl  = QLabel(video_path.name)
+            count_lbl = QLabel(f"({frame_cnt:,} frames, {label_cnt:,} labels)")
+            count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            row_lay.addWidget(chk)
+            row_lay.addWidget(name_lbl, 1)
+            row_lay.addWidget(count_lbl)
+
+            self.files_lay.addLayout(row_lay)
+
+        self.files_lay.addStretch(1)
+
+    def _update_selection_count(self):
+        total_files  = 0
+        total_frames = 0
+        total_labels = 0
+
+        for i in range(self.files_lay.count() - 1): 
+            lay = self.files_lay.itemAt(i)
+            if not isinstance(lay, QHBoxLayout):
+                continue
+            chk = lay.itemAt(0).widget()
+            if isinstance(chk, QCheckBox) and chk.isChecked():
+                total_files  += 1
+                total_frames += getattr(chk, "_frame_cnt", 0)
+                total_labels += getattr(chk, "_label_cnt", 0)
+
+        self.count_label.setText(
+            f"{total_files} files selected ㆍ "
+            f"{total_frames:,} frames ㆍ "
+            f"{total_labels:,} labels"
+        )
+
+    def get_selected_entries(self):
+        selected_entries: list[FileEntry] = []
+        for i in range(self.files_lay.count() - 1):
+            lay = self.files_lay.itemAt(i)
+            if not isinstance(lay, QHBoxLayout):
+                continue
+            chk = lay.itemAt(0).widget()
+            if isinstance(chk, QCheckBox) and chk.isChecked():
+                selected_entries.append(chk._file_entry)
+        return selected_entries
+
     def create_slider_spinbox_layout(self, slider, spinbox):
         hlayout = QHBoxLayout()
         hlayout.addWidget(slider)
         hlayout.addWidget(spinbox)
         return hlayout
 
-    def load_labels(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Labels Folder")
-        if not folder:
-            return
-        self.label_dir = folder
-        self.label_path_label.setText(folder)
-        self.update_count()
-
-    def load_images(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Images Folder")
-        if not folder:
-            return
-        self.image_dir = folder
-        self.image_path_label.setText(folder)
-        self.update_count()
-
-    def update_count(self):
-        label_count = len([f for f in os.listdir(self.label_dir) if f.endswith('.txt')]) if self.label_dir else 0
-        image_count = len([f for f in os.listdir(self.image_dir) if f.endswith(('.jpg', '.png'))]) if self.image_dir else 0
-        self.count_label.setText(f"Label number: {label_count} / Image number: {image_count}")
-        
     def run_split(self):
-        if not self.label_dir or not self.image_dir:
-            QMessageBox.warning(self, "Error", "Please load both labels and images folder first.")
+        selected_entries: List[FileEntry] = self.get_selected_entries()
+        if not selected_entries:
+            QMessageBox.warning(self, "Error", "First, select a video file.")
             return
 
-        output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory")
-        if not output_dir:
+        project_dir = Path(self.current_project.project_dir)
+        dataset_dir = project_dir / "runs" / "dataset"
+
+        if dataset_dir.exists():
+            shutil.rmtree(dataset_dir)
+        for split in ("train", "val", "test"):
+            (dataset_dir / split / "images").mkdir(parents=True, exist_ok=True)
+            (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
+
+        frame_type = self.frame_type_combo.currentText()
+        pair_list: List[Tuple[Path, Path, str]] = []
+
+        digit_re = re.compile(r'(\d+)$')        # video1_0000042 → 0000042
+
+        for fe in selected_entries:
+            video_path = Path(fe.video)
+            video_name = video_path.stem 
+
+            for txt_rel in fe.txt:
+                txt_path = Path(txt_rel)
+                if not txt_path.is_absolute():
+                    txt_path = project_dir / txt_path
+                if txt_path.is_dir():
+                    txt_files = sorted(txt_path.glob("*.txt"))  
+                else:
+                    continue
+                for lbl_file in txt_files:
+                    m = digit_re.search(lbl_file.stem)
+                    if not m:
+                        continue
+                    
+                    orig_num_str   = m.group(1)
+                    digits_len     = 7
+                    base_digit_len = len(orig_num_str)
+                    frame_idx      = int(orig_num_str) - 1
+                    frame_num      = f"{frame_idx:0{digits_len}d}"
+                    base_name      = f"{video_name}_{frame_idx:0{base_digit_len}d}"
+
+                    img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
+                    img_path = img_dir / f"{frame_num}.jpg"
+
+                    pair_list.append((lbl_file, img_path, base_name))
+
+        if not pair_list:
+            QMessageBox.warning(self, "Error", "Could not find label-image pair.")
             return
 
-        image_files = [f for f in os.listdir(self.image_dir) if f.lower().endswith(('.jpg', '.png'))]
-        label_files = [f for f in os.listdir(self.label_dir) if f.endswith('.txt')]
+        random.shuffle(pair_list)
 
-        image_basenames = set(os.path.splitext(f)[0] for f in image_files)
-        label_basenames = set(os.path.splitext(f)[0] for f in label_files)
+        train_ratio = self.train_spin.value() / 100.0
+        val_ratio   = self.valid_spin.value() / 100.0
 
-        valid_basenames = list(image_basenames & label_basenames)
+        total = len(pair_list)
+        train_end = int(total * train_ratio)
+        val_end   = train_end + int(total * val_ratio)
 
-        if not valid_basenames:
-            QMessageBox.warning(self, "Error", "No matching image-label pairs found.")
-            return
-
-        random.shuffle(valid_basenames)
-
-        train_ratio = self.train_spin.value() / 100
-        valid_ratio = self.valid_spin.value() / 100
-
-        total = len(valid_basenames)
-        train_count = int(total * train_ratio)
-        valid_count = int(total * valid_ratio)
-
-        train_names = valid_basenames[:train_count]
-        valid_names = valid_basenames[train_count:train_count+valid_count]
-        test_names = valid_basenames[train_count+valid_count:]
-
-        split_sets = {
-            'train': train_names,
-            'valid': valid_names,
-            'test': test_names
+        split_map = {
+            "train": pair_list[:train_end],
+            "val":   pair_list[train_end:val_end],
+            "test":  pair_list[val_end:],
         }
 
-        for split, names in split_sets.items():
-            img_dst = os.path.join(output_dir, split, 'images')
-            lbl_dst = os.path.join(output_dir, split, 'labels')
-            os.makedirs(img_dst, exist_ok=True)
-            os.makedirs(lbl_dst, exist_ok=True)
+        for split, pairs in split_map.items():
+            img_dst_root = dataset_dir / split / "images"
+            lbl_dst_root = dataset_dir / split / "labels"
 
-            for name in names:
-                for ext in ['.jpg', '.png']:
-                    img_path = os.path.join(self.image_dir, name + ext)
-                    if os.path.exists(img_path):
-                        shutil.copy(img_path, os.path.join(img_dst, name + ext))
-                        break  
-                    
-                label_path = os.path.join(self.label_dir, name + '.txt')
-                shutil.copy(label_path, os.path.join(lbl_dst, name + '.txt'))
+            for lbl_path, img_path, base in pairs:
+                print(lbl_path, img_path, base, base_digit_len)
+                shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
+                img_ext = img_path.suffix.lower()
+                shutil.copy(img_path, img_dst_root / f"{base}{img_ext}")
 
-        QMessageBox.information(self, "Success",
-                                f"✅ Data Split complete!\nTrain: {len(train_names)}\nValid: {len(valid_names)}\nTest: {len(test_names)}")
+        QMessageBox.information(
+            self,
+            "Success",
+            (f"Data Split completed\n"
+            f"Train: {len(split_map['train'])}\n"
+            f"Val:   {len(split_map['val'])}\n"
+            f"Test:  {len(split_map['test'])}")
+        )

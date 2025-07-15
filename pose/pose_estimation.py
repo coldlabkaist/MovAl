@@ -1,12 +1,13 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel
-from pose.prepare_data import PrepareDataDialog
+from pose.prepare_data import DataSplitDialog
 from pose.yolo_use import YOLODialog, YoloInferenceDialog
 
 class PoseEstimationDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Pose Estimation Options")
         self.setFixedSize(350, 220)
+        self.current_project = current_project
 
         layout = QVBoxLayout()
 
@@ -33,13 +34,13 @@ class PoseEstimationDialog(QDialog):
         self.setLayout(layout)
 
     def open_prepare_data(self):
-        dialog = PrepareDataDialog(self)
+        dialog = DataSplitDialog(self.current_project, self)
         dialog.exec()
 
     def train_yolo(self):
-        dialog = YOLODialog(self)
+        dialog = YOLODialog(self.current_project, self)
         dialog.exec()
         
     def pose_estimation(self):
-        dialog = YoloInferenceDialog(self)
+        dialog = YoloInferenceDialog(self.current_project, self)
         dialog.exec()

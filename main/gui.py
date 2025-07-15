@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)  # (Plain/Sunken/Raised)
+        line.setFrameShadow(QFrame.Shadow.Sunken) 
         line.setFixedHeight(2)
         outer_layout.addSpacing(5)
         outer_layout.addWidget(line)
@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
         self.setup_buttons()
 
         # TODO : remove -------------------------------------------------------------
-        path = r"example\test_config_0713\config.yaml"
+        path = r"C:\cold_yj\1.dev\moval_test\yolo_test\config.yaml"
         self.current_project = ProjectInformation.from_yaml(path)
         self.controller.current_project = self.current_project
         self.proj_name.setText(self.current_project.title or Path(path).stem)

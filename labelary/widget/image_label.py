@@ -118,7 +118,7 @@ class ClickableImageLabel(QLabel):
             if not pts:
                 continue
 
-            edge_pen = QPen(self._skeleton_color(track), 1.5)
+            edge_pen = QPen(self._skeleton_color(track), 2)
             edge_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             edge_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             painter.setPen(edge_pen)

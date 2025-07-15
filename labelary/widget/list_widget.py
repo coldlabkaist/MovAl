@@ -158,9 +158,6 @@ class KeypointListWidget(QListWidget):
             if track_item:
                 track_item.setBackground(_background_color_track(track_idx))
 
-            """self.setCurrentRow(row)
-            self.scrollToItem(track_item)"""
-
     def update_list_visibility(self, coords: dict[str, dict[str, tuple]]):
         for (tr, kp), item in self._item_map.items():
             if kp in coords.get(tr, {}):

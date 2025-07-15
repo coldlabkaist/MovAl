@@ -35,7 +35,7 @@ class PipelineController:
         run_labelary_with_project(self.current_project)
 
     def run_pose_estimation(self):
-        dialog = PoseEstimationDialog()
+        dialog = PoseEstimationDialog(current_project = self.current_project)
         dialog.exec()
 
     def data_convert(self):

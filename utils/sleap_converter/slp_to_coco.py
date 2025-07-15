@@ -274,7 +274,7 @@ class SlpToCocoOptionsGUI(QWidget):
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
 
-        QMessageBox.information(self, "Done", f"✅ JSON save complete: {save_path}")
+        QMessageBox.information(self, "Done", f"JSON save complete: {save_path}")
     
     def extract_images(self):
         output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory")

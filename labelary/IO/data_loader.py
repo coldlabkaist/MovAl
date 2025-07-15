@@ -92,8 +92,6 @@ class DataLoader:
         if cls.img_width is None or cls.img_height is None:
             print("⚠️ 해상도 정보 없음 → 정규화 건너뜀")
             return
-
-        # kp_order 가 비어 있으면 즉석에서 추출
         if not cls.kp_order:
             cls.kp_order = [c[:-2] for c in cls.loaded_data.columns if c.endswith(".x")]
 
@@ -151,7 +149,6 @@ class DataLoader:
             print(f"DataLoader.update_kpt_visibility: Column {col_v} not found.")
             return
         cls.loaded_data.loc[mask, col_v] = visibility
-        #print(f"Updated {col_v} to {cls.loaded_data.loc[mask, col_v]} (track={track}, frame={frame_idx})")
         return cls.loaded_data.loc[mask]
 
     @classmethod
@@ -168,7 +165,6 @@ class DataLoader:
             print(f"DataLoader.update_point: Columns {col_x} or {col_y} not found.")
             return
         cls.loaded_data.loc[mask, [col_x, col_y]] = [norm_x, norm_y]
-        #print(f"Updated {col_x}, {col_y} to ({cls.loaded_data.loc[mask, [col_x, col_y]]})")
         return cls.loaded_data.loc[mask]
 
     ### Modify Label ###
@@ -202,7 +198,7 @@ class DataLoader:
 
         frame_df = cls.loaded_data[cls.loaded_data["frame.idx"] == frame_idx]
         if frame_df["track"].nunique() >= getattr(cls, "max_animals", 1):
-            print("⚠️ Cannot add new skeleton: maximum instances reached for this frame.")
+            print("Cannot add new skeleton: maximum instances reached for this frame.")
             return False
 
         if ((cls.loaded_data["track"] == track_name) &
@@ -256,13 +252,10 @@ class DataLoader:
         except Exception as e:
             print(f"❌ Failed to add new skeleton row: {e}")
             return False
-
         if not cls.loaded_data.empty:
             cls.loaded_data = (cls.loaded_data
                                .set_index(["frame.idx", "track"], drop=False)
                                .sort_index())
-
-        print(f"✅ Added new skeleton for {track_name} at frame {frame_idx}")
         return True
 
     @classmethod
@@ -462,11 +455,11 @@ class DataLoader:
                 cls.loaded_data = df
                 cls._coords_normalized = True
 
-            print(f"✅ Loaded: {origin}")
+            print(f"Loaded: {origin}")
             return True
 
         except Exception as e:
-            print(f"❌ Failed to load data: {e}")
+            print(f"Failed to load data: {e}")
             return False
             
     @classmethod

@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from utils import __version__
+from utils.skeleton import SkeletonModel
 
 class _FileListWidget(QListWidget):
 
@@ -99,7 +100,7 @@ class ProjectManagerDialog(QDialog):
 
         self.step1_label = QLabel("<b>Step&nbsp;1.</b> Set number of animal")
         self.step1_spin = QSpinBox()
-        self.step1_spin.setRange(1, 15) # Note : Change the range to work on projects with more than 15 animals
+        self.step1_spin.setRange(1, 16) # Note : Change the range to work on projects with more than 15 animals
         self.step1_spin.setValue(2)
         col1.addWidget(self.step1_label)
         col1.addWidget(self.step1_spin)
@@ -316,7 +317,7 @@ class ProjectManagerDialog(QDialog):
     def _create_project(self):
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "No files",
-                                "Please add at least one video / txt / csv file.")
+                                "Please add at least one video file.")
             return
 
         instance_names = [
@@ -353,7 +354,7 @@ class ProjectManagerDialog(QDialog):
 
         subdirs = [
             "frames", "labels", 
-            "runs", "raw_videos", "outputs"
+            "runs", "raw_videos", "outputs", "prediction"
         ]
         for sd in subdirs:
             _ensure_dir(os.path.join(proj_dir, sd))
@@ -363,6 +364,7 @@ class ProjectManagerDialog(QDialog):
         project_files: list[dict] = []
         current_vid: dict | None = None
         errors: list[str] = []
+        video_stems: set[str] = set()
 
         for i in range(self.file_list.count()):
             item = self.file_list.item(i)
@@ -376,6 +378,24 @@ class ProjectManagerDialog(QDialog):
                 continue
 
             if ftype == "vid":
+                stem = Path(path_str).stem
+                if stem in video_stems:
+                    QMessageBox.warning(
+                        self,
+                        "Duplicate video name",
+                        f"The video name “{stem}” is used more than once.\n"
+                        "Please ensure all video filenames (without extension) are unique."
+                    )
+                    try:
+                        shutil.rmtree(proj_dir)
+                        QMessageBox.information(self, "Deleted",
+                                                "Project folder and all contents have been removed.")
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error",
+                                            f"Failed to delete project folder:\n{e}")
+                    return
+                video_stems.add(stem)
+                
                 if copy_videos:
                     path_str = _safe_copy(path_str, os.path.join(proj_dir, "raw_videos"))
                 current_vid = {"video": path_str, "csv": [], "txt": []}
@@ -411,7 +431,33 @@ class ProjectManagerDialog(QDialog):
             with open(project_config_path, "w", encoding="utf-8") as f:
                 yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save YAML:\n{e}")
+            QMessageBox.critical(self, "Error", f"Failed to save project YAML:\n{e}")
+            return
+
+        training_config_path = os.path.join(proj_dir, "runs", "traing_config.yaml")
+        training_base_dir = os.path.join(proj_dir, "runs", "dataset")
+        _ensure_dir(training_base_dir)
+        skeleton_model_dir = os.path.join(os.getcwd(), "preset", "skeleton", self.step4_combo.currentText())
+        skeleton_model = SkeletonModel()
+        skeleton_model.load_from_yaml(skeleton_model_dir)
+        nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
+        print(training_base_dir)
+        config = {
+            "train_dir": os.path.join(training_base_dir, "train"),
+            "val_dir": os.path.join(training_base_dir, "valid"),
+            "test_dir": os.path.join(training_base_dir, "test"),
+            "nc": 3,
+            "names": {i: n for i, n in enumerate(instance_names)},
+            "nkpt": nkpt,
+            "kpt_shape": [nkpt, 3],
+            "flip_idx" : flip_idx, 
+            "kpt_names" : kpt_names
+        }
+        try:
+            with open(training_config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save training YAML:\n{e}")
             return
 
         if errors:

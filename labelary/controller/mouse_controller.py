@@ -12,12 +12,10 @@ class MouseController(QObject):
         self.track_list = video_viewer.current_project.animals_name
         self.max_animals = video_viewer.current_project.num_animals
 
-        # Internal state
         self._dragging = False
         self._last_pos = QPoint()
         self.enable_control = True
 
-        # Selection state: currently selected instance (track) and node (track, keypoint)
         self.selected_instance: str | None = None
         self.selected_node: tuple[str, str] | None = None
         self.new_selection = False
@@ -54,32 +52,22 @@ class MouseController(QObject):
         pos = e.pos()
         # ---------- right click ----------
         if e.button() == Qt.MouseButton.RightButton:
-
-            # Determine click target on right-click (for context menu)
             target_track = None
             target_kp = None
-            # Check if clicked near a node
             near = self._nearest_csv_kp(pos)
             if near:
                 target_track, target_kp = near
             else:
-                # If not near a node, check if inside any instance bounding box
                 target_track = self._instance_at_point(pos)
 
-            # Update selection based on right-click position
             if target_track is not None:
-                # If clicked on a node
                 if target_kp is not None:
-                    # Select that node and its instance
                     self.selected_instance = target_track
                     self.selected_node = (target_track, target_kp)
                 else:
-                    # Clicked on instance (bounding box) with no specific node
                     self.selected_instance = target_track
                     self.selected_node = None
-                # If right-clicked on background (no target), do not change selection
             else:
-                # Clicked on instance (bounding box) with no specific node
                 self.selected_instance = None
                 self.selected_node = None
             self.video_viewer.update()
@@ -89,7 +77,6 @@ class MouseController(QObject):
 
         # ---------- left click ----------
         if e.button() == Qt.MouseButton.LeftButton:
-            # Determine click classification for left-click
             near = self._nearest_csv_kp(pos)
             inside_track = None
             if near:
@@ -98,34 +85,24 @@ class MouseController(QObject):
             else:
                 inside_track = self._instance_at_point(pos)
 
-            # Drag priority: if something is selected and click is within that selection
             if self.selected_instance is not None and inside_track == self.selected_instance:
-                # If near a node of the selected instance
                 if near and near[0] == self.selected_instance:
-                    # Select that node (could be same or another node of the instance)
                     track, kp = near
                     self.selected_instance = track
                     self.selected_node = (track, kp)
                     self._dragging = True
                     self.video_viewer.dragging_target = ("csv", track, kp)
-                # If click inside selected instance's box but not near any node
                 if not near:
-                    # Deselect any specific node, keep instance selected
                     self.selected_node = None
-                    # Start dragging the whole instance
                     track = self.selected_instance
                     self._dragging = True
                     self.video_viewer.dragging_target = ("instance", track)
-                    # Store last position for instance dragging
                     self._last_pos = pos
                 self.video_viewer.update()
                 self._sync_list_selection()
                 return True
-            # If not clicking within the currently selected target, proceed with normal classification
             if near:
-                # Click on a node (not necessarily of previously selected instance)
                 track, kp = near
-                # Update selection to this node and instance
                 self.selected_instance = track
                 self.selected_node = (track, kp)
                 self._dragging = True
@@ -134,12 +111,9 @@ class MouseController(QObject):
                 self._sync_list_selection()
                 return True
             if inside_track is not None:
-                # Click inside an instance bounding box (no node nearby)
                 track = inside_track
-                # Update selection to this instance (no specific node)
                 self.selected_instance = track
                 self.selected_node = None
-                # Start dragging the entire instance
                 self._dragging = True
                 self.video_viewer.dragging_target = ("instance", track)
                 self._last_pos = pos
@@ -147,14 +121,11 @@ class MouseController(QObject):
                 self._sync_list_selection()
                 return True
 
-            # Click on background (no node or instance hit)
-            # Clear any existing selection
             if self.selected_instance is not None or self.selected_node is not None:
                 self.selected_instance = None
                 self.selected_node = None
                 self.video_viewer.update()
                 self._sync_list_selection()
-            # Start panning the background
             self._dragging = True
             self.video_viewer.dragging_target = None
             self._last_pos = pos
@@ -168,9 +139,7 @@ class MouseController(QObject):
         pos = e.pos()
         act = self.video_viewer.base_scale * self.video_viewer.current_scale
 
-        # Pan the view if dragging background (dragging_target is None)
         if self.video_viewer.dragging_target is None:
-            # Compute translation delta
             delta = pos - self._last_pos
             new_tx = self.video_viewer.translation.x() + delta.x()
             new_ty = self.video_viewer.translation.y() + delta.y()
@@ -181,36 +150,28 @@ class MouseController(QObject):
         elif self.video_viewer.dragging_target:
             kind = self.video_viewer.dragging_target[0]
             if kind == "csv":
-                # Dragging a single keypoint (node)
                 _, track, kp = self.video_viewer.dragging_target
                 nx = (pos.x() - self.video_viewer.translation.x()) / (act * self.video_viewer.original_pixmap.width())
                 ny = (pos.y() - self.video_viewer.translation.y()) / (act * self.video_viewer.original_pixmap.height())
-                # Clamp coordinates between 0 and 1
                 nx = max(0.0, min(nx, 1.0))
                 ny = max(0.0, min(ny, 1.0))
                 self.video_viewer.csv_points[track][kp] = (nx, ny, self.video_viewer.csv_points[track][kp][2])
             elif kind == "instance":
-                # Dragging an entire instance (move all keypoints)
                 _, track = self.video_viewer.dragging_target
-                # Calculate movement delta in normalized coordinates
                 dx_norm = (pos.x() - self._last_pos.x()) / (act * self.video_viewer.original_pixmap.width())
                 dy_norm = (pos.y() - self._last_pos.y()) / (act * self.video_viewer.original_pixmap.height())
-                # Update all keypoints for this track
+                
                 for kp, (nx, ny, vis) in self.video_viewer.csv_points.get(track, {}).items():
                     nx_new = max(0.0, min(nx + dx_norm, 1.0))
                     ny_new = max(0.0, min(ny + dy_norm, 1.0))
                     self.video_viewer.csv_points[track][kp] = (nx_new, ny_new, vis)
-                # Update last position for next move delta
                 self._last_pos = pos
             elif kind == "click":
-                # Dragging a miscellaneous clicked point (not part of csv data)
                 _, idx = self.video_viewer.dragging_target
                 nx = (pos.x() - self.video_viewer.translation.x()) / act
                 ny = (pos.y() - self.video_viewer.translation.y()) / act
                 self.video_viewer.clicked_points[idx] = (nx, ny)
 
-        # Redraw after movement
-        #self.video_viewer._updateTransformed()
         self.video_viewer.update()
         return True
 
@@ -218,73 +179,50 @@ class MouseController(QObject):
         if not self._dragging:
             return False
 
-        # Finalize dragging operations
         if self.video_viewer.dragging_target:
             kind = self.video_viewer.dragging_target[0]
             frame_idx = getattr(self.video_viewer, "current_frame", 0) + 1
             if kind == "csv":
-                # Commit single keypoint position to data
                 _, track, kp = self.video_viewer.dragging_target
                 nx, ny, _ = self.video_viewer.csv_points[track][kp]
                 DataLoader.update_point(track, frame_idx, kp, nx, ny)
             elif kind == "instance":
-                # Commit all moved keypoints of the instance to data
                 _, track = self.video_viewer.dragging_target
                 if track in self.video_viewer.csv_points:
                     for kp, (nx, ny, _) in self.video_viewer.csv_points[track].items():
                         DataLoader.update_point(track, frame_idx, kp, nx, ny)
-            # No commit needed for "click" points as they are not part of DataLoader
 
-        # Reset dragging state
         self._dragging = False
         self.video_viewer.dragging_target = None
         return True
 
     def _wheel(self, e: QWheelEvent) -> bool:
-        """
-        확대·축소용 휠 이벤트 핸들러 (MouseController 전용 개정판).
-
-        • 확대/축소 범위 : current_scale ∈ [1.0, 10.0]
-        • 커서 아래 지점 고정
-        • 이미지가 화면보다 작아질 때는 자동 센터링
-        """
-        # 1) 이미지가 없는 경우 처리 생략
         if not self.video_viewer.original_pixmap:
             return False
 
-        # 2) 위젯 좌표계에서의 커서 위치
         cursor_pos = e.position().toPoint()
-
-        # 3) 현재 전체 배율 (base_scale × current_scale)
         old_act = self.video_viewer.base_scale * self.video_viewer.current_scale
 
-        # 4) 커서가 가리키는 (원본 이미지 기준) 정규화 좌표 [0 ~ 1]
         img_rel_x = (cursor_pos.x() - self.video_viewer.translation.x()) / (old_act * self.video_viewer.original_pixmap.width())
         img_rel_y = (cursor_pos.y() - self.video_viewer.translation.y()) / (old_act * self.video_viewer.original_pixmap.height())
 
-        # 5) 스케일 변화량 계산 (각도 델타 ↔ 픽셀 델타 모두 지원)
         delta = e.angleDelta().y() or e.pixelDelta().y()
         factor = 1.1 if delta > 0 else 0.9
 
         new_scale = max(1.0, min(self.video_viewer.current_scale * factor, 10.0))
-        if new_scale == self.video_viewer.current_scale:        # 변경 없으면 즉시 종료
+        if new_scale == self.video_viewer.current_scale: 
             return False
 
-        # 6) 스케일 반영 후 변환된 Pixmap 갱신
         self.video_viewer.current_scale = new_scale
-        self.video_viewer._updateTransformed()                  # → transformed_pixmap 크기 갱신
+        self.video_viewer._updateTransformed()
 
         new_pw = self.video_viewer.transformed_pixmap.width()
         new_ph = self.video_viewer.transformed_pixmap.height()
 
-        # 7) “커서 고정”을 위한 새 translation 계산
         new_tx = cursor_pos.x() - img_rel_x * new_pw
         new_ty = cursor_pos.y() - img_rel_y * new_ph
-
-        # 8) 화면 밖으로 나가지 않도록 클램핑
         new_tx, new_ty = self._get_clamped_translation(new_tx, new_ty)
 
-        # 9) 상태 반영 및 화면 갱신
         self.video_viewer.translation = QPoint(int(new_tx), int(new_ty))
         self.video_viewer.update()
         return True
@@ -297,10 +235,8 @@ class MouseController(QObject):
             self._active_menu.deleteLater()
             self._active_menu = None
 
-        print("show context")
-
         pos = e.pos()
-        self.video_viewer._context_click_pos = pos  # store click position for anchor (if needed by add_new_instance)
+        self.video_viewer._context_click_pos = pos 
         menu = QMenu(self.video_viewer)
         self._active_menu = menu
 
@@ -344,7 +280,6 @@ class MouseController(QObject):
         return True
 
     def _nearest_csv_kp(self, pos: QPoint, thresh: int = 30) -> tuple[str, str] | None:
-        """Find the nearest keypoint (node) within `thresh` pixels of the given position."""
         act = self.video_viewer.base_scale * self.video_viewer.current_scale
         ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
         oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
@@ -353,7 +288,6 @@ class MouseController(QObject):
         best_d = thresh + 1
         for track, pts in self.video_viewer.csv_points.items():
             for kp, (nx, ny, vis) in pts.items():
-                # Convert normalized coordinates to widget coordinates
                 px = nx * ow * act + self.video_viewer.translation.x()
                 py = ny * oh * act + self.video_viewer.translation.y()
                 d = (pos - QPoint(int(px), int(py))).manhattanLength()
@@ -363,20 +297,17 @@ class MouseController(QObject):
         return best if best_d <= thresh else None
 
     def _instance_at_point(self, pos: QPoint) -> str | None:
-        """Return the track of the instance whose bounding box contains the position (if any)."""
         act = self.video_viewer.base_scale * self.video_viewer.current_scale
         ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
         oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
 
         for track, pts in self.video_viewer.csv_points.items():
-            if not pts:  # skip tracks with no points in current frame
+            if not pts:
                 continue
-            # Compute bounding box of all keypoints for this track
             min_x = min(nx * ow * act + self.video_viewer.translation.x() for nx, ny, vis in pts.values())
             max_x = max(nx * ow * act + self.video_viewer.translation.x() for nx, ny, vis in pts.values())
             min_y = min(ny * oh * act + self.video_viewer.translation.y() for nx, ny, vis in pts.values())
             max_y = max(ny * oh * act + self.video_viewer.translation.y() for nx, ny, vis in pts.values())
-            # Check if pos lies within this bounding box
             if min_x <= pos.x() <= max_x and min_y <= pos.y() <= max_y:
                 return track
         return None
@@ -389,7 +320,6 @@ class MouseController(QObject):
         if pw >= vw:
             min_x, max_x = vw - pw, 0
         else:
-            # Image smaller than view; center it
             min_x = max_x = (vw - pw) // 2
         if ph >= vh:
             min_y, max_y = vh - ph, 0
@@ -442,13 +372,18 @@ class MouseController(QObject):
         success = DataLoader.delete_instance(frame_idx, track)
         if not success:
             return
-        # Refresh the displayed points for the current frame
         coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
         self.video_viewer.setCSVPoints(coords)
         self.kpt_list.update_list_visibility(coords)
-        # Clear selection since instance is deleted
         self.selected_instance = None
         self.selected_node = None
+
+    def _change_instance_number_by_idx(self, idx):
+        if idx >= len(self.track_list):
+            return
+        if self.selected_instance == self.track_list[idx]:
+            return
+        self._change_instance_number(self.track_list[idx])
 
     def _change_instance_number(self, new_track: str):
         if self.selected_instance is None:

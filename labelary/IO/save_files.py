@@ -107,7 +107,7 @@ def save_modified_data(parent: QWidget):
 
         try:
             df_to_save.to_csv(csv_path, index=False)
-            QMessageBox.information(parent, "Success", f"✅ CSV Saved!:\n{csv_path}")
+            QMessageBox.information(parent, "Success", f"CSV Saved!:\n{csv_path}")
             modify_yaml(video_path, "csv", csv_path, config_path, project_info)
         except Exception as e:
             QMessageBox.critical(parent, "Error", f"Failed to save CSV:\n{e}")
@@ -131,7 +131,7 @@ def save_modified_data(parent: QWidget):
 
         try:
             _export_txt_files(txt_dir, df_orig)
-            QMessageBox.information(parent, "Success", f"✅ TXT Exported:\n{txt_dir}")
+            QMessageBox.information(parent, "Success", f"TXT Exported:\n{txt_dir}")
             modify_yaml(video_path, "txt", txt_dir, config_path, project_info)
         except Exception as e:
             QMessageBox.critical(parent, "Error", f"Failed to export TXT:\n{e}")
@@ -216,13 +216,16 @@ def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
 
     max_f = int(df["frame.idx"].max())
     pad = max(2, len(str(max_f)))
+    track_mapping = {name: i for i, name in enumerate(DataLoader.animals_name)}
 
     def _track_num(t) -> int:
-        m = re.search(r"(\d+)$", str(t))
-        return int(m.group(1)) if m else 0
+        return track_mapping.get(str(t), 0)
 
     for f_idx in sorted(df["frame.idx"].unique()):
-        f_df = df[df["frame.idx"] == f_idx].sort_values("track", key=lambda s: s.map(_track_num))
+        f_df = df[df["frame.idx"] == f_idx].sort_values(
+            "track",
+            key=lambda s: s.map(_track_num)
+        )
         lines: list[str] = []
 
         for _, row in f_df.iterrows():
@@ -245,5 +248,5 @@ def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
         out = target_dir / f"{f_idx:0{pad}d}.txt"
         out.write_text("\n".join(lines), encoding="utf-8")
 
-    print(f"✅ TXT files saved to {target_dir}")
+    print(f"TXT files saved to {target_dir}")
 

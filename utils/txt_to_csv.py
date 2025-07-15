@@ -167,7 +167,6 @@ class TxtToCsvDialog(QDialog):
                     track_id = int(items[0])
                     raw = items[5:]
 
-                    # instance_id 포함 여부 검사
                     if len(raw) % 3 == 1:
                         try:
                             instance_id = int(raw[-1])
@@ -211,7 +210,7 @@ class TxtToCsvDialog(QDialog):
             df = pd.DataFrame(rows, columns=columns)
             save_path = os.path.join(output_dir, f"{video_name}.csv")
             df.to_csv(save_path, index=False)
-            print(f"✅ Saved: {save_path}")
+            print(f"Saved: {save_path}")
 
 
     def convert_csv_pixel(self):
@@ -303,6 +302,6 @@ class TxtToCsvDialog(QDialog):
             df = pd.DataFrame(rows, columns=columns)
             save_path = os.path.join(output_dir, f"{video_name}.csv")
             df.to_csv(save_path, index=False)
-            print(f"✅ Saved: {save_path}")
+            print(f"Saved: {save_path}")
 
 

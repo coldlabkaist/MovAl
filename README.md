@@ -7,23 +7,23 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 ![그림2](https://github.com/user-attachments/assets/c5652ecb-3ee8-402a-8a71-4e1059db3ea8)
 ![그림3](https://github.com/user-attachments/assets/c4d4b78c-3bfe-4d05-8835-f48ba638381d)
 
-[🔗 See more tracking results!](https://github.com/coldlabkaist/MovAl/tutorial/Tracking_Result.md)
+[🔗 See more tracking results!](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Tracking_Result.md)
 
 ## Requirement
 - CUDA 11.8 or 12.1
 - We recommend using Conda for setting up the environment.
 
 ### Installation Tutorial
-[0. Installation](https://github.com/coldlabkaist/MovAl/tutorial/0_Installation.md)
+[0. Installation](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/0_Installation.md)
 
 ### Tutorial on using the MovAl
-[1. Create Project](https://github.com/coldlabkaist/MovAl/tutorial/1_Create_Project.md)
+[1. Create Project](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/1_Create_Project.md)
 
-[2. Preprocess](https://github.com/coldlabkaist/MovAl/tutorial/2_Preprocess.md)
+[2. Preprocess](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/2_Preprocess.md)
 
-[3. Labelary](https://github.com/coldlabkaist/MovAl/tutorial/3_Labelary.md)
+[3. Labelary](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/3_Labelary.md)
 
-[4. Pose Estimation](https://github.com/coldlabkaist/MovAl/tutorial/4_Pose_Estimation.md)
+[4. Pose Estimation](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/4_Pose_Estimation.md)
 
 
 ## Liscense

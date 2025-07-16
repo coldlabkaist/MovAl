@@ -1,8 +1,8 @@
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QColor, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import (
-    QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
-    QSlider, QListWidget, QFrame, QApplication, QDialog, QListWidgetItem, QTreeWidget,
+    QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QFileDialog,
+    QSlider, QListWidget, QFrame, QApplication, QDialog, QListWidgetItem, QTreeWidget, QMessageBox,
     QColorDialog, QGridLayout, QTreeWidgetItem, QComboBox, QHeaderView, QStyledItemDelegate,
 )
 from .gui import UI_LabelaryDialog
@@ -104,8 +104,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         for txt_path in file_entry.txt:
             p = Path(txt_path)
             self.label_combo.addItem(p.name, p)
-        self.label_combo.addItem("Create new label", "Create new label")
         self.label_combo.addItem("Load inference result", "Load inference result")
+        self.label_combo.addItem("Create new label", "Create new label")
 
         if set_text:
             target_stem = Path(set_text).stem
@@ -136,7 +136,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             dir_path = QFileDialog.getExistingDirectory(
                 self,
                 "Select inference result directory",
-                str(self.current_project.project_dir)
+                str(self.project.project_dir)
             )
             if not dir_path:
                 return

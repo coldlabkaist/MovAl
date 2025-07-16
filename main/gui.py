@@ -77,12 +77,6 @@ class MainWindow(QMainWindow):
         
         self.setup_buttons()
 
-        # TODO : remove -------------------------------------------------------------
-        path = r"C:\cold_yj\1.dev\moval_test\yolo_test\config.yaml"
-        self.current_project = ProjectInformation.from_yaml(path)
-        self.controller.current_project = self.current_project
-        self.proj_name.setText(self.current_project.title or Path(path).stem)
-
     def setup_buttons(self):
         installation_label = QLabel("Installation (Cutie / YOLO)")
         installation_label.setStyleSheet("margin-top: 10px;")
@@ -171,4 +165,4 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Load Error", str(e))
 
         if __version__ != self.current_project.moval_version:
-            warning.warn("This project was created in a previous version of moval. The files may not be compatible.", UserWarning)
+            warnings.warn("This project was created in a previous version of moval. The files may not be compatible.", UserWarning)

@@ -34,7 +34,7 @@ class OneClickInstallDialog(QDialog):
                 QMessageBox.StandardButton.No,
             )
             if ans == QMessageBox.StandardButton.No:
-                self.log_view.append("Cutie Reinstallation skipped by user.")
+                self.log_view.append("Cutie directory reinstallation skipped by user.")
             else:
                 force_reinstall_cutie = True
 
@@ -50,7 +50,7 @@ class OneClickInstallDialog(QDialog):
                 QMessageBox.StandardButton.No,
             )
             if ans == QMessageBox.StandardButton.No:
-                self.log_view.append("YOLO reinstallation skipped by user.")
+                self.log_view.append("YOLO model reinstallation skipped by user.")
             else:
                 force_reinstall_yolo = True
 
@@ -138,8 +138,7 @@ class OneClickWorker(QThread):
                                self.cutie_url, self.cutie_dir])
 
     def pip_install_cutie(self):
-        if self.force_reinstall_cutie:
-            subprocess.check_call([self.python, "-m", "pip", "install", "-e", self.cutie_dir])
+        subprocess.check_call([self.python, "-m", "pip", "install", "-e", self.cutie_dir])
 
     def download_models_cutie(self):
         if self.force_reinstall_cutie:
@@ -147,7 +146,7 @@ class OneClickWorker(QThread):
             subprocess.check_call([self.python, script])
 
     def pip_install_ultralytics(self):
-        subprocess.check_call([self.python, "-m", "pip", "install", "-U", "ultralytics"])
+        subprocess.check_call([self.python, "-m", "pip", "install", "ultralytics"])
 
     def download_models_yolo(self):
         if os.path.isdir(self.yolo_model_dir):

@@ -90,7 +90,7 @@ class SkeletonModel:
         if key in self.syms:
             self.syms.remove(key)
 
-    def save_to_yaml(self, filepath): # TODO
+    def save_to_yaml(self, filepath):
         import yaml
         data = {"nodes": [], "connections": [], "symmetry": []}
         node_names = []

@@ -309,7 +309,6 @@ class ProjectManagerDialog(QDialog):
         self.file_list.clear()
 
     def check_path_validity(self, path: str):
-        # TODO
         ok = True
         err_msg = None
         return ok, err_msg
@@ -445,7 +444,7 @@ class ProjectManagerDialog(QDialog):
             "train": os.path.join(training_base_dir, "train"),
             "val": os.path.join(training_base_dir, "val"),
             "test": os.path.join(training_base_dir, "test"),
-            "nc": 3,
+            "nc": len(instance_names),
             "names": {i: n for i, n in enumerate(instance_names)},
             "nkpt": nkpt,
             "kpt_shape": [nkpt, 3],

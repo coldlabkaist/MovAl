@@ -187,7 +187,7 @@ class YOLODialog(QDialog):
         ts_date = ts.strftime("%y%m%d")
         ts_time = ts.strftime("%H%M%S")
         params["project"] = os.path.join(self.current_project.project_dir, "runs")
-        params["name"]    = "train_{ts_date}_{ts_time}"
+        params["name"]    = f"train_{ts_date}_{ts_time}"
 
         command = "yolo pose train"
         for key, value in params.items():

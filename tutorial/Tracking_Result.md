@@ -1,4 +1,4 @@
-
+---
 ## Two Mice
 ![tracking_2mice_compressed](https://github.com/user-attachments/assets/28148e30-8927-42da-b994-c2b7c24dd382)
 
@@ -24,4 +24,6 @@ https://drive.google.com/file/d/1ahJXcH17DAhvkxs9JZk4Nzwoys1mMMSK/view?usp=shari
 
 ---
 ## Monkeys
+![tracking_monkey_compressed](https://github.com/user-attachments/assets/66d4a984-f832-448b-b0b4-37902f41e6c1)
+
 https://drive.google.com/file/d/1ka29XNFRDrnueT3pyZr-WC9v9Y54E3io/view?usp=sharing

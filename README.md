@@ -29,5 +29,5 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 ## Liscense
 MovAl basically follow the MIT license. We allows free use for academic/research purposes, but not for commercial purposes.
 We recommends using Cutie and YOLO as part of the pipeline. The usage rights for each part follow the license of each program. 
-- Cutie : https://github.com/hkchengrex/Cutie?tab=MIT-1-ov-file
+- Cutie : https://github.com/hkchengrex/Cutie
 - YOLO : https://www.ultralytics.com/

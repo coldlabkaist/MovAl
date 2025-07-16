@@ -14,14 +14,14 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 - We recommend using Conda for setting up the environment.
 
 ### Installation Tutorial
-[0. Installation](https://github.com/coldlabkaist/MovAl/tutorial/1_Installation)
+[0. Installation](https://github.com/coldlabkaist/MovAl/tutorial/0_Installation)
 
 ### Tutorial on using the MovAl
-[1. Create Project](https://github.com/coldlabkaist/MovAl/tutorial/2_Create_Project)
+[1. Create Project](https://github.com/coldlabkaist/MovAl/tutorial/1_Create_Project)
 
-[2. Preprocess](https://github.com/coldlabkaist/MovAl/tutorial/3_Preprocess)
+[2. Preprocess](https://github.com/coldlabkaist/MovAl/tutorial/2_Preprocess)
 
-[3. Labelary](https://github.com/coldlabkaist/MovAl/tutorial/4_Labelary)
+[3. Labelary](https://github.com/coldlabkaist/MovAl/tutorial/3_Labelary)
 
 [4. Pose Estimation](https://github.com/coldlabkaist/MovAl/tutorial/4_Pose_Estimation)
 

@@ -13,8 +13,8 @@ nvcc --version
 ```
 You must use CUDA 11.8 or 12.1 to install pytorch 1.2.1. 
 
-If you are unable to check the appropriate CUDA version using the above command even though you have installed the appropriate CUDA version, 
-consider setting the system environment variables through the computer settings or temporarily setting the environment variables using the command below.
+If the command still doesn’t detect the correct CUDA version, set the system environment variables 
+(System Properties → Environment Variables) or set them temporarily with the command below.
 ```bash
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8"  # for CUDA 11.8
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"  # for CUDA 12.1

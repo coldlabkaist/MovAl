@@ -26,6 +26,8 @@ First, create moval venv to avoid conflicts with other programs
 ```bash
 conda create -n moval python=3.9
 conda activate moval
+
+cd (folder to download MovAl)
 git clone https://github.com/coldlabkaist/MovAl-Move_Altogether.git
 ```
 Additionally, install the required dependencies, including PyTorch.
@@ -52,6 +54,7 @@ Click the One Click Install button in the Installation (Cutie/YOLO) tab to easil
 If your local MovAl version is outdated compared to the latest release version on github, you can see a message recommending an update when running the code. 
 You can simply update it using the following command
 ```bash
+cd (MovAl_folder)
 git pull
 ```
 

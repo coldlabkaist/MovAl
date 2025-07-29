@@ -61,3 +61,4 @@ git pull
 ---
 
 **Now you are ready to use MovAl.**
+Next step: [1. Create Project](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/1_Create_Project.md)

@@ -2,7 +2,7 @@
 
 ## Requirements
 - CUDA 11.8 or 12.1 (Both versions are compatible) 
-- Supports Windows environment (planned to support Linux environment)
+- Supports Windows 11 environment (planned to support Linux environment)
 - We recommend using Conda for setting up the environment.
 - numpy (>=1.23.0,<2.0) is required to operate Cutie.
 
@@ -48,6 +48,12 @@ python moval.py
 Click the One Click Install button in the Installation (Cutie/YOLO) tab to easily install dependencies and required models.
 <img width="558" height="263" alt="image" src="https://github.com/user-attachments/assets/803a8381-deb7-4c56-a3e0-f65798ba8333" />
 
+## 4. MovAl Update
+If your local MovAl version is outdated compared to the latest release version on github, you can see a message recommending an update when running the code. 
+You can simply update it using the following command
+```bash
+git pull
+```
 
 ---
 

@@ -25,7 +25,8 @@ class SkeletonScene(QGraphicsScene):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.mode == 'add_node':
-                if self.itemAt(event.scenePos(), QTransform()) is None:
+                item = self.itemAt(event.scenePos(), QTransform())
+                if item is None:
                     node = self.model.add_node()
                     pos    = event.scenePos()
                     
@@ -35,8 +36,20 @@ class SkeletonScene(QGraphicsScene):
                     
                     self.main_window.node_items[node.name] = node_item
                     self.main_window.add_node_to_list(node)
+                    self.clearSelection()
+                    node_item.setSelected(True)
                     event.accept()
                     return
+                if isinstance(item, NodeItem):
+                    if item.isSelected():
+                        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                            item.setSelected(False)
+                        else:
+                            pass
+                    else:
+                        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                            self.clearSelection()
+                        item.setSelected(True)
             elif self.mode == 'add_edge':
                 item = self.itemAt(event.scenePos(), QTransform())
                 if isinstance(item, NodeItem):
@@ -49,9 +62,28 @@ class SkeletonScene(QGraphicsScene):
                     self.temp_line_is = "Edge"
                     event.accept()
                     return
+                if isinstance(item, EdgeItem):
+                    if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        self.clearSelection()
+                    item.setSelected(True)
+                    event.accept()
+                    return
         if event.button() == Qt.MouseButton.RightButton:
+            item = self.itemAt(event.scenePos(), QTransform())
+            if self.mode == 'add_node':
+                if isinstance(item, NodeItem):
+                    if item.isSelected():
+                        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                            item.setSelected(False)
+                        else:
+                            pass
+                    else:
+                        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                            self.clearSelection()
+                        item.setSelected(True)
+                        event.accept()
+                        return
             if self.mode == 'add_edge':
-                item = self.itemAt(event.scenePos(), QTransform())
                 if isinstance(item, NodeItem):
                     self.temp_edge_start = item
                     self.temp_line = QGraphicsLineItem(QLineF(item.scenePos(), item.scenePos()))
@@ -61,6 +93,12 @@ class SkeletonScene(QGraphicsScene):
                     self.temp_line.setZValue(-1)
                     self.addItem(self.temp_line)
                     self.temp_line_is = "Sym"
+                    event.accept()
+                    return
+                if isinstance(item, EdgeItem):
+                    if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        self.clearSelection()
+                    item.setSelected(True)
                     event.accept()
                     return
         super().mousePressEvent(event)
@@ -126,20 +164,23 @@ class SkeletonScene(QGraphicsScene):
 
     def contextMenuEvent(self, event):
         if not self.selectedItems():
-            event.ignore()
             return
 
         menu = QMenu()
         rename_act = menu.addAction("Rename node")
         visual_act = menu.addAction("visuialization option")
         delete_act = menu.addAction("Delete selected")
+
+        sel_cnt = len(self.selectedItems())
+        rename_act.setEnabled(sel_cnt == 1)
+        visual_act.setEnabled(sel_cnt == 1)
+        delete_act.setEnabled(sel_cnt >= 1)
+
         act = menu.exec(event.screenPos())
 
         if act == rename_act:
-            if len(self.selectedItems()) == 1:
-                self.main_window._rename_selected_node()
+            self.main_window._rename_selected_node()
         elif act == visual_act:
-            if len(self.selectedItems()) == 1:
-                self.main_window._visualization_setting()
+            self.main_window._visualization_setting()
         elif act == delete_act:
             self.main_window._delete_selected_scene_items()

@@ -167,7 +167,6 @@ class SkeletonManagerDialog(QDialog):
 
     def _on_list_context_menu(self, pos):
         if not self.node_list.selectedItems():
-            event.ignore()
             return
 
         menu = QMenu(self)
@@ -175,14 +174,17 @@ class SkeletonManagerDialog(QDialog):
         visual_act = menu.addAction("visuialization option")
         delete_act = menu.addAction("Delete selected")
 
+        sel_cnt = len(self.node_list.selectedItems())
+        rename_act.setEnabled(sel_cnt == 1)
+        visual_act.setEnabled(sel_cnt == 1)
+        delete_act.setEnabled(sel_cnt >= 1)
+
         action = menu.exec(self.node_list.mapToGlobal(pos))
 
         if action == rename_act:
-            if len(self.node_list.selectedItems()) == 1:
-                self._rename_selected_node()
+            self._rename_selected_node()
         elif action == visual_act:
-            if len(self.selectedItems()) == 1:
-                self.main_window._visualization_setting()
+            self._visualization_setting()
         elif action == delete_act:
             self._delete_selected_nodes()
 

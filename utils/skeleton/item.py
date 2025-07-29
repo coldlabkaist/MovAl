@@ -92,12 +92,6 @@ class NodeItem(QGraphicsItem):
                 sym.update_line()
         return super().itemChange(change, value)
 
-    def mouseDoubleClickEvent(self, event):
-        if hasattr(self, 'openPropertiesCallback'):
-            self.openPropertiesCallback(self.node)
-        else:
-            super().mouseDoubleClickEvent(event)
-
 class EdgeItem(QGraphicsLineItem):
     def __init__(self, node1: NodeItem, node2: NodeItem):
         super().__init__()

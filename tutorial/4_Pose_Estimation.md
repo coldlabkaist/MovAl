@@ -63,4 +63,4 @@ reload the results in Labelary for editing.
 With these steps, you’ll be able to perform accurate body‑part detection using MovAl.
 
 For additional project management guidelines, please refer to the following document: 
-[MovAl Project Structure](https://github.com/coldlabkaist/MovAl/edit/main/tutorial/MovAl_Project_Structure)
+[MovAl Project Structure](https://github.com/coldlabkaist/MovAl/edit/main/tutorial/MovAl_Project_Structure.md)

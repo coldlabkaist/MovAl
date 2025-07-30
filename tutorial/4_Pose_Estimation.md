@@ -37,6 +37,8 @@ Click Train Model to configure YOLO training options and begin training.
 
 View training progress in the terminal. All training logs and model checkpoints are saved in your project’s runs folder.
 
+For detailed information, refer to the [YOLO documentation](https://docs.ultralytics.com/ko/modes/train/)
+
 ## Inference
 
 <img width="1588" height="688" alt="step4_5" src="https://github.com/user-attachments/assets/39d373eb-c2b2-46ce-9868-0512b732031f" />
@@ -58,9 +60,11 @@ Tip: Use the same mode you trained on to maximize accuracy.
 Watch inference progress in your terminal. To correct any inference errors or to acquire additional data via inference, 
 reload the results in Labelary for editing.
 
+For detailed information, refer to the [YOLO documentation](https://docs.ultralytics.com/ko/modes/predict/)
+
 ---
 
 With these steps, you’ll be able to perform accurate body‑part detection using MovAl.
 
 For additional project management guidelines, please refer to the following document: 
-[MovAl Project Structure](https://github.com/coldlabkaist/MovAl/edit/main/tutorial/MovAl_Project_Structure.md)
+[MovAl Project Structure](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/MovAl_Project_Structure.md)

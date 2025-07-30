@@ -55,7 +55,7 @@ If your local MovAl version is outdated compared to the latest release version o
 You can simply update it using the following command
 ```bash
 cd (MovAl_folder)
-git pull
+git pull --ff-only
 ```
 
 ---

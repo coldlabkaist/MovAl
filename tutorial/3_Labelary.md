@@ -41,4 +41,4 @@ When importing CSV/TXT data, select **Load Inference Result** to load YOLO outpu
 
 ---
 
-Now you’re ready for [Step 4: Pose Estimation](https://github.com/coldlabkaist/MovAl/edit/main/tutorial/4_Pose_Estimation.md)
+Now you’re ready for [Step 4: Pose Estimation](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/4_Pose_Estimation.md)

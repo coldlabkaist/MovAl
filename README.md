@@ -26,8 +26,15 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 [4. Pose Estimation](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/4_Pose_Estimation.md)
 
 
+## News
+**25.08.01.** MovAl v1.0.1 released 
+- Improve YOLO inference UI.
+- Fix bugs related to video export and skeleton visualization settings.
+
+**25.07.16.** MovAl v1.0.0 released!
+
 ## Liscense
 MovAl basically follow the MIT license. We allows free use for academic/research purposes, but not for commercial purposes.
-We recommends using Cutie and YOLO as part of the pipeline. The usage rights for each part follow the license of each program. 
+We recommends using Cutie and YOLO as part of our pipeline. The usage rights for each part follow the license of each program. 
 - Cutie : https://github.com/hkchengrex/Cutie
 - YOLO : https://www.ultralytics.com/

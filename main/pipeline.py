@@ -23,18 +23,21 @@ class PipelineController:
 
     def run_video_preprocess(self):
         if self.current_project == None:
-            QMessageBox.warning(None, "Project not found", "Please Select Project")
+            QMessageBox.warning(None, "Project not found", "Please Select a Project")
             return
         dialog = PreprocessDialog(current_project = self.current_project)
         dialog.exec()
 
     def run_labelary(self):
         if self.current_project == None:
-            QMessageBox.warning(None, "Project not found", "Please Select Project")
+            QMessageBox.warning(None, "Project not found", "Please Select a Project")
             return
         run_labelary_with_project(self.current_project)
 
     def run_pose_estimation(self):
+        if self.current_project == None:
+            QMessageBox.warning(None, "Project not found", "Please Select a Project")
+            return
         dialog = PoseEstimationDialog(current_project = self.current_project)
         dialog.exec()
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap, QImage
-from PyQt6.QtWidgets import QFileDialog, QGraphicsOpacityEffect, QApplication, QMessageBox
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QApplication, QMessageBox
 from .data_loader import DataLoader
 import warnings
 
@@ -41,6 +41,10 @@ class VideoLoader:
             cap.release()
         except Exception:
             warnings.warn(f"Unable to load video from project: {path}. Video playback fps is fixed to 30.", UserWarning)
+            self.fps = 30
+        if self.fps == 0:
+            warnings.warn(f"Unable to load video from project: {path}. It's possible that the video directory specified in the project's config file wasn't read."
+                        "Check the project's config.py file and make sure the directory is set properly. Video playback fps is fixed to 30.", UserWarning)
             self.fps = 30
 
         frame_base_path = os.path.join(self.project_path, "frames")
@@ -116,7 +120,9 @@ class VideoLoader:
             self.timer.stop()
             return True
         else:
-            self.timer.start(self.fps*self.play_rate)
+            base_interval = 1000.0 / self.fps
+            interval_ms = int(base_interval / self.play_rate)
+            self.timer.start(max(1, interval_ms))
             return False
 
     def play_next_frame(self):

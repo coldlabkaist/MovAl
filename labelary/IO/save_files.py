@@ -15,8 +15,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 import yaml
 from dataclasses import asdict, is_dataclass
-
+from tqdm import tqdm
 from .data_loader import DataLoader
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import numpy as np    
 
 class _SaveActionDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -215,38 +217,48 @@ def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
 
     max_f = int(df["frame.idx"].max())
-    pad = max(2, len(str(max_f)))
-    track_mapping = {name: i for i, name in enumerate(DataLoader.animals_name)}
+    pad   = max(2, len(str(max_f)))
 
-    def _track_num(t) -> int:
-        return track_mapping.get(str(t), 0)
+    tracks_num = df["track"].map({n: i for i, n in enumerate(DataLoader.animals_name)}).to_numpy(np.int32)
+    fidx_arr   = df["frame.idx"].to_numpy(np.int32)
 
-    for f_idx in sorted(df["frame.idx"].unique()):
-        f_df = df[df["frame.idx"] == f_idx].sort_values(
-            "track",
-            key=lambda s: s.map(_track_num)
-        )
-        lines: list[str] = []
+    xs = df.filter(regex=r"\.x$").to_numpy(np.float32)
+    ys = df.filter(regex=r"\.y$").to_numpy(np.float32)
+    vs = df.filter(regex=r"\.visibility$").to_numpy(np.int8)
+    kp_n = xs.shape[1]
 
-        for _, row in f_df.iterrows():
-            tn = _track_num(row["track"])
-            xs = [row[f"{kp}.x"] for kp in DataLoader.kp_order if f"{kp}.x" in row]
-            ys = [row[f"{kp}.y"] for kp in DataLoader.kp_order if f"{kp}.y" in row]
-            mid_x, mid_y = (min(xs)+max(xs))/2, (min(ys)+max(ys))/2
-            w, h = max(xs) - min(xs), max(ys) - min(ys)
+    unique_frames = np.unique(fidx_arr)
+
+    def _one_frame(fid: int):
+        m    = fidx_arr == fid
+        rows = np.nonzero(m)[0]
+        out_lines: list[str] = []
+        for idx in rows:
+            tn = tracks_num[idx]
+            xx = xs[idx]; yy = ys[idx]
+            mid_x = (xx.min() + xx.max()) / 2
+            mid_y = (yy.min() + yy.max()) / 2
+            w     = xx.max() - xx.min()
+            h     = yy.max() - yy.min()
 
             buf = [tn, mid_x, mid_y, w, h]
-            for kp in DataLoader.kp_order:
-                x, y = row.get(f"{kp}.x"), row.get(f"{kp}.y")
-                vis = row.get(f"{kp}.visibility")
-                if x is not None and y is not None and vis is not None:
-                    buf.extend([x, y, vis])
+            for k in range(kp_n):
+                buf.extend((xx[k], yy[k], int(vs[idx, k])))
 
-            line = " ".join(f"{v:.6f}" if isinstance(v, float) else str(v) for v in buf)
-            lines.append(line)
+            out_lines.append(" ".join(f"{v:.6f}" if isinstance(v, float) else str(v)
+                                       for v in buf))
 
-        out = target_dir / f"{f_idx:0{pad}d}.txt"
-        out.write_text("\n".join(lines), encoding="utf-8")
+        (target_dir / f"{fid:0{pad}d}.txt").write_text("\n".join(out_lines),
+                                                       encoding="utf-8")
+
+    cpu_n = max(os.cpu_count() * 2, 4)
+    with ThreadPoolExecutor(max_workers=cpu_n) as pool:
+        futures = [pool.submit(_one_frame, fid) for fid in unique_frames]
+        counter = 0
+        with tqdm(total=len(futures), desc="Exporting TXT") as pbar:
+            for _ in as_completed(futures):
+                counter += 1
+                if counter % 50 == 0:
+                    pbar.update(50)
 
     print(f"TXT files saved to {target_dir}")
-

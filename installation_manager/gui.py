@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox, QFileDialog
+    QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox
 )
 from PyQt6.QtGui import QClipboard
 from PyQt6.QtCore import Qt

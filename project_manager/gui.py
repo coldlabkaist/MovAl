@@ -10,22 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeyEvent, QFont, QColor
 from PyQt6.QtWidgets import (
-    QApplication,
-    QDialog,
-    QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QMessageBox,
-    QPushButton,
-    QSpinBox,
-    QVBoxLayout,
-    QCheckBox,
-    QLineEdit,
-    QComboBox,
-    QScrollArea,
-    QWidget,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QCheckBox, QLineEdit,
+    QComboBox, QScrollArea, QWidget,
 )
 from utils import __version__
 from utils.skeleton import SkeletonModel
@@ -217,7 +204,7 @@ class ProjectManagerDialog(QDialog):
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Video Files",
-            "", # start dir
+            "",
             "Videos (*.mp4 *.avi *.mov *.mkv)",
         )
         self._append_files(files, "vid")
@@ -226,7 +213,7 @@ class ProjectManagerDialog(QDialog):
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select CSV Files",
-            "", # start dir
+            "",
             "CSV (*.csv)",
         )
         self._append_files(files, "csv")
@@ -353,7 +340,7 @@ class ProjectManagerDialog(QDialog):
 
         subdirs = [
             "frames", "labels", 
-            "runs", "raw_videos", "outputs", "prediction"
+            "runs", "raw_videos", "outputs", "predicts"
         ]
         for sd in subdirs:
             _ensure_dir(os.path.join(proj_dir, sd))

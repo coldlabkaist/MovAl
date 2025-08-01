@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QMainWindow, QLineEdit, QFileDialog, QMessageBox, QFrame,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QStandardPaths
 from PyQt6.QtGui import QPixmap
 from utils.project import ProjectInformation
 from pathlib import Path
@@ -19,6 +19,10 @@ class MainWindow(QMainWindow):
         self.setFixedSize(self.size())
 
         self.controller = controller
+        self.last_searched_dir = None
+        self.desktop_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DesktopLocation
+        )
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -142,15 +146,17 @@ class MainWindow(QMainWindow):
         checked: bool = False,
         path: Optional[Union[str, Path]] = None
     ) -> None:
+        start_dir = self.last_searched_dir if self.last_searched_dir else self.desktop_dir
         if path is None:
             path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select project YAML",
-                "",
+                start_dir,
                 "YAML files (*.yaml *.yml)"
             )
             if not path:
                 return
+            self.last_searched_dir = os.path.dirname(path)
         else:
             path = str(path)
 
@@ -163,6 +169,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "File not found", str(fnf))
         except Exception as e:
             QMessageBox.critical(self, "Load Error", str(e))
-
-        if __version__ != self.current_project.moval_version:
+        
+        curr_major, curr_minor, *_ = __version__.split(".")
+        proj_major, proj_minor, *_ = self.current_project.moval_version.split(".")
+        if (curr_major, curr_minor) != (proj_major, proj_minor):
             warnings.warn("This project was created in a previous version of moval. The files may not be compatible.", UserWarning)

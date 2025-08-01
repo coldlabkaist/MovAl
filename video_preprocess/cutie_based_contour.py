@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QPushButton,
     QTextEdit, QProgressBar, QLabel,
-    QDialog, QLineEdit, QMessageBox, QSpinBox, QFileDialog, QProgressBar
+    QDialog, QLineEdit, QMessageBox, QSpinBox, QProgressBar
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThreadPool
 import os

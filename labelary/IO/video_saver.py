@@ -9,6 +9,8 @@ from .data_loader import DataLoader
 from .save_files import _sanitize_index, _find_project
 import re
 from datetime import datetime
+from tqdm import tqdm
+import warnings
 
 def _export_video_stub(parent: QWidget) -> None:
     if DataLoader.loaded_data is None:
@@ -17,9 +19,6 @@ def _export_video_stub(parent: QWidget) -> None:
 
     from .save_files import _sanitize_index
     df = _sanitize_index(DataLoader.loaded_data.copy())
-    if df is None or df.empty:
-        QMessageBox.warning(parent, "Warning", "No data to export")
-        return
 
     project = _find_project(parent)
     if project is None or not hasattr(project, "project_dir"):
@@ -113,6 +112,8 @@ def _export_video_stub(parent: QWidget) -> None:
         except Exception:
             fps = 0.0
     if fps is None or fps <= 0:
+        warnings.warn(f"Unable to read original fps from project file: {video_path}. It's possible that the video directory specified in the project's config file wasn't read."
+                    "Check the project's config.py file and make sure the directory is set properly. Video playback fps is fixed to 30.", UserWarning)
         fps = 30.0 
 
     writer = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
@@ -128,7 +129,10 @@ def _export_video_stub(parent: QWidget) -> None:
         frame_groups = {int(f): df[df["frame.idx"] == f] for f in frame_indices}
         pad_width = len(image_files[0].stem)
 
-        for i, img_path in enumerate(image_files):
+        for i, img_path in tqdm(enumerate(image_files),
+                        total=len(image_files),
+                        desc="Exporting video",
+                        unit="frame"):
             frame_img = cv2.imread(str(img_path))
             if frame_img is None:
                 continue

@@ -2,7 +2,6 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from .widget.image_label import ClickableImageLabel
 from .widget.list_widget import KeypointListWidget
 
-
 class UI_LabelaryDialog(object):
     def setupUi(self, Dialog):
         Dialog.setObjectName("Dialog")
@@ -83,7 +82,16 @@ class UI_LabelaryDialog(object):
         self.play_button.setMinimumSize(QtCore.QSize(100, 0))
         self.play_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.play_button.setObjectName("play_button")
+        self.speed_spin = QtWidgets.QDoubleSpinBox(parent=Dialog)
+        self.speed_spin.setRange(0.1, 4.0)
+        self.speed_spin.setSingleStep(0.1)
+        self.speed_spin.setDecimals(1)
+        self.speed_spin.setValue(1.0)
+        self.speed_spin.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.speed_spin.setMaximumWidth(80)
+        self.speed_spin.setObjectName("speed_spin")
         self.horizontalLayout_2.addWidget(self.play_button)
+        self.horizontalLayout_2.addWidget(self.speed_spin)
         spacerItem = QtWidgets.QSpacerItem(427, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem)
         self.gridLayout.addLayout(self.horizontalLayout_2, 7, 0, 1, 1)

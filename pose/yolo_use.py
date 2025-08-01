@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QSizePolicy, QGridLayout,
     QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
-    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton
+    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QListWidgetItem, QFrame, QButtonGroup, QRadioButton
 )
 from PyQt6.QtCore import Qt
 import subprocess
@@ -131,7 +131,7 @@ class YOLODialog(QDialog):
             model_path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select pretrained model file",
-                project_root,
+                str(Path(self.current_project.project_dir)/"runs"),
                 "PyTorch model (*.pt);;All Files (*)"
             )
             if not model_path:
@@ -141,6 +141,12 @@ class YOLODialog(QDialog):
                     "Please select a pre-trained model"
                 )
                 return
+            if not Path(model_path).exists():
+                QMessageBox.warning(
+                    self,
+                    "No model selected",
+                    "Please select a pre-trained model"
+                )
         else:
             QMessageBox.critical(
                 self,
@@ -210,117 +216,181 @@ class YOLODialog(QDialog):
 class YoloInferenceDialog(QDialog):
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("YOLO Inference Config")
-        self.setFixedSize(800, 450)
-
         self.current_project = current_project
+        self.animals_name = current_project.animals_name
+        self.build_ui()
+
+    def build_ui(self):
+        self.setWindowTitle("YOLO Pose Inference")
+        self.setMinimumSize(600, 500)
 
         main_layout = QVBoxLayout(self)
+        main_layout.addLayout(self.build_model_row())
+        main_layout.addLayout(self.build_track_row())
 
-        model_layout = QHBoxLayout()
-        self.model_line_edit = QLineEdit()
-        model_btn = QPushButton("Browse")
-        model_btn.clicked.connect(self.select_model)
-        model_layout.addWidget(self.model_line_edit)
-        model_layout.addWidget(model_btn)
-        main_layout.addLayout(model_layout)
+        self.grid = QGridLayout()
+        self.video_group  = self.build_video_group()
+        self.target_group = self.build_target_group()
+        self.inference_group = self.create_params_group(
+            "Inference Config",
+            {"imgsz": 640, "conf": 0.5, "iou": 0.7,
+             "augment": False, "half": False, "device": "None"}
+        )
+        self.visualization_group = self.create_params_group(
+            "Visualization",
+            {"show": False, "save": False, "save_txt": True}
+        )
 
-        track_mode_layout = QHBoxLayout()
-        self.inference_radio = QRadioButton("Inference")
-        self.tracking_radio = QRadioButton("Tracking")
-        self.inference_radio.setChecked(True) 
-        self.inference_radio.toggled.connect(self.update_mode)
-        self.tracking_radio.toggled.connect(self.update_mode)
+        self.grid.addWidget(self.video_group, 0, 0)
+        self.grid.addWidget(self.target_group, 0, 1)
+        self.grid.addWidget(self.inference_group, 1, 0)
+        self.grid.addWidget(self.visualization_group, 1, 1)
 
-        self.track_method_combo = QComboBox()
-        self.track_method_combo.addItems(["botsort", "bytetrack"])
-        self.track_method_combo.setEnabled(False) 
+        self.grid.setRowStretch(0, 5)
+        self.grid.setRowStretch(1, 1)
+        self.grid.setColumnStretch(0, 3)
+        self.grid.setColumnStretch(1, 1)
 
-        track_mode_layout.addWidget(self.inference_radio)
-        track_mode_layout.addWidget(self.tracking_radio)
-        track_mode_layout.addWidget(QLabel("Tracking Method:"))
-        track_mode_layout.addWidget(self.track_method_combo)
-
-        main_layout.addLayout(track_mode_layout)
-
-        inference_params = {
-            "source": "",
-            "imgsz": 640,
-            "conf": 0.5,
-            "iou": 0.7,
-            "max_det": 15,
-            "augment": False,
-            "classes": "",
-            "half": False,
-            "device": "None"
-        }
-        self.inference_group = self.create_group_box("Inference Config", inference_params, is_inference=True)
-
-        visualization_params = {
-            "show": False,
-            "save": True,
-            "save_txt": True,
-            "show_labels": True,
-            "show_conf": True,
-            "show_boxes": True,
-            "kpt_radius": 4
-        }
-        self.visualization_group = self.create_group_box("Visualization", visualization_params)
-
-        middle_layout = QHBoxLayout()
-        middle_layout.addWidget(self.inference_group, 1)
-        middle_layout.addWidget(self.visualization_group, 1)
-        main_layout.addLayout(middle_layout)
-
-        run_btn = QPushButton("Run")
+        main_layout.addLayout(self.grid)
+        run_btn = QPushButton("Run", clicked=self.run_inference)
         run_btn.setFixedHeight(30)
-        run_btn.clicked.connect(self.run_inference)
         main_layout.addWidget(run_btn)
 
-    def create_group_box(self, title, params, is_inference=False):
+    def build_model_row(self):
+        row = QHBoxLayout()
+        self.model_line_edit = QLineEdit(placeholderText="Select Model")
+        browse_btn = QPushButton("Browse", clicked=self.select_model)
+        row.addWidget(self.model_line_edit)
+        row.addWidget(browse_btn)
+        return row
+
+    def build_track_row(self):
+        row = QHBoxLayout()
+        self.inference_radio = QRadioButton("Inference", checked=True)
+        self.tracking_radio = QRadioButton("Tracking")
+        self.track_method_combo = QComboBox(enabled=False)
+        self.track_method_combo.addItems(["botsort", "bytetrack"])
+
+        for w in (self.inference_radio, self.tracking_radio):
+            w.toggled.connect(self.update_mode)
+            row.addWidget(w)
+        row.addWidget(QLabel("Tracking Method:"))
+        row.addWidget(self.track_method_combo)
+        return row
+
+    def build_video_group(self):
+        group = QGroupBox("Video Selection")
+        form  = QFormLayout(group)
+        mode_box = QWidget()
+        mode_lay = QHBoxLayout(mode_box)
+        mode_lay.setContentsMargins(0,0,0,0)
+        self.image_radio = QRadioButton("image frames", checked=True)
+        self.video_radio = QRadioButton("video")
+        for w in (self.image_radio, self.video_radio):
+            mode_lay.addWidget(w)
+            w.toggled.connect(self.update_source_mode_ui)
+        form.addRow("Source Mode :", mode_box)
+
+        self.image_section = self.build_image_section()
+        form.addRow(self.image_section)
+        self.video_section = self.build_video_section()
+        form.addRow(self.video_section)
+        self.update_source_mode_ui()
+        return group
+
+    def build_image_section(self):
+        sect = QWidget()
+        lay = QVBoxLayout(sect)
+        lay.setContentsMargins(0,0,0,0)
+        self.image_mode_combo = QComboBox()
+        self.image_mode_combo.addItems(["davis", "contour"])
+        lay.addWidget(self.image_mode_combo)
+
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0,0,0,0)
+        vbox.setSpacing(2)
+        self.video_checks = []
+        for fe in self.current_project.files:
+            stem = Path(fe.video).stem
+            cb = QCheckBox(stem)
+            vbox.addWidget(cb)
+            self.video_checks.append((cb, stem))
+        vbox.addStretch()
+        scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
+        scroll.setWidget(container)
+        lay.addWidget(scroll)
+        return sect
+
+    def build_video_section(self):
+        sect = QWidget()
+        sect.hide()
+        lay  = QVBoxLayout(sect)
+        lay.setContentsMargins(0,0,0,0)
+        self.load_video_btn = QPushButton("Load Video...", clicked=self.load_videos)
+        self.loaded_list = QListWidget()
+        self.clear_video_btn = QPushButton("Clear List", clicked=self.clear_videos)
+        lay.addWidget(self.load_video_btn)
+        lay.addWidget(self.loaded_list)
+        lay.addWidget(self.clear_video_btn)
+        return sect
+
+    def build_target_group(self):
+        group = QGroupBox("Inference Target")
+        form = QFormLayout(group)
+        form.setSpacing(4)
+
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0,0,0,0)
+        vbox.setSpacing(2) 
+        self.target_checks = []
+        for name in self.animals_name:
+            cb = QCheckBox(name, checked=True)
+            self.target_checks.append(cb)
+            vbox.addWidget(cb)
+        vbox.addStretch()  
+
+        scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        scroll.setWidget(container)
+        form.addRow(scroll)
+        return group
+
+    def create_params_group(self, title, params: dict):
         group = QGroupBox(title)
-        form = QFormLayout()
-
+        form  = QFormLayout(group)
         for key, default in params.items():
-            if is_inference and key == "source":
-                h_layout = QHBoxLayout()
-                line_edit = QLineEdit()
-                btn = QPushButton("Select Data")
-                btn.clicked.connect(lambda _, le=line_edit: self.select_source(le))
-                h_layout.addWidget(line_edit)
-                h_layout.addWidget(btn)
-                form.addRow(QLabel(key), h_layout)
-            else:
-                if isinstance(default, bool):
-                    widget = QCheckBox()
-                    widget.setChecked(default)
-                elif isinstance(default, float):
-                    widget = QDoubleSpinBox()
-                    widget.setDecimals(4)
-                    widget.setMaximum(10000)
-                    widget.setValue(default)
-                elif isinstance(default, int):
-                    widget = QSpinBox()
-                    widget.setMaximum(10000)
-                    widget.setValue(default)
-                else:
-                    widget = QLineEdit()
-                    widget.setText(str(default))
-
-                form.addRow(QLabel(key), widget)
-
-        group.setLayout(form)
+            widget = (
+                QCheckBox(checked=default)                              if isinstance(default, bool)  else
+                QDoubleSpinBox(decimals=4, maximum=1e4, value=default)  if isinstance(default, float) else
+                QSpinBox(maximum=1e4, value=default)                    if isinstance(default, int)   else
+                QLineEdit(text=str(default))
+            )
+            form.addRow(QLabel(key), widget)
         return group
 
     def select_model(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Model File", "", "Model Files (*.pt *.onnx *.engine)")
-        if file_path:
-            self.model_line_edit.setText(file_path)
-
-    def select_source(self, line_edit):
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select Video Files", "", "Video Files (*.mp4 *.avi *.mov)")
-        if file_paths:
-            line_edit.setText(";".join(file_paths))
+        model_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select pretrained model file",
+                str(Path(self.current_project.project_dir)/"runs"),
+                "PyTorch model (*.pt);;All Files (*)"
+            )
+        if not model_path:
+            QMessageBox.warning(
+                self,
+                "No model selected",
+                "Please select a model"
+            )
+            return
+        if not Path(model_path).exists():
+            QMessageBox.warning(
+                self,
+                "No model selected",
+                "Please select a model"
+            )
+        self.model_line_edit.setText(model_path)
             
     def update_mode(self):
         if self.tracking_radio.isChecked():
@@ -328,42 +398,92 @@ class YoloInferenceDialog(QDialog):
         else:
             self.track_method_combo.setEnabled(False)
 
+    def update_source_mode_ui(self):
+        if self.image_radio.isChecked():
+            self.image_section.show()
+            self.video_section.hide()
+        else:
+            self.image_section.hide()
+            self.video_section.show()
+
+    def clear_videos(self):
+        self.loaded_list.clear()
+
+    def load_videos(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, 
+            "Select video files",
+            self.current_project.project_dir, 
+            "Video (*.mp4 *.avi *.mov)"
+        )
+        for p in paths:
+            if p and not any(p == self.loaded_list.item(i).text() for i in range(self.loaded_list.count())):
+                self.loaded_list.addItem(p)
+
     def get_params_from_group(self, group):
         params = {}
         layout = group.layout()
         for i in range(layout.rowCount()):
             label = layout.itemAt(i, QFormLayout.ItemRole.LabelRole).widget().text()
             field_item = layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
-
-            if label == "source":
-                h_layout = field_item.layout()
-                line_edit = h_layout.itemAt(0).widget() 
-                params[label] = line_edit.text()
-                continue
-
             field = field_item.widget()
-
             if isinstance(field, QLineEdit):
                 params[label] = field.text()
             elif isinstance(field, (QSpinBox, QDoubleSpinBox)):
                 params[label] = field.value()
             elif isinstance(field, QCheckBox):
                 params[label] = field.isChecked()
-
         return params
-    
+        
+    def get_video_list(self):
+        if self.image_radio.isChecked():
+            selected_names: list[str] = [
+                stem for cb, stem in self.video_checks if cb.isChecked()
+            ]
+            if not selected_names:
+                return None
+            image_mode = self.image_mode_combo.currentText() 
+            base_dir = Path(self.current_project.project_dir)
+            sources = [
+                (name, base_dir / "frames" / name / "visualization" / image_mode)
+                for name in selected_names
+            ]
+            return sources
+        elif self.video_radio.isChecked():
+            count = self.loaded_list.count()
+            if count == 0:
+                return None
+            sources = []
+            for i in range(count):
+                src = Path(self.loaded_list.item(i).text())
+                sources.append((src.stem, src))
+            return sources
+        raise
+        
+    def get_inference_target(self):
+        classes = [idx for idx, cb in enumerate(self.target_checks) if cb.isChecked()]
+        max_det = len(classes)
+        return classes, max_det
+
     def run_inference(self):
         model_path = self.model_line_edit.text()
         infer_params = self.get_params_from_group(self.inference_group)
         vis_params = self.get_params_from_group(self.visualization_group)
+        sources = self.get_video_list()
+        classes, max_det = self.get_inference_target()
+        if not model_path:
+            QMessageBox.warning(self, "Warning", "Select model.")
+            return
+        if not sources:
+            QMessageBox.warning(self, "Warning", "Select videos.")
+            return
+        if not classes:
+            QMessageBox.warning(self, "Warning", "Select target.")
+            return
+        classes = ",".join(str(c) for c in classes)
+        infer_params["classes"] = classes
+        infer_params["max_det"] = max_det
 
-        if "classes" in infer_params:
-            classes_val = infer_params["classes"]
-            if classes_val.strip():
-                infer_params["classes"] = ",".join(classes_val.replace(" ", "").split(","))
-
-        sources = infer_params.get("source", "")
-        sources = [s.strip() for s in sources.split(";") if s.strip()]
         self.command_queue = [] 
 
         ts = datetime.now()
@@ -371,15 +491,15 @@ class YoloInferenceDialog(QDialog):
         ts_time = ts.strftime("%H%M%S")
         base_out= os.path.join(self.current_project.project_dir, "predicts")
 
-        for src in sources:
+        for name, src in sources:
             if self.tracking_radio.isChecked():
                 tracker_name = self.track_method_combo.currentText() + ".yaml"
-                command = f"yolo track model={model_path} tracker={tracker_name} source={src}"
+                command = f'yolo track model="{model_path}" tracker={tracker_name} source="{src}"'
             else:
-                command = f"yolo pose predict model={model_path} source={src}"
-            command += f" project={base_out} name=predict_{ts_date}_{ts_time}"
+                command = f'yolo pose predict model="{model_path}" source="{src}"'
+            command += f' project="{base_out}" name=predict__{name}_{ts_date}_{ts_time}'
             for k, v in infer_params.items():
-                if k == "source" or v in ["", "None"]:
+                if v in ["", "None"]:
                     continue
                 if isinstance(v, bool):
                     if v:
@@ -387,9 +507,11 @@ class YoloInferenceDialog(QDialog):
                 else:
                     command += f" {k}={v}"
 
+            vis_option = ""
             for k in ["show", "save", "save_txt"]:
                 if vis_params.get(k, False):
                     command += f" {k}=True"
+            command += vis_option
 
             self.command_queue.append(command)
 
@@ -407,6 +529,3 @@ class YoloInferenceDialog(QDialog):
         self.infer_thread = InferenceThread(command)
         self.infer_thread.finished.connect(self.run_next_command) 
         self.infer_thread.start()
-
-
-

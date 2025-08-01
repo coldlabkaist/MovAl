@@ -2,11 +2,15 @@ import pandas as pd
 from pathlib import Path
 from typing import Union, Optional, List
 from PyQt6.QtWidgets import (
-    QFileDialog, QMessageBox, QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
+    QMessageBox, QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox
 )
 from utils.skeleton import SkeletonModel
-from typing import Optional
+from typing import Optional, List
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import multiprocessing
+import numpy as np, io
 
 class DataLoader:
     parent: Optional[QDialog] = None
@@ -24,8 +28,21 @@ class DataLoader:
     max_animals = 0
     animals_name = None
     track_mapping: dict[str, str] = {}
+    _expected_cols: Optional[int] = None
+    _col_names: Optional[List[str]] = None
+    _BATCH_ROWS: int = 20000
+    records_tmp: List[dict] = []
 
     ### Skeleton ###
+
+    @classmethod
+    def _init_txt_schema(cls, sample_fp: Path, sep: str) -> None:
+        if cls._expected_cols is not None:
+            return
+
+        tmp = pd.read_csv(sample_fp, header=None, sep=sep, engine="python")
+        cls._expected_cols = tmp.shape[1]
+        cls._col_names    = [f"c{i}" for i in range(cls._expected_cols)]
 
     @classmethod
     def load_skeleton_info(cls, skeleton_model: "SkeletonModel") -> None:
@@ -250,7 +267,7 @@ class DataLoader:
                                          pd.DataFrame([new_row])],
                                         ignore_index=True)
         except Exception as e:
-            print(f"❌ Failed to add new skeleton row: {e}")
+            print(f"Failed to add new skeleton row: {e}")
             return False
         if not cls.loaded_data.empty:
             cls.loaded_data = (cls.loaded_data
@@ -319,70 +336,87 @@ class DataLoader:
         return cls._load_generic(file_path, read_func=pd.read_csv)
 
     @classmethod
-    def load_txt_data(cls, path: Union[str, Path], sep: str = "\s+") -> bool:
+    def load_txt_data(cls, path: Union[str, Path], sep: str = r"\s+") -> bool:
         print("This may take some time.")
         cls._ensure_skeleton()
         path = Path(path)
 
         if path.is_dir():
-            txt_files = sorted(path.glob("*.txt"))      # test_1.txt, test_2.txt, …
+            txt_files = sorted(path.glob("*.txt"))
             if not txt_files:
                 print("There is no txt file in the directory.")
                 return False
 
-            frames = []
-            for single_frame_txt in txt_files:
+            cls._init_txt_schema(txt_files[0], sep)
+            cpu_n = max(multiprocessing.cpu_count() - 1, 1)
+            chunks: list[pd.DataFrame] = []
+            cls.records_tmp = []
+
+            def _safe_parse(fp: Path):
                 try:
-                    f_idx = int(single_frame_txt.stem.split("_")[-1])
-                except ValueError:
-                    print(f"'{single_frame_txt.name}' → Failed to parse frame number, skipped")
-                    continue
+                    f_idx = int(fp.stem.split("_")[-1])
+                    return cls._txt_to_records(fp, sep, f_idx)
+                except Exception as e:
+                    print(f"{fp.name} → skip ({e})")
+                    return []
 
-                single_frame_df = cls._txt_to_df(single_frame_txt, sep=sep, frame_idx=f_idx)
-                if not single_frame_df.empty:
-                    frames.append(single_frame_df)
-
-            if not frames:
+            with ThreadPoolExecutor(max_workers=cpu_n) as pool:
+                for recs in tqdm(pool.map(_safe_parse, txt_files),
+                                 total=len(txt_files),
+                                 desc="Loading TXT frames"):
+                    if not recs:
+                        continue
+                    cls.records_tmp.extend(recs)
+                    if len(cls.records_tmp) >= cls._BATCH_ROWS:
+                        chunks.append(
+                            pd.DataFrame.from_records(cls.records_tmp)
+                        )
+                        cls.records_tmp.clear()
+            if cls.records_tmp:
+                chunks.append(pd.DataFrame.from_records(cls.records_tmp))
+                cls.records_tmp.clear()
+            if not chunks:
                 print("There is no readable txt.")
                 return False
-
-            df_total = pd.concat(frames, ignore_index=True)
-            return cls._load_generic(df_total, from_dataframe=True) 
+            df_total = pd.concat(chunks, ignore_index=True)
+            return cls._load_generic(df_total, from_dataframe=True)
 
         print("Attempting to read incorrect txt directory")
         return False
 
     @classmethod
-    def _txt_to_df(cls, fp: Path, sep: str, frame_idx: int) -> pd.DataFrame:
-        raw = pd.read_table(fp, header=None, sep=sep, engine="python")
-        if raw.empty:
-            return pd.DataFrame()
+    def _txt_to_records(cls, fp: Path, sep: str, frame_idx: int) -> List[dict]:
+        buf = Path(fp).read_bytes()
+        arr = np.fromstring(buf, sep=" ", dtype=np.float32)
 
-        kp_n   = (raw.shape[1] - 5) // 3
+        if arr.size % cls._expected_cols:
+            return []
+
+        arr = arr.reshape(-1, cls._expected_cols)
+
+        kp_n = (arr.shape[1] - 5) // 3
         if cls.kp_order and kp_n != len(cls.kp_order):
-            raise ValueError(
-                f"TXT file '{fp.name}' contains {kp_n} key-points, "
-                f"but skeleton expects {len(cls.kp_order)}."
-            )
+            raise ValueError(f"{fp.name}: {kp_n} kpts ≠ {len(cls.kp_order)}")
         if not cls.kp_order:
             cls.kp_order = [f"kp{i+1}" for i in range(kp_n)]
 
-        cols = (
-            ["track.num", "bbox.x", "bbox.y", "bbox.w", "bbox.h"] +
-            sum([[f"{kp}.x", f"{kp}.y", f"{kp}.visibility"] for kp in cls.kp_order], [])
-        )
-        raw.columns = cols[: raw.shape[1]]
+        records = []
+        for row in arr:
+            rec: dict = {
+                "track": f"track_{int(row[0])}",
+                "frame.idx": frame_idx,
+                "instance.visibility": 2
+            }
+            off = 5
+            for kp in cls.kp_order:
+                x, y, vis = row[off: off+3]
+                rec[f"{kp}.x"] = float(x)
+                rec[f"{kp}.y"] = float(y)
+                rec[f"{kp}.visibility"] = 1 if vis in (1, 2) else 2
+                off += 3
+            records.append(rec)
+        return records
 
-        raw["track"] = raw["track.num"].apply(lambda n: f"track_{int(n)}")
-        raw["frame.idx"] = frame_idx
-        raw.drop(columns=["track.num", "bbox.x", "bbox.y", "bbox.w", "bbox.h"], inplace=True)
-
-        for kp in cls.kp_order:
-            vis_col = f"{kp}.visibility"
-            if vis_col in raw.columns:
-                raw.loc[~raw[vis_col].isin([1, 2]), vis_col] = 2
-        return raw
-        
     @classmethod
     def _load_generic(cls, src, read_func=None, *, from_dataframe: bool = False) -> bool:
         try:

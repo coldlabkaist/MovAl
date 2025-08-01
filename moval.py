@@ -7,7 +7,7 @@ from packaging import version
 from utils import __version__
 
 def main():
-    print(f"Move All Together! MovAl version {__version__}")
+    print(f"Move Altogether! MovAl version {__version__}")
     
     current_version = __version__
     latest_version = get_latest_git_tag()

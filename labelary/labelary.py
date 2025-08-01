@@ -3,7 +3,7 @@ from PyQt6.QtGui import QFont, QPixmap, QColor, QIcon, QPainter, QPen
 from PyQt6.QtWidgets import (
     QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QFileDialog,
     QSlider, QListWidget, QFrame, QApplication, QDialog, QListWidgetItem, QTreeWidget, QMessageBox,
-    QColorDialog, QGridLayout, QTreeWidgetItem, QComboBox, QHeaderView, QStyledItemDelegate,
+    QColorDialog, QTreeWidgetItem, QComboBox, QHeaderView, QStyledItemDelegate,
 )
 from .gui import UI_LabelaryDialog
 from .IO.video_loader import VideoLoader
@@ -41,6 +41,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.install_controller()
 
         self.play_button.clicked.connect(self.play_or_pause)
+        self.speed_spin.valueChanged.connect(self.set_playback_rate)
         self.frame_slider.valueChanged.connect(self.video_loader.move_to_frame)
         self.frame_slider.sliderPressed.connect(self.on_frame_slider_pressed)
         self.frame_slider.sliderReleased.connect(self.on_frame_slider_released)
@@ -136,9 +137,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             dir_path = QFileDialog.getExistingDirectory(
                 self,
                 "Select inference result directory",
-                str(self.project.project_dir)
+                str(Path(self.project.project_dir)/"predicts")
             )
             if not dir_path:
+                return
+            if not Path(dir_path).exists():
                 return
             self.load_txt(dir_path)
         else:
@@ -172,6 +175,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
     def play_or_pause(self):
         self.is_video_paused = self.video_loader.toggle_playback()
         self.mouse_controller.enable_control = self.is_video_paused
+        self.speed_spin.setEnabled(self.mouse_controller.enable_control)
+    
+    def set_playback_rate(self):
+        self.video_loader.play_rate = self.speed_spin.value()
 
     def on_frame_slider_pressed(self):
         if not self.is_video_paused:

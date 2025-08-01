@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QTextEdit, QLabel, QScrollArea, QComboBox,
-    QDialog, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout, QSlider, QCheckBox, QLineEdit, QWidget
+    QDialog, QMessageBox, QSpinBox, QGroupBox, QFormLayout, QSlider, QCheckBox, QLineEdit, QWidget
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont

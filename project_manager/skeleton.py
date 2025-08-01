@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QDialog, QGraphicsView, QListWidget, QPushButton, QRadioButton, 
     QHBoxLayout, QVBoxLayout, QListWidgetItem, QMenu, QFileDialog, QMessageBox, 
-    QAbstractItemView, QLabel, QComboBox, QLineEdit, QSplitter, QFrame, QFileDialog, QInputDialog
+    QAbstractItemView, QLabel, QComboBox, QLineEdit, QSplitter, QFrame, QInputDialog
 )
 from PyQt6.QtGui     import QBrush, QPixmap, QImage
 from utils.skeleton import SkeletonModel, SkeletonScene, NodeItem, EdgeItem, SymItem, NodeVisualSettingDialog

@@ -16,8 +16,8 @@ You must use CUDA 11.8 or 12.1 to install pytorch 1.2.1.
 If the command still doesn’t detect the correct CUDA version, set the system environment variables 
 (System Properties → Environment Variables) or set them temporarily with the command below.
 ```bash
-set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8"  # for CUDA 11.8
-set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"  # for CUDA 12.1
+set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8"  # for CUDA 11.8 only
+set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"  # for CUDA 12.1 only
 set "PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%"
 ```
 
@@ -32,9 +32,9 @@ git clone https://github.com/coldlabkaist/MovAl-Move_Altogether.git
 ```
 Additionally, install the required dependencies, including PyTorch.
 ```bash
-conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia  # for CUDA 11.8, Window
-conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=12.1 -c pytorch -c nvidia  # for CUDA 12.1, Window
-conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 -c pytorch  # for Linux
+conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia  # for Window with CUDA 11.8 only
+conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=12.1 -c pytorch -c nvidia  # for Window with CUDA 12.1 only
+conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 -c pytorch  # for Linux only
 
 conda install "numpy>=1.23.0,<2.0"
 pip install -r requirements.txt -c constraints.txt

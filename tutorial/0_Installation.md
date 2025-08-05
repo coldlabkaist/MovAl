@@ -37,6 +37,7 @@ conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=
 conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 -c pytorch  # for Linux only
 
 conda install "numpy>=1.23.0,<2.0"
+cd ./MovAl-Move_Altogether
 pip install -r requirements.txt -c constraints.txt
 ```
 Now you can run MovAl UI.

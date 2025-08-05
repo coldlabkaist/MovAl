@@ -32,9 +32,8 @@ git clone https://github.com/coldlabkaist/MovAl-Move_Altogether.git
 ```
 Additionally, install the required dependencies, including PyTorch.
 ```bash
-conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia  # for Window with CUDA 11.8 only
-conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=12.1 -c pytorch -c nvidia  # for Window with CUDA 12.1 only
-conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 -c pytorch  # for Linux only
+conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia  # for CUDA 11.8 
+conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=12.1 -c pytorch -c nvidia  # for CUDA 12.1 
 
 conda install "numpy>=1.23.0,<2.0"
 cd ./MovAl-Move_Altogether

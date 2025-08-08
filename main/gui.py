@@ -14,11 +14,12 @@ import warnings
 class MainWindow(QMainWindow):
     def __init__(self, controller=None):
         super().__init__()
-        self.setWindowTitle("Move Altogether: MoVal")
+        self.setWindowTitle("Move Altogether: MovAl")
         self.setGeometry(100, 100, 650, 550) 
         self.setFixedSize(self.size())
 
         self.controller = controller
+        self.controller.parent = self
         self.last_searched_dir = None
         self.desktop_dir = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.DesktopLocation
@@ -47,7 +48,7 @@ class MainWindow(QMainWindow):
         outer_layout.addLayout(proj_bar)
 
         self.current_project = None
-        self.controller.set_main_window_project = self.on_load_yaml_clicked
+        self.controller.main_window_load_project = self.on_load_yaml_clicked
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)

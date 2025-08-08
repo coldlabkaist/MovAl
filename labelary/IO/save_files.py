@@ -18,7 +18,8 @@ from dataclasses import asdict, is_dataclass
 from tqdm import tqdm
 from .data_loader import DataLoader
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import numpy as np    
+import numpy as np   
+import shutil 
 
 class _SaveActionDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -130,11 +131,14 @@ def save_modified_data(parent: QWidget):
             )
             if res != QMessageBox.StandardButton.Yes:
                 return 
+            shutil.rmtree(txt_dir)
+            txt_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             _export_txt_files(txt_dir, df_orig)
             QMessageBox.information(parent, "Success", f"TXT Exported:\n{txt_dir}")
-            modify_yaml(video_path, "txt", txt_dir, config_path, project_info)
+            if not has_existing:
+                modify_yaml(video_path, "txt", txt_dir, config_path, project_info)
         except Exception as e:
             QMessageBox.critical(parent, "Error", f"Failed to export TXT:\n{e}")
         parent.update_label_combo(set_text = txt_dir)

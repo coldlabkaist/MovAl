@@ -34,8 +34,6 @@ class DataSplitDialog(QDialog):
         scroll.setWidget(inner_widget)
         layout.addWidget(scroll)
 
-        self._populate_file_items()
-
         layout.addSpacing(40) 
         self.count_label = QLabel("Label number: 0 / Image number: 0")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -94,26 +92,26 @@ class DataSplitDialog(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
+        self._populate_file_items()
+        self.frame_type_combo.currentTextChanged.connect(self._frame_type_changed)
+
+    def _frame_type_changed(self):
+        self._populate_file_items()
+        self._update_selection_count()
+
     def _populate_file_items(self) -> None:
+        self._clear_file_items()  
         for fe in self.files:
+            current_project = self.current_project
             video_path = Path(fe.video)
-            if not video_path.is_absolute():
-                video_path = self.current_project.project_dir / video_path
+            video_stem = video_path.stem
+            frame_type = self.frame_type_combo.currentText()
 
-            cap = cv2.VideoCapture(str(video_path))
-            frame_cnt = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.isOpened() else 0
-            cap.release()
-
-            label_cnt = 0
-            for txt_rel in fe.txt:
-                txt_full = Path(txt_rel)
-                if not txt_full.is_absolute():
-                    txt_full = self.current_project.project_dir / txt_full
-
-                if txt_full.is_dir():
-                    label_cnt += sum(1 for _ in txt_full.glob("*.txt"))
-                elif txt_full.is_file():
-                    label_cnt += 1
+            frame_dir  = (Path(current_project.project_dir) /
+                        "frames" / video_stem / "visualization" / frame_type)
+            label_dir  = Path(current_project.project_dir) / "labels" / video_stem / "txt"
+            frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
+            label_cnt = sum(1 for _ in label_dir.glob("*.txt"))
 
             row_lay = QHBoxLayout()
             chk = QCheckBox()
@@ -133,6 +131,18 @@ class DataSplitDialog(QDialog):
             self.files_lay.addLayout(row_lay)
 
         self.files_lay.addStretch(1)
+
+    def _clear_file_items(self) -> None:
+        while self.files_lay.count():
+            item = self.files_lay.takeAt(0)
+
+            if widget := item.widget():
+                widget.deleteLater()
+            elif child_lay := item.layout():
+                while child_lay.count():
+                    sub_item = child_lay.takeAt(0)
+                    if w := sub_item.widget():
+                        w.deleteLater()
 
     def _update_selection_count(self):
         total_files  = 0
@@ -194,32 +204,27 @@ class DataSplitDialog(QDialog):
 
         for fe in selected_entries:
             video_path = Path(fe.video)
-            video_name = video_path.stem 
-
-            for txt_rel in fe.txt:
-                txt_path = Path(txt_rel)
-                if not txt_path.is_absolute():
-                    txt_path = project_dir / txt_path
-                if txt_path.is_dir():
-                    txt_files = sorted(txt_path.glob("*.txt"))  
-                else:
+            video_name = video_path.stem
+            label_dir  = project_dir / "labels" / video_name / "txt"
+            if label_dir.is_dir():
+                label_files = sorted(label_dir.glob("*.txt"))  
+            else:
+                continue
+            for lbl_file in label_files:
+                m = digit_re.search(lbl_file.stem)
+                if not m:
                     continue
-                for lbl_file in txt_files:
-                    m = digit_re.search(lbl_file.stem)
-                    if not m:
-                        continue
-                    
-                    orig_num_str   = m.group(1)
-                    digits_len     = 7
-                    base_digit_len = len(orig_num_str)
-                    frame_idx      = int(orig_num_str) 
-                    frame_num      = f"{frame_idx- 1:0{digits_len}d}"
-                    base_name      = f"{video_name}_{frame_idx:0{base_digit_len}d}"
+                
+                orig_num_str   = m.group(1)
+                digits_len     = 7
+                base_digit_len = len(orig_num_str)
+                frame_idx      = int(orig_num_str) 
+                frame_num      = f"{frame_idx:0{digits_len}d}"
+                base_name      = f"{video_name}_{frame_idx:0{base_digit_len}d}"
 
-                    img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
-                    img_path = img_dir / f"{frame_num}.jpg"
-
-                    pair_list.append((lbl_file, img_path, base_name))
+                img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
+                img_path = img_dir / f"{frame_num}.jpg"
+                pair_list.append((lbl_file, img_path, base_name))
 
         if not pair_list:
             QMessageBox.warning(self, "Error", "Could not find label-image pair.")
@@ -245,6 +250,7 @@ class DataSplitDialog(QDialog):
             lbl_dst_root = dataset_dir / split / "labels"
 
             for lbl_path, img_path, base in pairs:
+                print(lbl_path, img_path, base)
                 shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
                 img_ext = img_path.suffix.lower()
                 shutil.copy(img_path, img_dst_root / f"{base}{img_ext}")

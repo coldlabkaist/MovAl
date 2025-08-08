@@ -59,7 +59,7 @@ class _FileListWidget(QListWidget):
 class ProjectManagerDialog(QDialog):
     def __init__(
         self, 
-        set_main_window_project: Optional[Callable[[str], None]] = None,
+        main_window_load_project: Optional[Callable[[str], None]] = None,
         parent: QDialog | None = None,
     ) -> None:
 
@@ -69,7 +69,7 @@ class ProjectManagerDialog(QDialog):
 
         self._preset_dir = os.path.join(os.getcwd(), "preset", "skeleton")
         os.makedirs(self._preset_dir, exist_ok=True)
-        self.set_main_window_project = set_main_window_project
+        self.main_window_load_project = main_window_load_project
 
         layout = QHBoxLayout(self)
 
@@ -455,7 +455,7 @@ class ProjectManagerDialog(QDialog):
             QMessageBox.information(self, "Done",
                                     f"Project folder created:\n{proj_dir}\n\nconfig.yaml saved.")
 
-        self.set_main_window_project(path=project_config_path)
+        self.main_window_load_project(path=project_config_path)
         self.accept()
 
 def _ensure_dir(path: str | Path):

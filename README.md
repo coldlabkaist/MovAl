@@ -27,6 +27,10 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 
 
 ## News
+**25.08.08.** MovAl v1.0.2 released
+- Resolved data split errors
+- Enhanced exception handling
+
 **25.08.01.** MovAl v1.0.1 released 
 - Improve YOLO inference UI.
 - Fix bugs related to video export and skeleton visualization settings.

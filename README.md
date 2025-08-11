@@ -10,8 +10,8 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 [🔗 See more tracking results!](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Tracking_Result.md)
 
 ## Requirement
-- CUDA 11.8 or 12.1
-- We recommend using Conda for setting up the environment.
+- CUDA 11.8 or 12.1 (Both versions are compatible)
+- Supports Windows 11, Ubuntu 22.04 environment.
 
 ### Installation Tutorial
 [0. Installation](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/0_Installation.md)

@@ -2,7 +2,7 @@
 
 ## Requirements
 - CUDA 11.8 or 12.1 (Both versions are compatible) 
-- Supports Windows 11 environment (planned to support Linux environment)
+- Supports Windows 11, Ubuntu 22.04 environment (Ubuntu 24.04 is not compatible)
 - We recommend using Conda for setting up the environment.
 - numpy (>=1.23.0,<2.0) is required to operate Cutie.
 

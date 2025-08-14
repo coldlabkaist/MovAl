@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QDialog, QLineEdit, QMessageBox, QFileDialog, QScrollArea
+    QDialog, QLineEdit, QMessageBox, QFileDialog, QScrollArea,
+    QListView, QTreeView, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
 import os
@@ -11,6 +12,10 @@ import re
 
 def extract_frame_number(filename):
     match = re.search(r'_(\d+)\.txt$', filename)
+    if match:
+        return int(match.group(1))
+    # fallback for filenames like 0000001.txt (no prefix)
+    match = re.search(r'(\d+)\.txt$', filename)
     return int(match.group(1)) if match else -1
 
 class TxtToCsvDialog(QDialog):
@@ -72,31 +77,58 @@ class TxtToCsvDialog(QDialog):
     def load_txt_folders(self):
         self.txt_folders = []
 
-        while True:
-            folder = QFileDialog.getExistingDirectory(self, "Select a TXT Folder")
-            if folder:
-                if folder not in self.txt_folders:
-                    self.txt_folders.append(folder)
-            else:
-                break 
+        dialog = QFileDialog(self, "Select TXT Folders")
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        # enable multi-selection for directories
+        for view in dialog.findChildren(QListView) + dialog.findChildren(QTreeView):
+            view.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
 
-            ret = QMessageBox.question(
-                self, "Continue?", "Add another folder?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if ret == QMessageBox.StandardButton.No:
-                break
+        if dialog.exec():
+            selected = dialog.selectedFiles()
+            for folder in selected:
+                if folder and folder not in self.txt_folders:
+                    self.txt_folders.append(folder)
 
         if not self.txt_folders:
             return
 
-        video_names = set()
+        self.video_to_txts = {}
         for folder in self.txt_folders:
+            collected_any = False
+            if os.path.basename(folder).lower() == 'labels':
+                video_name = os.path.basename(os.path.dirname(folder))
+                txts = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.txt')]
+                if txts:
+                    self.video_to_txts.setdefault(video_name, []).extend(txts)
+                    collected_any = True
+            labels_dir = os.path.join(folder, 'labels')
+            if os.path.isdir(labels_dir):
+                video_name = os.path.basename(folder)
+                txts = [os.path.join(labels_dir, f) for f in os.listdir(labels_dir) if f.endswith('.txt')]
+                if txts:
+                    self.video_to_txts.setdefault(video_name, []).extend(txts)
+                    collected_any = True
             for root, dirs, files in os.walk(folder):
-                for f in files:
-                    if f.endswith(".txt"):
-                        name = "_".join(f.split("_")[:-1])
-                        video_names.add(name)
+                if os.path.basename(root).lower() == 'labels':
+                    video_name = os.path.basename(os.path.dirname(root))
+                    txts = [os.path.join(root, f) for f in files if f.endswith('.txt')]
+                    if txts:
+                        self.video_to_txts.setdefault(video_name, []).extend(txts)
+                        collected_any = True
+            if not collected_any:
+                for root, dirs, files in os.walk(folder):
+                    for f in files:
+                        if f.endswith('.txt'):
+                            name_part = "_".join(f.split("_")[:-1])
+                            if name_part:
+                                self.video_to_txts.setdefault(name_part, []).append(os.path.join(root, f))
+
+        for k, v in list(self.video_to_txts.items()):
+            self.video_to_txts[k] = list(set(v))
+
+        video_names = set(self.video_to_txts.keys())
 
         for i in reversed(range(self.inner_layout.count())):
             item = self.inner_layout.itemAt(i)
@@ -145,13 +177,7 @@ class TxtToCsvDialog(QDialog):
             return
 
         for video_name in self.video_widget_map:
-            all_txts = []
-            for folder in self.txt_folders:
-                all_txts += [
-                    os.path.join(folder, f) for f in os.listdir(folder)
-                    if f.startswith(video_name) and f.endswith(".txt")
-                ]
-            all_txts.sort(key=lambda x: extract_frame_number(os.path.basename(x)))
+            all_txts = sorted(self.video_to_txts.get(video_name, []), key=lambda x: extract_frame_number(os.path.basename(x)))
 
             rows = []
             has_instance_id = False
@@ -234,13 +260,7 @@ class TxtToCsvDialog(QDialog):
                 return
             width, height = int(width), int(height)
 
-            all_txts = []
-            for folder in self.txt_folders:
-                all_txts += [
-                    os.path.join(folder, f) for f in os.listdir(folder)
-                    if f.startswith(video_name) and f.endswith(".txt")
-                ]
-            all_txts.sort(key=lambda x: extract_frame_number(os.path.basename(x)))
+            all_txts = sorted(self.video_to_txts.get(video_name, []), key=lambda x: extract_frame_number(os.path.basename(x)))
 
             rows = []
             has_instance_id = False

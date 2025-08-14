@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QProgressBar, QLabel,
     QDialog, QLineEdit, QMessageBox, QSpinBox, QProgressBar
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThreadPool
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 import os
 import glob
 from .thread import ContourWorker
@@ -19,12 +19,12 @@ class BatchContourProcessor(QObject):
         self.parent = parent
 
         self.current_project = current_project
-        self.pool            = QThreadPool.globalInstance()
-        self.pool.setMaxThreadCount(max_threads)
+        self._max_parallel   = max_threads
 
         self._total  = 0
         self._done   = 0
-        self._threads: list[ContourWorker] = []
+        self._active: list[ContourWorker] = []
+        self._pending: list[Path] = []
 
     def start(self):
         base = Path(self.current_project.project_dir) / "frames"
@@ -40,13 +40,11 @@ class BatchContourProcessor(QObject):
         self._total = len(workspaces)
         self.progress.emit(0, self._total)
 
-        for ws in workspaces:
-            try:
-                self._launch_worker(ws)
-            except Exception as e:
-                self.any_error.emit(f"{ws.name}: {e}")
+        self._pending = workspaces.copy()
+        self._active = []
+        self._fill_slots()
 
-    def _launch_worker(self, workspace_path: Path):
+    def _launch_worker(self, workspace_path: Path) -> ContourWorker:
         video_name  = workspace_path.name
         masks_path  = workspace_path / "masks"
         seg_path    = workspace_path / "visualization" / "davis"
@@ -64,24 +62,34 @@ class BatchContourProcessor(QObject):
         worker = ContourWorker(video_name, seg_frames, masks, str(output_dir))
 
         def _done_callback(vn, w=worker):
-            self._threads.remove(w)
+            if w in self._active:
+                self._active.remove(w)
             self._on_worker_done(vn)
 
         worker.finished.connect(lambda vn=video_name: _done_callback(vn))
         worker.finished.connect(worker.deleteLater)
-
-        self._threads.append(worker)  
-        worker.start()
+        return worker
 
     def _on_worker_done(self, video_name: str):
         self._done += 1
-
-        QMessageBox.information(
-            self.parent,
-            "Done",
-            f"{video_name} contour saved."
-        )
+        try:
+            print(f"[Contour] {video_name} done")
+        except Exception:
+            pass
 
         self.progress.emit(self._done, self._total)
-        if self._done == self._total:
+        self._fill_slots()
+        if self._done == self._total and not self._pending and not self._active:
             self.all_done.emit()
+
+    def _fill_slots(self):
+        while self._pending and len(self._active) < self._max_parallel:
+            ws = self._pending.pop(0)
+            try:
+                worker = self._launch_worker(ws)
+                self._active.append(worker)
+                worker.start()
+            except Exception as e:
+                self.any_error.emit(f"{ws.name}: {e}")
+                self._done += 1
+                self.progress.emit(self._done, self._total)

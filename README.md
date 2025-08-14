@@ -29,7 +29,7 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 ## News
 **25.08.14.** MovAl v1.0.3 released
 - Resolved CPU management issue
-- Fixed path for txt2csv
+- Bug fixed path for txt2csv
 
 **25.08.08.** MovAl v1.0.2 released
 - Resolved data split errors

@@ -51,7 +51,7 @@ Arrange nodes as you like, then set each node’s name and visual settings.
 
 In **Add skeleton / symmetry** mode, 
 Drag between nodes to define skeleton links (left‑click drag, black solid line) or to specify symmetry (right‑click drag, cyan dashed line).
-All keypoints and skeleton links can be selected and deleted.
+All keypoints and skeleton links can be selected and deleted. **Symmetry information** is required for **YOLO learning**.
 
 <img width="649" height="444" alt="create_project_7" src="https://github.com/user-attachments/assets/9c43c5f6-6d8a-4307-9956-9103bb6b9e7a" />
 

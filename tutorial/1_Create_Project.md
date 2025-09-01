@@ -34,6 +34,7 @@ You can delete videos or change order of videos through right click menu and dra
 
 <br><br>
 
+
 ## How to create New Skeleton Config
 
 To create new skeleton preset, click **Skeleton Setting** button and open Skeleton Manager GUI. This GUI lets you create or customize any skeleton preset you need.
@@ -54,6 +55,15 @@ Drag between nodes to define skeleton links (left‑click drag, black solid line
 All keypoints and skeleton links can be selected and deleted. **Symmetry information** is required for **YOLO learning**.
 
 <img width="649" height="444" alt="create_project_7" src="https://github.com/user-attachments/assets/9c43c5f6-6d8a-4307-9956-9103bb6b9e7a" />
+
+
+<br><br>
+## (Optional) How to use pretrained model
+
+https://github.com/coldlabkaist/MovAl/blob/main/tutorial/How_to_use_pretrained_model.md
+
+This link provides instructions for deploying pretrained models. If you wish to use a model from the distribution, download the appropriate config file from the link and save it in the specified location (MovAl/preset/skeleton). You can then create a project by specifying the file.
+If you pasted the file while the "Create Project" window was open, the file may not be reflected in the list of available config files. In this case, reopen the "Create Project" window to select the file normally.
 
 
 <br><br>

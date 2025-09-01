@@ -31,7 +31,8 @@ Note: Each project stores only one split—running this will overwrite any exist
 
 Click Train Model to configure YOLO training options and begin training.
 
-- In the Model section, enable Use Pretrained Model to resume training on new data from an existing checkpoint.
+- In the Model section, enable Use **Pretrained Model** to resume training on new data from an existing checkpoint. If you wish to use a model from the distribution, download the appropriate model and select the model you want from this window. For a list of currently available models and detailed manuals, please refer to the following link.
+  https://github.com/coldlabkaist/MovAl/blob/main/tutorial/How_to_use_pretrained_model.md
 
 - For multi‑GPU training, specify the device IDs under Training Options.
 

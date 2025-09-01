@@ -10,6 +10,9 @@ If you want to easily complete labeling (around 50-150 labels) and then proceed 
 - Skeleton config: Save the file to Moval/preset/skeleton. Select the corresponding config file in the Create Project step.
 
 ## B6 mouse 6kpt model
+
+This model is specialized for tracking up to six B6 mice in various environments. Details and distribution file links are below.
+
 ### Environment
 
 ![environments](https://github.com/user-attachments/assets/792e1a71-4b9c-476d-b51f-6ef2acb41e76)

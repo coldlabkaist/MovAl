@@ -24,7 +24,7 @@ This model is specialized for tracking up to six B6 mice in various environments
 ![val_batch2_pred](https://github.com/user-attachments/assets/ce2cf039-2665-4a7b-929b-5e1ca4f344d5)
 
 ### Pretrained model
-https://drive.google.com/file/d/1LtcvQBZmM24437wSJD9SvK38-TEPzpfo/view?usp=drive_link
+https://drive.google.com/file/d/1ZIEWHQO5Xp38-M1tddwMzOTtm-a-PxL9/view?usp=sharing
 ### Skeleton config
 https://drive.google.com/file/d/15qZW_F3Y1VE9YQXQMnHeDd7hOYjAvDpN/view?usp=drive_link
 

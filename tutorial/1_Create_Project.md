@@ -17,7 +17,7 @@ To create your first project, click **Step 1: Create Project.**
 
 Enter each field:
 
-**Project name (A)** : name for the new MovAl project. (**important** : Directory names must be in English and contain no spaces.)
+**Project name (A)** : name for the new MovAl project. (**important** : Directory names and file names must be in English and contain no spaces.)
 
 **Animals (B)** : number of animals per video and their labels (default name: track_N).
 

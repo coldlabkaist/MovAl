@@ -73,6 +73,20 @@ If it persists, navigate to the frame where the new error began and repeat the p
 There’s no need to save your work in Cutie. When you’re done, close the Cutie window and
 switch back to the MovAl tab to review your progress as shown above.
 
+## Before You Start: Recommended Setup for Faster Cutie Labeling
+
+To speed up and stabilize your Cutie labeling workflow, please review the following:
+
+- Use the fine-tuned Cutie models: In addition to the base Cutie model, we distributes fine-tuned variants. These typically yield more stable ID tracking and greater robustness under occlusion compared with the base model.
+
+- Consider fine-tuning for your specific environment : If you plan to label large batches of data under a single recording setup, we recommend fine-tuning a Cutie model for that environment.
+
+Note: Fine-tuning requires a GPU and non-trivial training time.
+
+- Labeling Assist Panel : After you achieve reliable tracking with a strong model, consider using the Cutie Labeling Assist Panel add-on to accelerate proofreading and targeted fixes (selective play, selective re-propagation, single-frame propagation, bulk ID reassignment).
+
+→ See: [Cutie Labeling Assist Panel Add-On](https://github.com/coldlabkaist/Labeling-Assist-Panel-Injection-Code)
+
 ## (Optional) How to Create Contour
 <br>
 <img width="1098" height="429" alt="step2_8" src="https://github.com/user-attachments/assets/56c297db-9bb7-4397-8b37-35e706dbe4c2" />

@@ -14,6 +14,7 @@ If you want to easily complete labeling (around 50-150 labels) and then proceed 
 This model is specialized for tracking up to six B6 mice in various environments. Details and distribution file links are below.
 
 ### Environment
+- with contoured video
 
 ![environments](https://github.com/user-attachments/assets/792e1a71-4b9c-476d-b51f-6ef2acb41e76)
 

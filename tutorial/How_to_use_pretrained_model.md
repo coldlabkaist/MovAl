@@ -1,4 +1,4 @@
-# How to use pretrained model
+# How to use pretrained tracking model
 
 For the user's convenient tracking, we provide a pretrained model.
 

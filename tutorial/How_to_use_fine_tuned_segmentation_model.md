@@ -28,7 +28,7 @@ weights: weights/<target_model_name>.pth
 
 
 ## Available Models & Recommended Use
-### [B6 Pretrained model](https://drive.google.com/file/d/1UT4HRKQLJiURKt5voLBWRCZ5Wio8NUtB/view?usp=drive_link)
+### [B6 Pretrained model](https://drive.google.com/file/d/1UT4HRKQLJiURKt5voLBWRCZ5Wio8NUtB/view?usp=sharing)
 
 - **B6_pretrained_hc_setting.pth**
 

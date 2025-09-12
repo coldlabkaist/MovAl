@@ -66,4 +66,6 @@ git pull --ff-only
 
 **Now you are ready to use MovAl.**
 
+**Troubleshooting**: https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Troubleshooting.md
+
 Next step: [1. Create Project](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/1_Create_Project.md)

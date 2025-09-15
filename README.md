@@ -27,6 +27,11 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 
 
 ## News
+**25.09.15.** MovAl v1.0.4 released
+- Resolve index shift issue of labelary
+- Clean up and standardize config file paths
+- Add selective contour generation
+
 **25.08.14.** MovAl v1.0.3 released
 - Resolved CPU management issue
 - Bug fixed path for txt2csv

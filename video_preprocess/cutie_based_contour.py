@@ -1,25 +1,70 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QPushButton,
     QTextEdit, QProgressBar, QLabel,
-    QDialog, QLineEdit, QMessageBox, QSpinBox, QProgressBar
+    QDialog, QLineEdit, QMessageBox, QSpinBox, QProgressBar,
+    QCheckBox, QDialogButtonBox, QHBoxLayout, QScrollArea, QWidget
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
 import os
 import glob
 from .thread import ContourWorker
 from pathlib import Path
+from typing import Optional, List
+
+class VideoMultiSelectDialog(QDialog):
+    def __init__(self, parent, current_project):
+        super().__init__(parent)
+        self.setWindowTitle("Select Videos for Contour")
+        self.setMinimumSize(420, 480)
+        self._checks: list[QCheckBox] = []
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Select videos to generate contours."))
+
+        base = Path(current_project.project_dir) / "frames"
+        names = sorted([p.name for p in base.iterdir() if p.is_dir()]) if base.exists() else []
+
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        box = QWidget(); v = QVBoxLayout(box); v.setContentsMargins(6,6,6,6); v.setSpacing(4)
+        for name in names:
+            cb = QCheckBox(name); cb.setChecked(True)
+            v.addWidget(cb)
+            self._checks.append(cb)
+        v.addStretch(1)
+        scroll.setWidget(box)
+        layout.addWidget(scroll, 1)
+
+        tools = QHBoxLayout()
+        btn_all   = QPushButton("Select All")
+        btn_none  = QPushButton("Select None")
+        btn_inv   = QPushButton("Select Invert")
+        tools.addWidget(btn_all); tools.addWidget(btn_none); tools.addWidget(btn_inv)
+        layout.addLayout(tools)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        layout.addWidget(btns)
+
+        btn_all.clicked.connect(lambda: [cb.setChecked(True) for cb in self._checks])
+        btn_none.clicked.connect(lambda: [cb.setChecked(False) for cb in self._checks])
+        btn_inv.clicked.connect(lambda: [cb.setChecked(not cb.isChecked()) for cb in self._checks])
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+
+    def selected_names(self) -> list[str]:
+        return [cb.text() for cb in self._checks if cb.isChecked()]
 
 class BatchContourProcessor(QObject):
     all_done   = pyqtSignal()       
     any_error  = pyqtSignal(str) 
     progress   = pyqtSignal(int,int) 
 
-    def __init__(self, parent, current_project, max_threads: int = 4):
+    def __init__(self, parent, current_project, max_threads: int = 4, include_only: Optional[List[str]] = None):
         super().__init__(parent)
         self.parent = parent
 
         self.current_project = current_project
         self._max_parallel   = max_threads
+        self._include_only   = set(include_only) if include_only else None
 
         self._total  = 0
         self._done   = 0
@@ -33,12 +78,20 @@ class BatchContourProcessor(QObject):
             return
 
         workspaces = [p for p in base.iterdir() if p.is_dir()]
+        if self._include_only is not None:
+            name_set = self._include_only
+            workspaces = [p for p in workspaces if p.name in name_set]
         if not workspaces:
             self.any_error.emit(f"No workspace folders in:\n{base}")
+            msg = f"No workspace folders in:\n{base}" if self._include_only is None \
+                  else "No selected videos to process."
+            self.any_error.emit(msg)
             return
 
+        print(f"[Batch] Starting contour for {len(workspaces)} videos with max {self._max_parallel} threads.")
+
         self._total = len(workspaces)
-        self.progress.emit(0, self._total)
+        #self.progress.emit(0, self._total)
 
         self._pending = workspaces.copy()
         self._active = []

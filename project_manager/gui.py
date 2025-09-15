@@ -384,7 +384,7 @@ class ProjectManagerDialog(QDialog):
                 
                 if copy_videos:
                     path_str = _safe_copy(path_str, os.path.join(proj_dir, "raw_videos"))
-                current_vid = {"video": path_str, "csv": [], "txt": []}
+                current_vid = {"video": Path(path_str).as_posix(), "csv": [], "txt": []}
                 project_files.append(current_vid)
                 _ensure_dir(os.path.join(proj_dir, "labels", Path(path_str).stem, "csv"))
                 _ensure_dir(os.path.join(proj_dir, "labels", Path(path_str).stem, "txt"))
@@ -396,7 +396,7 @@ class ProjectManagerDialog(QDialog):
                 if copy_labels:
                     sub = "csv" if ftype == "csv" else "txt"
                     path_str = _safe_copy(path_str, os.path.join(proj_dir, "labels", current_video_name, sub))
-                current_vid[ftype].append(path_str)
+                current_vid[ftype].append(Path(path_str).as_posix())
 
         if not project_files:
             QMessageBox.critical(self, "Error",
@@ -406,7 +406,7 @@ class ProjectManagerDialog(QDialog):
         project_config_path = os.path.join(proj_dir, "config.yaml")
         config = {
             "moval_version": __version__,
-            "project_dir": proj_dir,
+            "project_dir": Path(proj_dir).as_posix(),
             "title": title,
             "num_animals": int(self.step1_spin.value()),
             "animals_name": instance_names,
@@ -428,9 +428,9 @@ class ProjectManagerDialog(QDialog):
         skeleton_model.load_from_yaml(skeleton_model_dir)
         nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
         config = {
-            "train": os.path.join(training_base_dir, "train"),
-            "val": os.path.join(training_base_dir, "val"),
-            "test": os.path.join(training_base_dir, "test"),
+            "train": Path(os.path.join(training_base_dir, "train")).as_posix(),
+            "val": Path(os.path.join(training_base_dir, "val")).as_posix(),
+            "test": Path(os.path.join(training_base_dir, "test")).as_posix(),
             "nc": len(instance_names),
             "names": {i: n for i, n in enumerate(instance_names)},
             "nkpt": nkpt,

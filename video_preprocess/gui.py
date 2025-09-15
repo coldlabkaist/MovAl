@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QLabel, QMessageBox
+from pathlib import Path
 from .segment import CutieDialog
-from .cutie_based_contour import BatchContourProcessor
+from .cutie_based_contour import BatchContourProcessor, VideoMultiSelectDialog
 
 class PreprocessDialog(QDialog):
     def __init__(self, parent=None, current_project = None):
@@ -32,17 +33,29 @@ class PreprocessDialog(QDialog):
         dialog.exec()
 
     def open_contour(self):
+        base = Path(self.current_project.project_dir) / "frames"
+        if not base.exists():
+            QMessageBox.critical(self, "Error", f"'frames' directory not found:\n{base}")
+            return
+        dlg = VideoMultiSelectDialog(self, self.current_project)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dlg.selected_names()
+        if not selected:
+            QMessageBox.information(self, "Contour", "Please select at least one video.")
+            return
         reply = QMessageBox.question(
             self,
             "Generate Contours",
-            "Would you like to generate contour frames?",
+            f"Selected {len(selected)} Video(s) for contour generation.\n",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes
         )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
 
-        if reply == QMessageBox.StandardButton.Yes:
-            processor = BatchContourProcessor(self, self.current_project, max_threads=4)
-            processor.any_error.connect(lambda msg: QMessageBox.critical(self, "Error", msg))
-            processor.progress.connect(lambda done, total: print(f"[Batch] {done}/{total} videos finished")) 
-            processor.all_done.connect(lambda: QMessageBox.information(self, "Batch", "All contours finished."))
-            processor.start()
+        processor = BatchContourProcessor(self, self.current_project, max_threads=4, include_only=selected)
+        processor.any_error.connect(lambda msg: QMessageBox.critical(self, "Error", msg))
+        processor.progress.connect(lambda done, total: print(f"[Batch] {done}/{total} videos finished"))
+        processor.all_done.connect(lambda: QMessageBox.information(self, "Batch", "All contours finished."))
+        processor.start()

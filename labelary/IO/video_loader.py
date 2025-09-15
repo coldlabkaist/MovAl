@@ -109,9 +109,9 @@ class VideoLoader:
         self.skeleton_video_viewer.current_frame = self.current_frame
 
         self.frame_slider.setValue(self.current_frame)
-        self.frame_number_label.setText(f"{self.current_frame+1} / {self.total_frames}")
+        self.frame_number_label.setText(f"{self.current_frame} (total frames : {self.total_frames})")
 
-        csv_points = DataLoader.get_keypoint_coordinates_by_frame(self.current_frame + 1)
+        csv_points = DataLoader.get_keypoint_coordinates_by_frame(self.current_frame)
         self.skeleton_video_viewer.setCSVPoints(csv_points)
         self.kpt_list.update_list_visibility(csv_points)
 

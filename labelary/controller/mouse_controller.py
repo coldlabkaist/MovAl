@@ -181,7 +181,7 @@ class MouseController(QObject):
 
         if self.video_viewer.dragging_target:
             kind = self.video_viewer.dragging_target[0]
-            frame_idx = getattr(self.video_viewer, "current_frame", 0) + 1
+            frame_idx = getattr(self.video_viewer, "current_frame", 0) 
             if kind == "csv":
                 _, track, kp = self.video_viewer.dragging_target
                 nx, ny, _ = self.video_viewer.csv_points[track][kp]
@@ -334,7 +334,7 @@ class MouseController(QObject):
     def _add_new_skeleton_label(self):
         if not hasattr(self.video_viewer, "current_frame"):
             return
-        frame_idx = self.video_viewer.current_frame + 1
+        frame_idx = self.video_viewer.current_frame
         present_tracks = self._tracks_in_frame(frame_idx)
         
         new_track = next((name for name in self.track_list
@@ -367,7 +367,7 @@ class MouseController(QObject):
     def _delete_selected_instance(self):
         if self.selected_instance is None:
             return
-        frame_idx = getattr(self.video_viewer, "current_frame", 0) + 1
+        frame_idx = getattr(self.video_viewer, "current_frame", 0) 
         track = self.selected_instance
         success = DataLoader.delete_instance(frame_idx, track)
         if not success:
@@ -404,7 +404,7 @@ class MouseController(QObject):
             if not ok:
                 return
 
-        frame_idx   = getattr(self.video_viewer, "current_frame", 0) + 1
+        frame_idx   = getattr(self.video_viewer, "current_frame", 0)
         old_track   = self.selected_instance
         if not DataLoader.swap_or_rename_instance(frame_idx, old_track, new_track):
             return
@@ -421,7 +421,7 @@ class MouseController(QObject):
         if self.selected_node is None:
             return
         track, kp = self.selected_node
-        frame_idx = getattr(self.video_viewer, "current_frame", 0) + 1
+        frame_idx = getattr(self.video_viewer, "current_frame", 0)
 
         cur_vis = 2
         df = DataLoader.loaded_data if hasattr(DataLoader, "loaded_data") else None

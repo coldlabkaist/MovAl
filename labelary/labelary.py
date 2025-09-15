@@ -191,7 +191,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def update_csv_points_on_image(self):
         current_frame = self.video_loader.current_frame
-        coords_dict = DataLoader.get_keypoint_coordinates_by_frame(current_frame + 1)
+        coords_dict = DataLoader.get_keypoint_coordinates_by_frame(current_frame)
         self.skeleton_video_viewer.setCSVPoints(coords_dict)
         self.kpt_list.update_list_visibility(coords_dict)
         

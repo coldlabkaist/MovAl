@@ -112,9 +112,12 @@ def save_modified_data(parent: QWidget):
             df_to_save.to_csv(csv_path, index=False)
             QMessageBox.information(parent, "Success", f"CSV Saved!:\n{csv_path}")
             modify_yaml(video_path, "csv", csv_path, config_path, project_info)
+            parent.update_label_combo(
+                video_index = (parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
+                set_text = csv_path
+            )
         except Exception as e:
             QMessageBox.critical(parent, "Error", f"Failed to save CSV:\n{e}")
-        parent.update_label_combo(set_text = csv_path)
         return
 
     if action == "txt":
@@ -139,9 +142,12 @@ def save_modified_data(parent: QWidget):
             QMessageBox.information(parent, "Success", f"TXT Exported:\n{txt_dir}")
             if not has_existing:
                 modify_yaml(video_path, "txt", txt_dir, config_path, project_info)
+            parent.update_label_combo(
+                video_index = (parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
+                set_text = txt_dir
+            )
         except Exception as e:
             QMessageBox.critical(parent, "Error", f"Failed to export TXT:\n{e}")
-        parent.update_label_combo(set_text = txt_dir)
         return
         
     if action == "video":

@@ -15,8 +15,33 @@ Tips:
 Do not arbitrarily upgrade NumPy; stick to the versions pinned by the tutorial. 
 Avoid mixing conda and pip unless the tutorial explicitly instructs it.
 
+## 2. Error During Cutie Oneclick Installation
 
-## 2. OSError: [WinError 182] ... fbgemm.dll (Windows / PyTorch)
+Symptom: Errors occur during Cutie installation, especially in the model download process.
+
+Cause: 
+In many cases, these issues are related to PyTorch dependencies. Please review the following points:
+
+- Check for fbgemm.dll errors.
+(See the solution section below.)
+
+- Verify your Ubuntu version.
+If you are using Ubuntu 24.04, be aware that due to Torch compatibility issues, MovAl does not support Ubuntu 24.04.
+
+- Confirm Torch and CUDA functionality in your environment.
+If PyTorch cannot be successfully imported, MovAl will also fail to run.
+
+```
+conda activate moval
+python - <<PY
+import torch
+print("PyTorch version:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+PY
+```
+
+
+## 3. OSError: [WinError 182] ... fbgemm.dll (Windows / PyTorch)
 
 Symptom: 
 Runtime error loading fbgemm.dll (or one of its dependencies) when launching a Torch-based program:

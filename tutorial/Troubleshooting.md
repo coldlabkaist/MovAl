@@ -61,12 +61,6 @@ If the error persists, install the Intel OpenMP runtime:
 
 Restart your shell (or reboot) and try again.
 
-Notes
-
-Ensure your PyTorch build matches your Python version and CUDA/driver setup.
-
-If you recently changed CUDA or drivers, reinstalling a matching PyTorch build can help.
-
 
 ## Other Common Issues
 **Cutie runs too slowly**
@@ -74,3 +68,5 @@ If you recently changed CUDA or drivers, reinstalling a matching PyTorch build c
 - When running Cutie, the terminal should explicitly display that CUDA is being used.
 If this message does not appear, segmentation may be running on CPU instead of GPU.
 - In this case, please recheck your dependency configuration and ensure CUDA is correctly enabled.
+- **Notes:**
+Ensure your PyTorch build matches your Python version and CUDA/driver setup.

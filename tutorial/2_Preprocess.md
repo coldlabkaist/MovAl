@@ -78,7 +78,7 @@ switch back to the MovAl tab to review your progress as shown above.
 To speed up and stabilize your Cutie labeling workflow, please review the following:
 
 - Use the fine-tuned Cutie models: In addition to the base Cutie model, we distributes fine-tuned variants. These typically yield more stable ID tracking and greater robustness under occlusion compared with the base model.
-- 
+
 → See : https://github.com/coldlabkaist/MovAl/blob/main/tutorial/How_to_use_fine_tuned_segmentation_model.md
 
 - Consider fine-tuning for your specific environment : If you plan to label large batches of data under a single recording setup, we recommend fine-tuning a Cutie model for that environment.

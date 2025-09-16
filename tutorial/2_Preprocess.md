@@ -82,8 +82,7 @@ To speed up and stabilize your Cutie labeling workflow, please review the follow
 → See : https://github.com/coldlabkaist/MovAl/blob/main/tutorial/How_to_use_fine_tuned_segmentation_model.md
 
 - Consider fine-tuning for your specific environment : If you plan to label large batches of data under a single recording setup, we recommend fine-tuning a Cutie model for that environment.
-
-Note: Fine-tuning requires a GPU and non-trivial training time.
+(Fine-tuning requires a GPU and non-trivial training time.)
 
 - Labeling Assist Panel : After you achieve reliable tracking with a strong model, consider using the Cutie Labeling Assist Panel add-on to accelerate proofreading and targeted fixes (selective play, selective re-propagation, single-frame propagation, bulk ID reassignment).
 

@@ -2,24 +2,24 @@
 
 ## 1. OmegaConf / dependency error on startup
 
-Symptom: 
+**Symptom:**
 Import/initialization fails with messages related to omegaconf or version conflicts.
 
-Cause: 
+**Cause:**
 An incompatible NumPy version is installed, which breaks Cutie’s dependency.
 
-Fix: 
+**Fix:** 
 Recreate the moval virtual environment exactly as described in the MovAl installation tutorial.
 
-Tips: 
+**Tips:** 
 Do not arbitrarily upgrade NumPy; stick to the versions pinned by the tutorial. 
 Avoid mixing conda and pip unless the tutorial explicitly instructs it.
 
 ## 2. Error During Cutie Oneclick Installation
 
-Symptom: Errors occur during Cutie installation, especially in the model download process.
+**Symptom:** Errors occur during Cutie installation, especially in the model download process.
 
-Cause: 
+**Cause:** 
 In many cases, these issues are related to PyTorch dependencies. Please review the following points:
 
 - Check for fbgemm.dll errors.
@@ -43,16 +43,16 @@ PY
 
 ## 3. OSError: [WinError 182] ... fbgemm.dll (Windows / PyTorch)
 
-Symptom: 
+**Symptom:** 
 Runtime error loading fbgemm.dll (or one of its dependencies) when launching a Torch-based program:
 
 OSError: [WinError 182] The operating system cannot run %1.
 Error loading ".../torch/lib/fbgemm.dll" or one of its dependencies.
 
-Cause: 
+**Cause:** 
 Missing MSVC C++ runtime and/or OpenMP runtime required by PyTorch on Windows.
 
-Fix: 
+**Fix:** 
 Install Visual Studio (or Build Tools for Visual Studio) with the “Desktop development with C++” workload.
 This provides the required MSVC runtime for Torch.
 
@@ -66,3 +66,11 @@ Notes
 Ensure your PyTorch build matches your Python version and CUDA/driver setup.
 
 If you recently changed CUDA or drivers, reinstalling a matching PyTorch build can help.
+
+
+## Other Common Issues
+**Cutie runs too slowly**
+
+- When running Cutie, the terminal should explicitly display that CUDA is being used.
+If this message does not appear, segmentation may be running on CPU instead of GPU.
+- In this case, please recheck your dependency configuration and ensure CUDA is correctly enabled.

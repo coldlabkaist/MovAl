@@ -90,8 +90,8 @@ class DataLoader:
     @staticmethod
     def _first_frame_row(df):
         try:
-            first_idx = df["frame.idx"].min() 
-            return df[df["frame.idx"] == first_idx].iloc[0]
+            first_idx = df["frame_idx"].min() 
+            return df[df["frame_idx"] == first_idx].iloc[0]
         except Exception:
             return None
             
@@ -125,7 +125,7 @@ class DataLoader:
             return {}
         coords = {t: {} for t in cls.animals_name}
         try:
-            frame_df = cls.loaded_data.xs(frame_idx, level="frame.idx")
+            frame_df = cls.loaded_data.xs(frame_idx, level="frame_idx")
         except KeyError:
             return coords
 
@@ -157,7 +157,7 @@ class DataLoader:
         if cls.loaded_data is None:
             print("DataLoader.update_kpt_visibility: No data loaded.")
             return
-        mask = (cls.loaded_data["track"] == track) & (cls.loaded_data["frame.idx"] == frame_idx)
+        mask = (cls.loaded_data["track"] == track) & (cls.loaded_data["frame_idx"] == frame_idx)
         if mask.sum() == 0:
             print(f"DataLoader.update_kpt_visibility: No row for track={track}, frame={frame_idx}")
             return
@@ -173,7 +173,7 @@ class DataLoader:
         if cls.loaded_data is None:
             print("DataLoader.update_point: No data loaded.")
             return
-        mask = (cls.loaded_data["track"] == track) & (cls.loaded_data["frame.idx"] == frame_idx)
+        mask = (cls.loaded_data["track"] == track) & (cls.loaded_data["frame_idx"] == frame_idx)
         if mask.sum() == 0:
             print(f"DataLoader.update_point: No row for track={track}, frame={frame_idx}")
             return
@@ -189,7 +189,7 @@ class DataLoader:
     @classmethod
     def create_new_data(cls, n_tracks: int = 1) -> bool:
         cls._ensure_skeleton()
-        cols = ["track", "frame.idx", "instance.visibility"]
+        cols = ["track", "frame_idx", "instance.visibility"]
         for kp in cls.kp_order:
             cols += [f"{kp}.x", f"{kp}.y", f"{kp}.visibility"]
         df = pd.DataFrame(columns=cols)
@@ -213,26 +213,26 @@ class DataLoader:
             return False
         track_name = cls._to_project_name(track_name)
 
-        frame_df = cls.loaded_data[cls.loaded_data["frame.idx"] == frame_idx]
+        frame_df = cls.loaded_data[cls.loaded_data["frame_idx"] == frame_idx]
         if frame_df["track"].nunique() >= getattr(cls, "max_animals", 1):
             print("Cannot add new skeleton: maximum instances reached for this frame.")
             return False
 
         if ((cls.loaded_data["track"] == track_name) &
-            (cls.loaded_data["frame.idx"] == frame_idx)).any():
+            (cls.loaded_data["frame_idx"] == frame_idx)).any():
             return False
 
-        new_row = {"track": track_name, "frame.idx": frame_idx}
+        new_row = {"track": track_name, "frame_idx": frame_idx}
         if "instance.visibility" in cls.loaded_data.columns:
             new_row["instance.visibility"] = 2
 
         init_coords: dict[str, tuple[float, float, int]] = {}
         mask = ((cls.loaded_data["track"] == track_name) &
-                (cls.loaded_data["frame.idx"].between(frame_idx - nearby_range,
+                (cls.loaded_data["frame_idx"].between(frame_idx - nearby_range,
                                                       frame_idx + nearby_range)))
         if not cls.loaded_data[mask].empty:
             near_df = cls.loaded_data[mask]
-            idx_nearest = (near_df["frame.idx"] - frame_idx).abs().idxmin()
+            idx_nearest = (near_df["frame_idx"] - frame_idx).abs().idxmin()
             src = near_df.loc[idx_nearest]
             for kp in cls.kp_order:
                 xcol, ycol, vcol = f"{kp}.x", f"{kp}.y", f"{kp}.visibility"
@@ -271,7 +271,7 @@ class DataLoader:
             return False
         if not cls.loaded_data.empty:
             cls.loaded_data = (cls.loaded_data
-                               .set_index(["frame.idx", "track"], drop=False)
+                               .set_index(["frame_idx", "track"], drop=False)
                                .sort_index())
         return True
 
@@ -285,8 +285,8 @@ class DataLoader:
         if old_track == new_track:
             return True
 
-        m_old = (cls.loaded_data["frame.idx"] == frame_idx) & (cls.loaded_data["track"] == old_track)
-        m_new = (cls.loaded_data["frame.idx"] == frame_idx) & (cls.loaded_data["track"] == new_track)
+        m_old = (cls.loaded_data["frame_idx"] == frame_idx) & (cls.loaded_data["track"] == old_track)
+        m_new = (cls.loaded_data["frame_idx"] == frame_idx) & (cls.loaded_data["track"] == new_track)
 
         if m_old.sum() == 0:
             return False 
@@ -299,7 +299,7 @@ class DataLoader:
             cls.loaded_data.loc[m_old, "track"] = new_track
         cls.loaded_data = (
             cls.loaded_data
-            .set_index(["frame.idx", "track"], drop=False)
+            .set_index(["frame_idx", "track"], drop=False)
             .sort_index()
         )
         return True
@@ -311,7 +311,7 @@ class DataLoader:
 
         before = len(cls.loaded_data)
         cls.loaded_data = cls.loaded_data[
-            ~((cls.loaded_data["frame.idx"] == frame_idx) &
+            ~((cls.loaded_data["frame_idx"] == frame_idx) &
               (cls.loaded_data["track"] == track))
         ]
         after = len(cls.loaded_data)
@@ -322,7 +322,7 @@ class DataLoader:
         if not cls.loaded_data.empty:
             cls.loaded_data = (
                 cls.loaded_data
-                .set_index(["frame.idx", "track"], drop=False)
+                .set_index(["frame_idx", "track"], drop=False)
                 .sort_index()
             )
         print(f"Deleted {track} @ frame {frame_idx}")
@@ -404,7 +404,7 @@ class DataLoader:
         for row in arr:
             rec: dict = {
                 "track": f"track_{int(row[0])}",
-                "frame.idx": frame_idx,
+                "frame_idx": frame_idx,
                 "instance.visibility": 2
             }
             off = 5
@@ -462,7 +462,7 @@ class DataLoader:
                         kp_order.append(base)
             cls.kp_order = kp_order  
 
-            base_cols = ["track", "frame.idx"]
+            base_cols = ["track", "frame_idx"]
             if "instance.visibility" in df.columns:
                 base_cols.append("instance.visibility")
 
@@ -476,7 +476,7 @@ class DataLoader:
 
             df = df[new_order] 
             df = (
-                df.set_index(["frame.idx", "track"], drop=False)
+                df.set_index(["frame_idx", "track"], drop=False)
                 .sort_index()
             )
 

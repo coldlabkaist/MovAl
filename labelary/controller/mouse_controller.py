@@ -362,7 +362,7 @@ class MouseController(QObject):
         df = DataLoader.loaded_data
         if df is None or df.empty:
             return set()
-        return set(df[df["frame.idx"] == frame_idx]["track"].unique())
+        return set(df[df["frame_idx"] == frame_idx]["track"].unique())
 
     def _delete_selected_instance(self):
         if self.selected_instance is None:
@@ -427,7 +427,7 @@ class MouseController(QObject):
         df = DataLoader.loaded_data if hasattr(DataLoader, "loaded_data") else None
         if df is not None:
             try:
-                cur_vis = df.loc[(df["track"] == track) & (df["frame.idx"] == frame_idx), f"{kp}.visibility"].iat[0]
+                cur_vis = df.loc[(df["track"] == track) & (df["frame_idx"] == frame_idx), f"{kp}.visibility"].iat[0]
             except Exception:
                 pass
 

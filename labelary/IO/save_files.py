@@ -226,11 +226,11 @@ def _norm(p: str | Path) -> Path:
 def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    max_f = int(df["frame.idx"].max())
+    max_f = int(df["frame_idx"].max())
     pad   = max(2, len(str(max_f)))
 
     tracks_num = df["track"].map({n: i for i, n in enumerate(DataLoader.animals_name)}).to_numpy(np.int32)
-    fidx_arr   = df["frame.idx"].to_numpy(np.int32)
+    fidx_arr   = df["frame_idx"].to_numpy(np.int32)
 
     xs = df.filter(regex=r"\.x$").to_numpy(np.float32)
     ys = df.filter(regex=r"\.y$").to_numpy(np.float32)

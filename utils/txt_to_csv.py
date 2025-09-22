@@ -32,7 +32,7 @@ class TxtToCsvDialog(QDialog):
         txt_btn.clicked.connect(self.load_txt_folders)
         main_layout.addWidget(txt_btn)
 
-        yaml_btn = QPushButton("Read Data YAML")
+        yaml_btn = QPushButton("Read Data YAML (training_config.yaml from MovAl)")
         yaml_btn.clicked.connect(self.load_yaml)
         main_layout.addWidget(yaml_btn)
 
@@ -219,7 +219,7 @@ class TxtToCsvDialog(QDialog):
                         track_data[key] = (prev_np.tolist(), remapped_id)
 
                 for (track_id, _), (kpt_data, remapped_id) in track_data.items():
-                    row = [f"track_{track_id}", idx + 1, 0.9]
+                    row = [f"track_{track_id}", idx, 0.9]
                     for kp in range(len(self.kpt_names)):
                         x, y, conf = kpt_data[kp*3:kp*3+3]
                         row.extend([x, y, conf])
@@ -227,7 +227,7 @@ class TxtToCsvDialog(QDialog):
                         row.append(remapped_id)
                     rows.append(row)
 
-            columns = ["track", "frame.idx", "instance.score"]
+            columns = ["track", "frame_idx", "instance.score"]
             for name in self.kpt_names:
                 columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
             if has_instance_id:
@@ -303,7 +303,7 @@ class TxtToCsvDialog(QDialog):
                         track_data[key] = (prev_np.tolist(), remapped_id)
 
                 for (track_id, _), (kpt_data, remapped_id) in track_data.items():
-                    row = [f"track_{track_id}", idx + 1, 0.9]
+                    row = [f"track_{track_id}", idx, 0.9]
                     for kp in range(len(self.kpt_names)):
                         x = kpt_data[kp*3] * width
                         y = kpt_data[kp*3+1] * height
@@ -313,7 +313,7 @@ class TxtToCsvDialog(QDialog):
                         row.append(remapped_id)
                     rows.append(row)
 
-            columns = ["track", "frame.idx", "instance.score"]
+            columns = ["track", "frame_idx", "instance.score"]
             for name in self.kpt_names:
                 columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
             if has_instance_id:

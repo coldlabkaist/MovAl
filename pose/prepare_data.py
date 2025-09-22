@@ -81,6 +81,7 @@ class DataSplitDialog(QDialog):
         layout.addSpacing(20)
 
         self.frame_type_combo = QComboBox()
+        self.frame_type_combo.addItem("images")
         self.frame_type_combo.addItem("davis")
         self.frame_type_combo.addItem("contour")
         layout.addWidget(self.frame_type_combo)
@@ -107,8 +108,12 @@ class DataSplitDialog(QDialog):
             video_stem = video_path.stem
             frame_type = self.frame_type_combo.currentText()
 
-            frame_dir  = (Path(current_project.project_dir) /
-                        "frames" / video_stem / "visualization" / frame_type)
+            if frame_type in ["davis", "contour"]:
+                frame_dir  = (Path(current_project.project_dir) /
+                            "frames" / video_stem / "visualization" / frame_type)
+            else:
+                frame_dir  = (Path(current_project.project_dir) /
+                            "frames" / video_stem / "images")
             label_dir  = Path(current_project.project_dir) / "labels" / video_stem / "txt"
             frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
             label_cnt = sum(1 for _ in label_dir.glob("*.txt"))
@@ -221,8 +226,11 @@ class DataSplitDialog(QDialog):
                 frame_idx      = int(orig_num_str) 
                 frame_num      = f"{frame_idx:0{digits_len}d}"
                 base_name      = f"{video_name}_{frame_idx:0{base_digit_len}d}"
-
-                img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
+                
+                if frame_type in ["davis", "contour"]:
+                    img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
+                else:
+                    img_dir  = project_dir / "frames" / video_name / "images"
                 img_path = img_dir / f"{frame_num}.jpg"
                 pair_list.append((lbl_file, img_path, base_name))
 

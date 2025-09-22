@@ -303,7 +303,7 @@ class YoloInferenceDialog(QDialog):
         lay = QVBoxLayout(sect)
         lay.setContentsMargins(0,0,0,0)
         self.image_mode_combo = QComboBox()
-        self.image_mode_combo.addItems(["davis", "contour"])
+        self.image_mode_combo.addItems(["images", "davis", "contour"])
         lay.addWidget(self.image_mode_combo)
 
         container = QWidget()
@@ -444,10 +444,16 @@ class YoloInferenceDialog(QDialog):
                 return None
             image_mode = self.image_mode_combo.currentText() 
             base_dir = Path(self.current_project.project_dir)
-            sources = [
-                (name, base_dir / "frames" / name / "visualization" / image_mode)
-                for name in selected_names
-            ]
+            if image_mode in ("davis", "contour"):
+                sources = [
+                    (name, base_dir / "frames" / name / "visualization" / image_mode)
+                    for name in selected_names
+                ]
+            else:
+                sources = [
+                    (name, base_dir / "frames" / name / "images")
+                    for name in selected_names
+                ]
             return sources
         elif self.video_radio.isChecked():
             count = self.loaded_list.count()

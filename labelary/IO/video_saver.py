@@ -51,7 +51,7 @@ def _export_video_stub(parent: QWidget) -> None:
         return
 
     total_images = len(image_files)
-    frame_indices = sorted(df["frame.idx"].unique().astype(int))
+    frame_indices = sorted(df["frame_idx"].unique().astype(int))
     total_frames = len(frame_indices)
 
     if total_images != total_frames:
@@ -126,7 +126,7 @@ def _export_video_stub(parent: QWidget) -> None:
     coords_are_normalized = df[xy_cols].max().max() <= 1.0 + 1e-6
 
     try:
-        frame_groups = {int(f): df[df["frame.idx"] == f] for f in frame_indices}
+        frame_groups = {int(f): df[df["frame_idx"] == f] for f in frame_indices}
         pad_width = len(image_files[0].stem)
 
         for i, img_path in tqdm(enumerate(image_files),

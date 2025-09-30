@@ -10,7 +10,11 @@ class TrainThread(QThread):
         self.command = command
 
     def run(self):
-        subprocess.run(self.command, shell=True)
+        try:
+            subprocess.run(self.command, shell=True, check=True)
+        except Exception:
+            cmd_list = self.command if isinstance(self.command, (list, tuple)) else str(self.command).split()
+            subprocess.run(cmd_list, shell=False, check=True)
         self.finished_signal.emit()
         
 class InferenceThread(QThread):
@@ -19,12 +23,19 @@ class InferenceThread(QThread):
         self.command = command
 
     def run(self):
-        process = subprocess.Popen(
-            self.command,
-            shell=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1, encoding='utf-8'
-        )
+        try:
+            process = subprocess.Popen(
+                self.command, shell=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1, encoding='utf-8'
+            )
+        except Exception:
+            cmd_list = self.command if isinstance(self.command, (list, tuple)) else str(self.command).split()
+            process = subprocess.Popen(
+                cmd_list, shell=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1, encoding='utf-8'
+            )
 
         for line in iter(process.stdout.readline, ''):
             if line:

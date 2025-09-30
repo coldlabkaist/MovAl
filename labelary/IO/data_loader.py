@@ -33,6 +33,37 @@ class DataLoader:
     _BATCH_ROWS: int = 20000
     records_tmp: List[dict] = []
 
+    _label_version: int = 0  
+    _label_frames_cache: Optional[list] = None
+    _label_cache_version: int = -1
+
+    ### Version ###
+
+    @classmethod
+    def _bump_label_version(cls) -> None:
+        cls._label_version += 1
+
+    @classmethod
+    def get_labeled_frames(cls) -> list[int]:
+        df = cls.loaded_data
+        if df is None or df.empty:
+            return []
+        if (cls._label_frames_cache is not None and
+            cls._label_cache_version == cls._label_version):
+            return cls._label_frames_cache
+        try:
+            if isinstance(df.index, pd.MultiIndex) and "frame_idx" in df.index.names:
+                vals = df.index.get_level_values("frame_idx").unique()
+            else:
+                vals = df["frame_idx"].unique()
+            labeled = sorted(vals.tolist())
+        except Exception:
+            labeled = []
+
+        cls._label_frames_cache = labeled
+        cls._label_cache_version = cls._label_version
+        return labeled
+
     ### Skeleton ###
 
     @classmethod
@@ -107,7 +138,7 @@ class DataLoader:
     @classmethod
     def _normalize_df(cls):
         if cls.img_width is None or cls.img_height is None:
-            print("⚠️ 해상도 정보 없음 → 정규화 건너뜀")
+            print("No resolution information, Skip normalization")
             return
         if not cls.kp_order:
             cls.kp_order = [c[:-2] for c in cls.loaded_data.columns if c.endswith(".x")]
@@ -196,6 +227,7 @@ class DataLoader:
         cls.loaded_data = df
         cls.csv_path = None
         cls._coords_normalized = True
+        cls._bump_label_version()
         return True
 
     @classmethod
@@ -273,6 +305,7 @@ class DataLoader:
             cls.loaded_data = (cls.loaded_data
                                .set_index(["frame_idx", "track"], drop=False)
                                .sort_index())
+        cls._bump_label_version()
         return True
 
     @classmethod
@@ -326,6 +359,7 @@ class DataLoader:
                 .sort_index()
             )
         print(f"Deleted {track} @ frame {frame_idx}")
+        cls._bump_label_version()
         return True
 
     ### Load Label ###
@@ -446,12 +480,12 @@ class DataLoader:
                 df["track"] = df["track"].map(mapping)
                 cls.track_mapping = mapping
 
-
             for col in list(df.columns):
-                if col.endswith(".score"):
+                if col.endswith(".visibility"): # for txt
+                    df[col] = 2
+                if col.endswith(".score"): # for csv
                     vis = col.replace(".score", ".visibility")
-                    if vis not in df.columns:
-                        df[vis] = 2
+                    df[vis] = 2
             df = df.drop(columns=[c for c in df.columns if c.endswith(".score")])
 
             kp_order: List[str] = []
@@ -490,6 +524,7 @@ class DataLoader:
                 cls._coords_normalized = True
 
             print(f"Loaded: {origin}")
+            cls._bump_label_version()
             return True
 
         except Exception as e:

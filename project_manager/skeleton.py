@@ -148,6 +148,13 @@ class SkeletonManagerDialog(QDialog):
                 edge_item = EdgeItem(self.node_items[n1], self.node_items[n2])
                 edge_item.setZValue(3)
                 self.scene.addItem(edge_item)
+        for n1, n2 in (tuple(sym) for sym in self.model.syms):
+            if n1 in self.node_items and n2 in self.node_items:
+                sym_item = SymItem(self.node_items[n1], self.node_items[n2])
+                sym_item.setZValue(3.1) 
+                self.scene.addItem(sym_item)
+
+        self.scene.update()
 
     def add_node_to_list(self, node):
         item = QListWidgetItem(node.name)

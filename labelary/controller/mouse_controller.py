@@ -5,8 +5,9 @@ from PyQt6.QtWidgets import QMenu
 from ..IO.data_loader import DataLoader
 
 class MouseController(QObject):
-    def __init__(self, video_viewer, kpt_list, parent=None):
+    def __init__(self, video_loader, video_viewer, kpt_list, parent=None):
         super().__init__(parent)
+        self.video_loader = video_loader
         self.video_viewer = video_viewer
         self.kpt_list = kpt_list
         self.track_list = video_viewer.current_project.animals_name
@@ -265,6 +266,15 @@ class MouseController(QObject):
         act_vis.setShortcut(QKeySequence("Ctrl+V"))
         act_delete.setShortcutVisibleInContextMenu(True)
 
+        if self.video_loader is not None:
+            menu.addSeparator()
+            act_prev_lbl = menu.addAction("Move to Previous Labeled Frame")
+            act_next_lbl = menu.addAction("Move to Next Labeled Frame")
+            act_prev_lbl.triggered.connect(lambda: self._move_labeled(-1))
+            act_next_lbl.triggered.connect(lambda: self._move_labeled(+1))
+            act_prev_lbl.setShortcut(QKeySequence("Ctrl+ ←"))
+            act_next_lbl.setShortcut(QKeySequence("Ctrl+ →"))
+
         act_add.setEnabled(self.video_viewer.current_animal_num <= self.max_animals)
         act_delete.setEnabled(self.selected_instance is not None)
         act_change_num.setEnabled(self.selected_instance is not None)
@@ -437,3 +447,8 @@ class MouseController(QObject):
             nx, ny, _ = self.video_viewer.csv_points[track][kp]
             self.video_viewer.csv_points[track][kp] = (nx, ny, new_vis)
         self.video_viewer.update()
+
+    def _move_labeled(self, direction: int):
+        if self.video_loader is None:
+            return
+        self.video_loader.move_to_labeled_frame(direction)

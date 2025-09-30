@@ -71,7 +71,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.accept()
     
     def install_controller(self):
-        mouse_controller = MouseController(self.skeleton_video_viewer, self.kpt_list)
+        mouse_controller = MouseController(self.video_loader, self.skeleton_video_viewer, self.kpt_list)
         self.mouse_controller = mouse_controller
         self.skeleton_video_viewer.mouse_controller = mouse_controller
         self.skeleton_video_viewer.installEventFilter(mouse_controller)

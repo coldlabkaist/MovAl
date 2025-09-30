@@ -57,7 +57,10 @@ class DataConverterDialog(QDialog):
             QMessageBox.warning(self, "Error", f"{bat_path} not found")
             return
 
-        subprocess.Popen(bat_path, shell=True)
+        try:
+            subprocess.Popen(bat_path, shell=True)
+        except Exception:
+            subprocess.Popen(["cmd", "/c", bat_path], shell=False)
         QMessageBox.information(self, "Launching", "Launching SLP to COCO GUI...")
         
     def open_dlc_to_coco(self):

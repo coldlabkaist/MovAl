@@ -144,3 +144,26 @@ class VideoLoader:
             self.display_video_on_viewer(frame)
         else:
             self.timer.stop()
+
+    def _labeled_frames_sorted(self):
+        return DataLoader.get_labeled_frames()
+
+    def _find_neighbor_labeled_frame(self, start_idx: int, direction: int) -> int:
+        labeled = self._labeled_frames_sorted()
+        if not labeled:
+            return 0 if direction < 0 else max(0, self.total_frames - 1)
+
+        if direction > 0:
+            for f in labeled:
+                if f > start_idx:
+                    return min(f, self.total_frames - 1)
+            return max(0, self.total_frames - 1)
+        else:
+            for f in reversed(labeled):
+                if f < start_idx:
+                    return max(0, f)
+            return 0
+
+    def move_to_labeled_frame(self, direction: int):
+        target = self._find_neighbor_labeled_frame(self.current_frame, direction)
+        self.move_to_frame(target, force=True)

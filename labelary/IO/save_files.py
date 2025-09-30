@@ -104,8 +104,7 @@ def save_modified_data(parent: QWidget):
         df_to_save = df_orig.copy()
         for sc in [c for c in df_to_save.columns if c.endswith(".score")]:
             vis = sc.replace(".score", ".visibility")
-            if vis not in df_to_save.columns:
-                df_to_save[vis] = 2
+            df_to_save[vis] = 2
             df_to_save.drop(columns=[sc], inplace=True)
 
         try:

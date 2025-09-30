@@ -27,6 +27,11 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 
 
 ## News
+**25.09.30.** MovAl v1.0.6 released
+- Improved Training Stability
+- Fixed Visibility Bug
+- New Feature: Labeled-Frame Navigation in Labelary
+
 **25.09.15.** MovAl v1.0.4 released
 - Resolve index shift issue of labelary
 - Clean up and standardize config file paths

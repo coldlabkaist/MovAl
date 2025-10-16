@@ -104,7 +104,8 @@ def save_modified_data(parent: QWidget):
         df_to_save = df_orig.copy()
         for sc in [c for c in df_to_save.columns if c.endswith(".score")]:
             vis = sc.replace(".score", ".visibility")
-            df_to_save[vis] = 2
+            if vis not in df_to_save.columns:
+                df_to_save[vis] = 2
             df_to_save.drop(columns=[sc], inplace=True)
 
         try:
@@ -230,11 +231,14 @@ def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
 
     tracks_num = df["track"].map({n: i for i, n in enumerate(DataLoader.animals_name)}).to_numpy(np.int32)
     fidx_arr   = df["frame_idx"].to_numpy(np.int32)
+    x_cols = [f"{kp}.x" for kp in DataLoader.kp_order if f"{kp}.x" in df.columns]
+    y_cols = [f"{kp}.y" for kp in DataLoader.kp_order if f"{kp}.y" in df.columns]
+    v_cols = [f"{kp}.visibility" for kp in DataLoader.kp_order if f"{kp}.visibility" in df.columns]
 
-    xs = df.filter(regex=r"\.x$").to_numpy(np.float32)
-    ys = df.filter(regex=r"\.y$").to_numpy(np.float32)
-    vs = df.filter(regex=r"\.visibility$").to_numpy(np.int8)
-    kp_n = xs.shape[1]
+    xs = df[x_cols].to_numpy(np.float32)
+    ys = df[y_cols].to_numpy(np.float32)
+    vs = df[v_cols].to_numpy(np.int8)
+    kp_n = len(v_cols)
 
     unique_frames = np.unique(fidx_arr)
 

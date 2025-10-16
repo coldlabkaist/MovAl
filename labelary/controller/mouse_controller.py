@@ -180,18 +180,21 @@ class MouseController(QObject):
         if not self._dragging:
             return False
 
-        if self.video_viewer.dragging_target:
-            kind = self.video_viewer.dragging_target[0]
-            frame_idx = getattr(self.video_viewer, "current_frame", 0) 
-            if kind == "csv":
-                _, track, kp = self.video_viewer.dragging_target
-                nx, ny, _ = self.video_viewer.csv_points[track][kp]
-                DataLoader.update_point(track, frame_idx, kp, nx, ny)
-            elif kind == "instance":
-                _, track = self.video_viewer.dragging_target
-                if track in self.video_viewer.csv_points:
-                    for kp, (nx, ny, _) in self.video_viewer.csv_points[track].items():
-                        DataLoader.update_point(track, frame_idx, kp, nx, ny)
+        try:
+            if self.video_viewer.dragging_target:
+                kind = self.video_viewer.dragging_target[0]
+                frame_idx = getattr(self.video_viewer, "current_frame", 0) 
+                if kind == "csv":
+                    _, track, kp = self.video_viewer.dragging_target
+                    nx, ny, _ = self.video_viewer.csv_points[track][kp]
+                    DataLoader.update_point(track, frame_idx, kp, nx, ny)
+                elif kind == "instance":
+                    _, track = self.video_viewer.dragging_target
+                    if track in self.video_viewer.csv_points:
+                        for kp, (nx, ny, _) in self.video_viewer.csv_points[track].items():
+                            DataLoader.update_point(track, frame_idx, kp, nx, ny)
+        except KeyError:
+            pass
 
         self._dragging = False
         self.video_viewer.dragging_target = None

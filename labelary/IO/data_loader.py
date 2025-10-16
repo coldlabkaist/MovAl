@@ -36,6 +36,7 @@ class DataLoader:
     _label_version: int = 0  
     _label_frames_cache: Optional[list] = None
     _label_cache_version: int = -1
+    _inference_mode: bool = False
 
     ### Version ###
 
@@ -370,10 +371,11 @@ class DataLoader:
         return cls._load_generic(file_path, read_func=pd.read_csv)
 
     @classmethod
-    def load_txt_data(cls, path: Union[str, Path], sep: str = r"\s+") -> bool:
+    def load_txt_data(cls, path: Union[str, Path], sep: str = r"\s+", inference_mode: bool = False) -> bool:
         print("This may take some time.")
         cls._ensure_skeleton()
         path = Path(path)
+        cls._inference_mode = inference_mode
 
         if path.is_dir():
             txt_files = sorted(path.glob("*.txt"))
@@ -413,7 +415,9 @@ class DataLoader:
                 print("There is no readable txt.")
                 return False
             df_total = pd.concat(chunks, ignore_index=True)
-            return cls._load_generic(df_total, from_dataframe=True)
+            result = cls._load_generic(df_total, from_dataframe=True)
+            cls._inference_mode = False
+            return result
 
         print("Attempting to read incorrect txt directory")
         return False
@@ -446,7 +450,11 @@ class DataLoader:
                 x, y, vis = row[off: off+3]
                 rec[f"{kp}.x"] = float(x)
                 rec[f"{kp}.y"] = float(y)
-                rec[f"{kp}.visibility"] = 1 if vis in (1, 2) else 2
+                if cls._inference_mode:
+                    rec[f"{kp}.visibility"] = 2
+                else:
+                    v = int(round(float(vis)))
+                    rec[f"{kp}.visibility"] = 1 if v == 1 else 2
                 off += 3
             records.append(rec)
         return records
@@ -454,11 +462,11 @@ class DataLoader:
     @classmethod
     def _load_generic(cls, src, read_func=None, *, from_dataframe: bool = False) -> bool:
         try:
-            if from_dataframe:                  # txt
+            if from_dataframe:                  
                 df = src
                 origin = "<DataFrame>"
                 cls.csv_path = None
-            else:                               # csv
+            else:                               
                 df = read_func(src)
                 origin = str(src)
                 cls.csv_path = origin
@@ -480,11 +488,9 @@ class DataLoader:
                 df["track"] = df["track"].map(mapping)
                 cls.track_mapping = mapping
 
-            for col in list(df.columns):
-                if col.endswith(".visibility"): # for txt
-                    df[col] = 2
-                if col.endswith(".score"): # for csv
-                    vis = col.replace(".score", ".visibility")
+            for sc in [c for c in df.columns if c.endswith(".score")]:
+                vis = sc.replace(".score", ".visibility")
+                if vis not in df.columns:
                     df[vis] = 2
             df = df.drop(columns=[c for c in df.columns if c.endswith(".score")])
 

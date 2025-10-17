@@ -14,7 +14,6 @@ def extract_frame_number(filename):
     match = re.search(r'_(\d+)\.txt$', filename)
     if match:
         return int(match.group(1))
-    # fallback for filenames like 0000001.txt (no prefix)
     match = re.search(r'(\d+)\.txt$', filename)
     return int(match.group(1)) if match else -1
 
@@ -81,7 +80,6 @@ class TxtToCsvDialog(QDialog):
         dialog.setFileMode(QFileDialog.FileMode.Directory)
         dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-        # enable multi-selection for directories
         for view in dialog.findChildren(QListView) + dialog.findChildren(QTreeView):
             view.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
 
@@ -184,8 +182,8 @@ class TxtToCsvDialog(QDialog):
             for idx, txt_path in enumerate(all_txts):
                 with open(txt_path, "r") as f:
                     lines = f.readlines()
-
-                track_data = {}
+                    
+                detections = []
                 for line in lines:
                     items = line.strip().split()
                     if len(items) < 6:
@@ -205,21 +203,30 @@ class TxtToCsvDialog(QDialog):
                         kpt_data = list(map(float, raw))
 
                     remapped_id = instance_id if instance_id is not None else ""
+                    detections.append((track_id, remapped_id, kpt_data))
 
-                    key = (track_id, instance_id)
+                # Use actual frame number from filename instead of sequential index
+                frame_num = extract_frame_number(os.path.basename(txt_path))
+                if frame_num < 0:
+                    frame_num = idx + 1
+
+                # Merge duplicates by (track_id, instance_id) using per-kpt max confidence
+                track_data = {}
+                for track_id, remapped_id, kpt_data in detections:
+                    key = (track_id, remapped_id if remapped_id != "" else None)
                     if key not in track_data:
                         track_data[key] = (kpt_data, remapped_id)
                     else:
-                        prev, _ = track_data[key]
+                        prev, rid = track_data[key]
                         prev_np = np.array(prev)
                         curr_np = np.array(kpt_data)
                         for kp in range(len(self.kpt_names)):
                             if curr_np[kp*3 + 2] > prev_np[kp*3 + 2]:
                                 prev_np[kp*3:kp*3+3] = curr_np[kp*3:kp*3+3]
-                        track_data[key] = (prev_np.tolist(), remapped_id)
+                        track_data[key] = (prev_np.tolist(), rid)
 
                 for (track_id, _), (kpt_data, remapped_id) in track_data.items():
-                    row = [f"track_{track_id}", idx, 0.9]
+                    row = [f"track_{track_id}", frame_num, 0.9]
                     for kp in range(len(self.kpt_names)):
                         x, y, conf = kpt_data[kp*3:kp*3+3]
                         row.extend([x, y, conf])
@@ -269,7 +276,7 @@ class TxtToCsvDialog(QDialog):
                 with open(txt_path, "r") as f:
                     lines = f.readlines()
 
-                track_data = {}
+                detections = []  # list of tuples: (track_id, remapped_id, kpt_data)
                 for line in lines:
                     items = line.strip().split()
                     if len(items) < 6:
@@ -289,21 +296,29 @@ class TxtToCsvDialog(QDialog):
                         kpt_data = list(map(float, raw))
 
                     remapped_id = instance_id if instance_id is not None else ""
+                    detections.append((track_id, remapped_id, kpt_data))
+                # Use actual frame number from filename instead of sequential index
+                frame_num = extract_frame_number(os.path.basename(txt_path))
+                if frame_num < 0:
+                    frame_num = idx + 1
 
-                    key = (track_id, instance_id)
+                # Merge duplicates by (track_id, instance_id) using per-kpt max confidence
+                track_data = {}
+                for track_id, remapped_id, kpt_data in detections:
+                    key = (track_id, remapped_id if remapped_id != "" else None)
                     if key not in track_data:
                         track_data[key] = (kpt_data, remapped_id)
                     else:
-                        prev, _ = track_data[key]
+                        prev, rid = track_data[key]
                         prev_np = np.array(prev)
                         curr_np = np.array(kpt_data)
                         for kp in range(len(self.kpt_names)):
                             if curr_np[kp*3 + 2] > prev_np[kp*3 + 2]:
                                 prev_np[kp*3:kp*3+3] = curr_np[kp*3:kp*3+3]
-                        track_data[key] = (prev_np.tolist(), remapped_id)
+                        track_data[key] = (prev_np.tolist(), rid)
 
                 for (track_id, _), (kpt_data, remapped_id) in track_data.items():
-                    row = [f"track_{track_id}", idx, 0.9]
+                    row = [f"track_{track_id}", frame_num, 0.9]
                     for kp in range(len(self.kpt_names)):
                         x = kpt_data[kp*3] * width
                         y = kpt_data[kp*3+1] * height

@@ -1,7 +1,7 @@
 # 0. Installation
 
 ## Requirements
-- CUDA 11.8 or 12.1 (Both versions are compatible) 
+- CUDA 11.8 (or 12.1/12.8)
 - Supports Windows 11, Ubuntu 22.04 environment (Ubuntu 24.04 is not compatible)
 - We recommend using Conda for setting up the environment.
 - numpy (>=1.23.0,<2.0) is required to operate Cutie.
@@ -11,13 +11,14 @@ Check your CUDA version from terminal.
 ```bash
 nvcc --version
 ```
-You must use CUDA 11.8 or 12.1 to install pytorch 1.2.1. 
+We recommend to use cuda 11.8, at the same time we support 12.1, 12.8.
 
 **If the command still doesn’t detect the correct CUDA version**, set the system environment variables 
 (System Properties → Environment Variables) or set them temporarily with the command below.
 ```bash
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8"  # for CUDA 11.8 only
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"  # for CUDA 12.1 only
+set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"  # for CUDA 12.8 only
 set "PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%"
 ```
 
@@ -37,6 +38,9 @@ conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=
 
 # for CUDA 12.1 
 conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=12.1 -c pytorch -c nvidia
+
+# for CUDA 12.8
+pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 ```  
 ```bash
 conda install "numpy>=1.23.0,<2.0"

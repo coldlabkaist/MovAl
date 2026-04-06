@@ -24,6 +24,9 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.setupUi(self)
 
         self.project = project
+        self.auto_label_model = None
+        self.auto_label_model_path: Optional[str] = None
+        self.auto_label_model_mode: Optional[str] = None
         self.load_skeleton_model()
         self.load_video_combo()
         self.load_mode_combo()
@@ -46,6 +49,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.frame_slider.sliderPressed.connect(self.on_frame_slider_pressed)
         self.frame_slider.sliderReleased.connect(self.on_frame_slider_released)
         self.load_data_button.clicked.connect(self.on_show_clicked)
+        self.browse_model_button.clicked.connect(self.browse_model)
+        self.load_model_button.clicked.connect(self.load_model)
+        self.model_path_edit.textChanged.connect(self.on_model_path_changed)
+        self.automatic_label_checkbox.toggled.connect(self.on_automatic_label_toggled)
 
         self.video_combo.currentIndexChanged.connect(self.update_label_combo)
         self.file_entry_idx = 0
@@ -55,6 +62,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.color_combo.currentIndexChanged.connect(self.set_color_mode)
 
         self.save_button.clicked.connect(self.open_save_dialog)
+        self._refresh_model_button_state()
 
     def load_skeleton_model(self):
         self.skeleton = SkeletonModel()
@@ -162,6 +170,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.is_video_paused = True
         self.update_keypoint_list()
         self.update_csv_points_on_image()
+        self.maybe_auto_label_current_frame()
 
     def load_csv(self, path):
         DataLoader.load_csv_data(path)
@@ -188,6 +197,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
     def on_frame_slider_released(self):
         if not self.is_video_paused:
             self.video_loader.toggle_playback()
+        self.maybe_auto_label_current_frame()
 
     def update_csv_points_on_image(self):
         current_frame = self.video_loader.current_frame
@@ -215,6 +225,237 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def open_save_dialog(self):
         save_modified_data(self)
+
+    def on_automatic_label_toggled(self, checked: bool):
+        if not checked:
+            return
+        if self.auto_label_model is None:
+            QMessageBox.warning(self, "Model not loaded", "Load a model before enabling automatic labeling.")
+            self.automatic_label_checkbox.blockSignals(True)
+            self.automatic_label_checkbox.setChecked(False)
+            self.automatic_label_checkbox.blockSignals(False)
+            return
+        self.maybe_auto_label_current_frame()
+
+    def browse_model(self):
+        start_dir = self._default_model_dir()
+        model_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select YOLO pose model",
+            str(start_dir),
+            "PyTorch model (*.pt);;All Files (*)"
+        )
+        if not model_path:
+            return
+        self.model_path_edit.setText(model_path)
+
+    def load_model(self):
+        raw_path = self.model_path_edit.text().strip()
+        if not raw_path:
+            QMessageBox.warning(self, "No model selected", "Select a model file first.")
+            return
+
+        model_path = Path(raw_path).expanduser()
+        if not model_path.exists() or not model_path.is_file():
+            QMessageBox.warning(self, "Invalid model path", f"Model file not found:\n{model_path}")
+            return
+
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            QMessageBox.critical(
+                self,
+                "Ultralytics not installed",
+                "The ultralytics package is required to load YOLO models."
+            )
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            model = YOLO(str(model_path))
+            model_task = getattr(model, "task", None)
+            if model_task not in (None, "pose"):
+                raise ValueError(f"Expected a pose model, but got task='{model_task}'.")
+        except Exception as e:
+            QMessageBox.critical(self, "Model load failed", f"Failed to load model:\n{e}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        resolved_path = str(model_path.resolve())
+        self.auto_label_model = model
+        self.auto_label_model_path = resolved_path
+        self.auto_label_model_mode = self.mode_combo.currentText()
+        self.model_path_edit.blockSignals(True)
+        self.model_path_edit.setText(resolved_path)
+        self.model_path_edit.blockSignals(False)
+        self._refresh_model_button_state()
+
+        QMessageBox.information(
+            self,
+            "Model loaded",
+            f"Loaded model:\n{resolved_path}\n\nMode at load time: {self.auto_label_model_mode}"
+        )
+        if self.automatic_label_checkbox.isChecked():
+            self.maybe_auto_label_current_frame()
+
+    def on_model_path_changed(self, text: str):
+        new_path = text.strip()
+        if self.auto_label_model_path is None:
+            self._refresh_model_button_state()
+            return
+
+        try:
+            current_path = str(Path(new_path).expanduser().resolve()) if new_path else ""
+        except Exception:
+            current_path = new_path
+
+        if current_path != self.auto_label_model_path:
+            self.auto_label_model = None
+            self.auto_label_model_path = None
+            self.auto_label_model_mode = None
+        self._refresh_model_button_state()
+
+    def _default_model_dir(self) -> Path:
+        candidates = [
+            Path(self.project.project_dir) / "runs",
+            Path.cwd() / "models",
+            Path(self.project.project_dir),
+            Path.cwd(),
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return Path.cwd()
+
+    def _refresh_model_button_state(self):
+        loaded = self.auto_label_model is not None and self.auto_label_model_path is not None
+        self.load_model_button.setText("Reload Model" if loaded else "Load Model")
+        if loaded:
+            self.load_model_button.setToolTip(
+                f"Loaded for mode '{self.auto_label_model_mode}': {self.auto_label_model_path}"
+            )
+        else:
+            self.load_model_button.setToolTip("")
+
+    def maybe_auto_label_current_frame(self):
+        if not self.automatic_label_checkbox.isChecked():
+            return
+        if self.auto_label_model is None:
+            return
+        if not getattr(self.skeleton_video_viewer, "video_loaded", False):
+            return
+
+        current_mode = self.video_loader.frame_display_mode
+        if self.auto_label_model_mode and current_mode != self.auto_label_model_mode:
+            QMessageBox.warning(
+                self,
+                "Mode mismatch",
+                "The loaded model was loaded for a different display mode.\n"
+                "Reload the model for the current mode before using automatic labeling."
+            )
+            self.automatic_label_checkbox.blockSignals(True)
+            self.automatic_label_checkbox.setChecked(False)
+            self.automatic_label_checkbox.blockSignals(False)
+            return
+
+        frame_idx = self.video_loader.current_frame
+        if DataLoader.frame_has_labels(frame_idx):
+            return
+
+        frame_path = self.video_loader.get_current_frame_path()
+        if not frame_path:
+            return
+
+        try:
+            instances = self.predict_current_frame(frame_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Auto labeling failed", f"Failed to run inference:\n{e}")
+            return
+
+        if not instances:
+            return
+
+        if DataLoader.add_auto_labeled_frame(frame_idx, instances):
+            self.update_csv_points_on_image()
+            self.skeleton_video_viewer.update()
+            self.kpt_list.update()
+
+    def predict_current_frame(self, frame_path: str) -> list[dict]:
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            results = self.auto_label_model.predict(
+                source=frame_path,
+                verbose=False,
+                save=False,
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if not results:
+            return []
+
+        result = results[0]
+        boxes = getattr(result, "boxes", None)
+        keypoints = getattr(result, "keypoints", None)
+        if boxes is None or keypoints is None or boxes.cls is None or keypoints.xyn is None:
+            return []
+
+        cls_ids = boxes.cls.cpu().tolist()
+        det_scores = boxes.conf.cpu().tolist() if boxes.conf is not None else [0.0] * len(cls_ids)
+        keypoint_xy = keypoints.xyn.cpu().tolist()
+        keypoint_conf_tensor = getattr(keypoints, "conf", None)
+        keypoint_conf = keypoint_conf_tensor.cpu().tolist() if keypoint_conf_tensor is not None else None
+
+        if len(keypoint_xy) != len(cls_ids):
+            return []
+
+        expected_kpts = len(DataLoader.kp_order)
+        best_by_class: dict[int, dict] = {}
+        for det_idx, cls_val in enumerate(cls_ids):
+            class_idx = int(cls_val)
+            if not (0 <= class_idx < len(self.project.animals_name)):
+                continue
+
+            kp_xy = keypoint_xy[det_idx]
+            if len(kp_xy) != expected_kpts:
+                raise ValueError(
+                    f"Model predicted {len(kp_xy)} keypoints, but the project expects {expected_kpts}."
+                )
+
+            score = float(det_scores[det_idx]) if det_idx < len(det_scores) else 0.0
+            prev = best_by_class.get(class_idx)
+            if prev is not None and prev["score"] >= score:
+                continue
+
+            kp_conf_row = None
+            if keypoint_conf is not None and det_idx < len(keypoint_conf):
+                kp_conf_row = keypoint_conf[det_idx]
+
+            kp_map: dict[str, tuple[float, float, int]] = {}
+            for kp_idx, kp_name in enumerate(DataLoader.kp_order):
+                x, y = kp_xy[kp_idx]
+                x = max(0.0, min(float(x), 1.0))
+                y = max(0.0, min(float(y), 1.0))
+                conf = None
+                if kp_conf_row is not None and kp_idx < len(kp_conf_row):
+                    conf = kp_conf_row[kp_idx]
+                vis = 2 if conf is None or float(conf) > 0.0 else 1
+                kp_map[kp_name] = (x, y, vis)
+
+            best_by_class[class_idx] = {
+                "score": score,
+                "track": self.project.animals_name[class_idx],
+                "keypoints": kp_map,
+            }
+
+        return [
+            {
+                "track": item["track"],
+                "keypoints": item["keypoints"],
+            }
+            for _, item in sorted(best_by_class.items())
+        ]
 
 def run_labelary_with_project(current_project, parent=None):
     app = QApplication.instance() or QApplication(sys.argv)

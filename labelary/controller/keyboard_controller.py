@@ -12,20 +12,25 @@ class KeyboardController(QObject):
             key = event.key()
             if key == Qt.Key.Key_Right and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 current = self.video_loader.current_frame
-                self.video_loader.move_to_frame(current + 1)
+                if current + 1 < self.video_loader.total_frames:
+                    self.video_loader.move_to_frame(current + 1)
+                    self.main_dialog.maybe_auto_label_current_frame()
                 return True
             elif key == Qt.Key.Key_Left and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 current = self.video_loader.current_frame
                 if current > 0:
                     self.video_loader.move_to_frame(current - 1)
+                    self.main_dialog.maybe_auto_label_current_frame()
                 return True
             elif (key == Qt.Key.Key_Right and
                   event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 self.video_loader.move_to_labeled_frame(+1)
+                self.main_dialog.maybe_auto_label_current_frame()
                 return True
             elif (key == Qt.Key.Key_Left and
                   event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 self.video_loader.move_to_labeled_frame(-1)
+                self.main_dialog.maybe_auto_label_current_frame()
                 return True
 
             elif key == Qt.Key.Key_Space and not event.isAutoRepeat():

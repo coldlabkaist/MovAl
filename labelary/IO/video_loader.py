@@ -1,6 +1,7 @@
 import cv2
 import os
 from pathlib import Path
+from typing import Optional
 from tqdm import tqdm
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap, QImage
@@ -26,6 +27,7 @@ class VideoLoader:
         self.frame_display_mode = frame_display_mode
 
         self.frame_dir = None
+        self.frame_files = []
         self.current_frame = 0
         self.total_frames = 0
         self.timer = QTimer()
@@ -52,13 +54,16 @@ class VideoLoader:
         path = os.path.join(frame_base_path, path.stem, self._ensure_display_mode(frame_display_mode))
         self.frame_dir = path
         try:
-            frame_list = [f for f in os.listdir(path) if f.endswith(".jpg")]
-            first_frame_path = os.path.join(path, frame_list[0])
+            self.frame_files = sorted(f for f in os.listdir(path) if f.endswith(".jpg"))
+            if not self.frame_files:
+                print("Could not load first frame.")
+                return False
+            first_frame_path = os.path.join(path, self.frame_files[0])
 
-            if frame_list[0] and os.path.exists(first_frame_path):
+            if self.frame_files[0] and os.path.exists(first_frame_path):
                 frame = cv2.imread(first_frame_path)
                 if frame is not None:
-                    self.display_video(frame, len(frame_list))
+                    self.display_video(frame, len(self.frame_files))
                     print(f"First frame displayed: {first_frame_path}")
                 else:
                     print("Could not load first frame.")
@@ -128,7 +133,10 @@ class VideoLoader:
     def play_next_frame(self):
         if self.current_frame + 1 < self.total_frames:
             self.current_frame += 1
-            frame_path = os.path.join(self.frame_dir, sorted(os.listdir(self.frame_dir))[self.current_frame])
+            frame_path = self.get_frame_path(self.current_frame)
+            if frame_path is None:
+                self.timer.stop()
+                return
             frame = cv2.imread(frame_path)
             self.display_video_on_viewer(frame)
         else:
@@ -139,11 +147,26 @@ class VideoLoader:
             return
         if 0 <= frame_idx < self.total_frames:
             self.current_frame = frame_idx
-            frame_path = os.path.join(self.frame_dir, sorted(os.listdir(self.frame_dir))[frame_idx])
+            frame_path = self.get_frame_path(frame_idx)
+            if frame_path is None:
+                self.timer.stop()
+                return
             frame = cv2.imread(frame_path)
             self.display_video_on_viewer(frame)
         else:
             self.timer.stop()
+
+    def get_frame_path(self, frame_idx: int) -> Optional[str]:
+        if self.frame_dir is None:
+            return None
+        if not self.frame_files:
+            return None
+        if not (0 <= frame_idx < len(self.frame_files)):
+            return None
+        return os.path.join(self.frame_dir, self.frame_files[frame_idx])
+
+    def get_current_frame_path(self) -> Optional[str]:
+        return self.get_frame_path(self.current_frame)
 
     def _labeled_frames_sorted(self):
         return DataLoader.get_labeled_frames()

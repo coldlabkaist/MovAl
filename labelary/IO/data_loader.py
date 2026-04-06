@@ -172,6 +172,16 @@ class DataLoader:
                     coords[track][kp] = (row[xcol], row[ycol], row[scol])
         return coords
 
+    @classmethod
+    def frame_has_labels(cls, frame_idx: int) -> bool:
+        df = cls.loaded_data
+        if df is None or df.empty:
+            return False
+        try:
+            return bool((df["frame_idx"] == frame_idx).any())
+        except Exception:
+            return False
+
     @staticmethod
     def is_empty(obj) -> bool:
         if obj is None:
@@ -227,6 +237,55 @@ class DataLoader:
         df = pd.DataFrame(columns=cols)
         cls.loaded_data = df
         cls.csv_path = None
+        cls._coords_normalized = True
+        cls._bump_label_version()
+        return True
+
+    @classmethod
+    def add_auto_labeled_frame(cls, frame_idx: int, instances: list[dict]) -> bool:
+        cls._ensure_skeleton()
+        if not instances:
+            return False
+
+        if cls.loaded_data is None:
+            cls.create_new_data()
+
+        if cls.frame_has_labels(frame_idx):
+            return False
+
+        rows: list[dict] = []
+        for instance in instances:
+            track_name = instance.get("track")
+            if track_name is None:
+                continue
+            keypoints = instance.get("keypoints", {})
+            row = {
+                "track": str(track_name),
+                "frame_idx": int(frame_idx),
+                "instance.visibility": 2,
+            }
+            for kp in cls.kp_order:
+                x, y, vis = keypoints.get(kp, (0.0, 0.0, 1))
+                row[f"{kp}.x"] = float(x)
+                row[f"{kp}.y"] = float(y)
+                row[f"{kp}.visibility"] = int(vis)
+            rows.append(row)
+
+        if not rows:
+            return False
+
+        new_rows = pd.DataFrame.from_records(rows)
+        if cls.loaded_data is None or cls.loaded_data.empty:
+            cls.loaded_data = new_rows
+        else:
+            base_df = cls.loaded_data.reset_index(drop=True)
+            cls.loaded_data = pd.concat([base_df, new_rows], ignore_index=True, sort=False)
+
+        cls.loaded_data = (
+            cls.loaded_data
+            .set_index(["frame_idx", "track"], drop=False)
+            .sort_index()
+        )
         cls._coords_normalized = True
         cls._bump_label_version()
         return True

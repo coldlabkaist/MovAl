@@ -497,29 +497,50 @@ class YoloInferenceDialog(QDialog):
         ts_time = ts.strftime("%H%M%S")
         base_out= os.path.join(self.current_project.project_dir, "predicts")
 
+        def norm(p):
+            return str(p).replace("\\", "/")
+        
+        model_path = norm(model_path)
+        base_out = norm(base_out)
+
         for name, src in sources:
+            src = norm(src)
+
+            run_name = f"predict__{name}_{ts_date}_{ts_time}"
+
             if self.tracking_radio.isChecked():
                 tracker_name = self.track_method_combo.currentText() + ".yaml"
-                command = f'yolo track model="{model_path}" tracker={tracker_name} source="{src}"'
+                cmd = [
+                    "yolo", "track",
+                    f"model={model_path}",
+                    f"tracker={tracker_name}",
+                    f"source={src}",
+                    f"project={base_out}",
+                    f"name={run_name}",
+                ]
             else:
-                command = f'yolo pose predict model="{model_path}" source="{src}"'
-            command += f' project="{base_out}" name=predict__{name}_{ts_date}_{ts_time}'
+                cmd = [
+                    "yolo", "pose", "predict",
+                    f"model={model_path}",
+                    f"source={src}",
+                    f"project={base_out}",
+                    f"name={run_name}",
+                ]
+
             for k, v in infer_params.items():
                 if v in ["", "None"]:
                     continue
                 if isinstance(v, bool):
                     if v:
-                        command += f" {k}=True"
+                        cmd.append(f"{k}=True")
                 else:
-                    command += f" {k}={v}"
+                    cmd.append(f"{k}={v}")
 
-            vis_option = ""
             for k in ["show", "save", "save_txt"]:
                 if vis_params.get(k, False):
-                    command += f" {k}=True"
-            command += vis_option
+                    cmd.append(f"{k}=True")
 
-            self.command_queue.append(command)
+            self.command_queue.append(cmd)
 
         self.run_next_command()
 

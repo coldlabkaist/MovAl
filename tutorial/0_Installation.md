@@ -63,7 +63,8 @@ If your local MovAl version is outdated compared to the latest release version o
 You can simply update it using the following command
 ```bash
 cd (MovAl_folder)
-git pull --ff-only
+git fetch --tags
+git checkout (version) # git checkout v1.1.1
 ```
 
 ---

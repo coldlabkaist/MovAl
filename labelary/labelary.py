@@ -9,13 +9,17 @@ from .gui import UI_LabelaryDialog
 from .IO.video_loader import VideoLoader
 from .widget.image_label import ClickableImageLabel
 from .IO.data_loader import DataLoader
-from .IO.save_files import save_modified_data
+from .IO.save_files import save_modified_data, export_current_labels_to_txt_snapshot
 from .controller.keyboard_controller import KeyboardController
 from .controller.mouse_controller import MouseController
 from utils.skeleton import SkeletonModel
+from pose.prepare_data import create_online_training_dataset
+from pose.thread import TrainThread
 
 from typing import Union, Optional, List
+from datetime import datetime
 from pathlib import Path
+import yaml
 import sys
 
 class LabelaryDialog(QDialog, UI_LabelaryDialog):
@@ -27,6 +31,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.auto_label_model = None
         self.auto_label_model_path: Optional[str] = None
         self.auto_label_model_mode: Optional[str] = None
+        self.mini_training_thread: Optional[TrainThread] = None
+        self.mini_training_run_context: Optional[dict] = None
         self.load_skeleton_model()
         self.load_video_combo()
         self.load_mode_combo()
@@ -49,10 +55,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.frame_slider.sliderPressed.connect(self.on_frame_slider_pressed)
         self.frame_slider.sliderReleased.connect(self.on_frame_slider_released)
         self.load_data_button.clicked.connect(self.on_show_clicked)
-        self.browse_model_button.clicked.connect(self.browse_model)
-        self.load_model_button.clicked.connect(self.load_model)
+        self.load_model_button.clicked.connect(self.browse_and_load_model)
         self.model_path_edit.textChanged.connect(self.on_model_path_changed)
         self.automatic_label_checkbox.toggled.connect(self.on_automatic_label_toggled)
+        self.mini_training_button.clicked.connect(self.run_mini_training)
 
         self.video_combo.currentIndexChanged.connect(self.update_label_combo)
         self.file_entry_idx = 0
@@ -63,6 +69,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
         self.save_button.clicked.connect(self.open_save_dialog)
         self._refresh_model_button_state()
+        self._refresh_mini_training_button_state()
 
     def load_skeleton_model(self):
         self.skeleton = SkeletonModel()
@@ -170,13 +177,14 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.is_video_paused = True
         self.update_keypoint_list()
         self.update_csv_points_on_image()
-        self.maybe_auto_label_current_frame()
+        self.auto_label_current_frame()
 
     def load_csv(self, path):
         DataLoader.load_csv_data(path)
 
     def load_txt(self, path):
-        DataLoader.load_txt_data(path)
+        inference_mode = self.label_combo.currentText() == "Load inference result"
+        DataLoader.load_txt_data(path, inference_mode=inference_mode)
 
     def create_new_label(self):
         DataLoader.create_new_data()
@@ -197,7 +205,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
     def on_frame_slider_released(self):
         if not self.is_video_paused:
             self.video_loader.toggle_playback()
-        self.maybe_auto_label_current_frame()
+        self.auto_label_current_frame()
 
     def update_csv_points_on_image(self):
         current_frame = self.video_loader.current_frame
@@ -235,7 +243,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.automatic_label_checkbox.setChecked(False)
             self.automatic_label_checkbox.blockSignals(False)
             return
-        self.maybe_auto_label_current_frame()
+        self.auto_label_current_frame()
 
     def browse_model(self):
         start_dir = self._default_model_dir()
@@ -248,6 +256,18 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         if not model_path:
             return
         self.model_path_edit.setText(model_path)
+
+    def browse_and_load_model(self):
+        raw_path = self.model_path_edit.text().strip()
+        if raw_path:
+            model_path = Path(raw_path).expanduser()
+            if model_path.exists() and model_path.is_file():
+                self.load_model()
+                return
+
+        self.browse_model()
+        if self.model_path_edit.text().strip():
+            self.load_model()
 
     def load_model(self):
         raw_path = self.model_path_edit.text().strip()
@@ -296,8 +316,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             "Model loaded",
             f"Loaded model:\n{resolved_path}\n\nMode at load time: {self.auto_label_model_mode}"
         )
-        if self.automatic_label_checkbox.isChecked():
-            self.maybe_auto_label_current_frame()
+        self.automatic_label_checkbox.setChecked(True)
+        self.auto_label_current_frame()
 
     def on_model_path_changed(self, text: str):
         new_path = text.strip()
@@ -330,15 +350,160 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def _refresh_model_button_state(self):
         loaded = self.auto_label_model is not None and self.auto_label_model_path is not None
-        self.load_model_button.setText("Reload Model" if loaded else "Load Model")
+        self.load_model_button.setText("Reload Model" if loaded else "Browse/Load Model")
         if loaded:
             self.load_model_button.setToolTip(
                 f"Loaded for mode '{self.auto_label_model_mode}': {self.auto_label_model_path}"
             )
         else:
             self.load_model_button.setToolTip("")
+        self._refresh_mini_training_button_state()
 
-    def maybe_auto_label_current_frame(self):
+    def _refresh_mini_training_button_state(self):
+        if self.mini_training_thread is not None and self.mini_training_thread.isRunning():
+            self.mini_training_button.setEnabled(False)
+            self.mini_training_button.setText("Mini Training...")
+        else:
+            self.mini_training_button.setEnabled(True)
+            self.mini_training_button.setText("Run Mini Training")
+
+        frame_mode = self.video_loader.frame_display_mode if getattr(self.skeleton_video_viewer, "video_loaded", False) else self.mode_combo.currentText()
+        self.mini_training_button.setToolTip(
+            "Export current in-memory labels to a timestamped snapshot under runs/, "
+            "build a separate online dataset, run short fine-tuning, and hot-load the resulting best.pt "
+            f"using the current frame mode '{frame_mode}'."
+        )
+
+    def _resolve_base_model_path(self) -> Optional[Path]:
+        candidates = []
+        if self.auto_label_model_path:
+            candidates.append(self.auto_label_model_path)
+
+        text_path = self.model_path_edit.text().strip()
+        if text_path:
+            candidates.append(text_path)
+
+        for raw_path in candidates:
+            try:
+                model_path = Path(raw_path).expanduser().resolve()
+            except Exception:
+                continue
+            if model_path.exists() and model_path.is_file():
+                return model_path
+        return None
+
+    def _current_frame_mode(self) -> str:
+        if getattr(self.skeleton_video_viewer, "video_loaded", False):
+            return self.video_loader.frame_display_mode
+        return self.mode_combo.currentText()
+
+    def _write_mini_training_config(self, dataset_dir: Path, run_name: str) -> Path:
+        base_config_path = Path(self.project.project_dir) / "runs" / "training_config.yaml"
+        if not base_config_path.exists():
+            raise FileNotFoundError(f"Training config not found:\n{base_config_path}")
+
+        with base_config_path.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+
+        config["train"] = (dataset_dir / "train").as_posix()
+        config["val"] = (dataset_dir / "val").as_posix()
+        config["test"] = (dataset_dir / "test").as_posix()
+
+        target_config_path = Path(self.project.project_dir) / "runs" / f"{run_name}_config.yaml"
+        with target_config_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+
+        return target_config_path
+
+    def run_mini_training(self):
+        if self.mini_training_thread is not None and self.mini_training_thread.isRunning():
+            return
+
+        if DataLoader.loaded_data is None or DataLoader.loaded_data.empty:
+            QMessageBox.warning(self, "No labels loaded", "Load and review labels before starting mini training.")
+            return
+
+        model_path = self._resolve_base_model_path()
+        if model_path is None:
+            QMessageBox.warning(self, "No model selected", "Load a base model or choose a valid model file first.")
+            return
+
+        try:
+            current_video = self.video_combo.currentData(Qt.ItemDataRole.UserRole)
+            if current_video is None:
+                raise ValueError("Current video is not selected.")
+
+            current_video_name = Path(current_video).stem
+            snapshot_dir = export_current_labels_to_txt_snapshot(self)
+            dataset_dir, split_counts = create_online_training_dataset(
+                self.project,
+                frame_type=self._current_frame_mode(),
+                label_dirs={current_video_name: snapshot_dir},
+            )
+
+            run_stamp = datetime.now().strftime("%y%m%d_%H%M%S")
+            run_name = f"mini_training_{run_stamp}"
+            config_path = self._write_mini_training_config(dataset_dir, run_name)
+            output_dir = Path(self.project.project_dir) / "runs" / run_name
+        except Exception as e:
+            QMessageBox.critical(self, "Mini training setup failed", f"Failed to prepare training inputs:\n{e}")
+            return
+
+        command = [
+            "yolo",
+            "pose",
+            "train",
+            f"model={model_path.as_posix()}",
+            f"data={config_path.as_posix()}",
+            f"epochs={int(self.mini_training_epochs_spin.value())}",
+            f"project={(Path(self.project.project_dir) / 'runs').as_posix()}",
+            f"name={run_name}",
+            "exist_ok=False",
+        ]
+
+        self.mini_training_run_context = {
+            "run_name": run_name,
+            "output_dir": output_dir,
+            "dataset_dir": dataset_dir,
+            "snapshot_dir": snapshot_dir,
+            "config_path": config_path,
+            "split_counts": split_counts,
+        }
+
+        self.mini_training_thread = TrainThread(command)
+        self.mini_training_thread.finished_signal.connect(self.on_mini_training_finished)
+        self._refresh_mini_training_button_state()
+        self.mini_training_thread.start()
+
+        QMessageBox.information(
+            self,
+            "Mini training started",
+            "Started quick fine-tuning with the current reviewed labels.\n\n"
+            f"Snapshot: {snapshot_dir}\n"
+            f"Dataset: {dataset_dir}\n"
+            f"Train/Val/Test: {split_counts['train']}/{split_counts['val']}/{split_counts['test']}\n"
+            f"Output: {output_dir}"
+        )
+
+    def on_mini_training_finished(self):
+        context = self.mini_training_run_context or {}
+        self.mini_training_thread = None
+        self._refresh_mini_training_button_state()
+
+        best_model_path = Path(context.get("output_dir", "")) / "weights" / "best.pt"
+        if not best_model_path.exists():
+            QMessageBox.critical(
+                self,
+                "Mini training failed",
+                "Training finished, but best.pt was not created.\n"
+                f"Expected path:\n{best_model_path}"
+            )
+            return
+
+        self.model_path_edit.setText(str(best_model_path.resolve()))
+        self.load_model()
+
+    def auto_label_current_frame(self):
         if not self.automatic_label_checkbox.isChecked():
             return
         if self.auto_label_model is None:
@@ -382,10 +547,12 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.kpt_list.update()
 
     def predict_current_frame(self, frame_path: str) -> list[dict]:
+        confidence_threshold = float(self.auto_label_confidence_spin.value())
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             results = self.auto_label_model.predict(
                 source=frame_path,
+                conf=confidence_threshold,
                 verbose=False,
                 save=False,
             )
@@ -424,6 +591,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 )
 
             score = float(det_scores[det_idx]) if det_idx < len(det_scores) else 0.0
+            if score < confidence_threshold:
+                continue
             prev = best_by_class.get(class_idx)
             if prev is not None and prev["score"] >= score:
                 continue

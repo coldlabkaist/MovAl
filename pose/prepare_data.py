@@ -1,22 +1,185 @@
-from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QPushButton,
-    QTextEdit, QLabel, QScrollArea, QComboBox,
-    QDialog, QMessageBox, QSpinBox, QGroupBox, QFormLayout, QSlider, QCheckBox, QLineEdit, QWidget
-)
+from __future__ import annotations
+
+import random
+import re
+import shutil
+from datetime import datetime
+from pathlib import Path
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-import subprocess
-import os
-import json
-import random
-import shutil
-import yaml
-import cv2
-import re
-import numpy as np
-import pandas as pd
-from pathlib import Path
-   
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+ONLINE_DATASET_ROOT = "online_datasets"
+
+
+def _resolve_frame_dir(project_dir: Path, video_name: str, frame_type: str) -> Path:
+    if frame_type in ("davis", "contour"):
+        return project_dir / "frames" / video_name / "visualization" / frame_type
+    if frame_type == "images":
+        return project_dir / "frames" / video_name / "images"
+    raise ValueError(f"Unsupported frame type: {frame_type}")
+
+
+def _collect_label_image_pairs(
+    current_project,
+    selected_entries,
+    frame_type: str,
+    label_dirs: dict[str, Path] | None = None,
+) -> list[tuple[Path, Path, str]]:
+    project_dir = Path(current_project.project_dir)
+    digit_re = re.compile(r"(\d+)$")
+    pair_list: list[tuple[Path, Path, str]] = []
+    label_dirs = label_dirs or {}
+
+    for fe in selected_entries:
+        video_path = Path(fe.video)
+        video_name = video_path.stem
+        label_dir = Path(label_dirs.get(video_name, project_dir / "labels" / video_name / "txt"))
+        if not label_dir.is_dir():
+            continue
+
+        img_dir = _resolve_frame_dir(project_dir, video_name, frame_type)
+        for lbl_file in sorted(label_dir.glob("*.txt")):
+            match = digit_re.search(lbl_file.stem)
+            if not match:
+                continue
+
+            orig_num_str = match.group(1)
+            frame_idx = int(orig_num_str)
+            frame_num = f"{frame_idx:07d}"
+            base_name = f"{video_name}_{frame_idx:0{len(orig_num_str)}d}"
+            img_path = img_dir / f"{frame_num}.jpg"
+            if not img_path.exists():
+                continue
+
+            pair_list.append((lbl_file, img_path, base_name))
+
+    return pair_list
+
+
+def create_dataset_split(
+    current_project,
+    selected_entries,
+    frame_type: str,
+    dataset_dir: str | Path,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.2,
+    *,
+    clear_existing: bool = True,
+    seed: int | None = None,
+    label_dirs: dict[str, Path] | None = None,
+) -> dict[str, int]:
+    dataset_dir = Path(dataset_dir)
+    pair_list = _collect_label_image_pairs(
+        current_project,
+        selected_entries,
+        frame_type,
+        label_dirs=label_dirs,
+    )
+    if not pair_list:
+        raise ValueError("Could not find label-image pair.")
+
+    if dataset_dir.exists() and clear_existing:
+        shutil.rmtree(dataset_dir)
+
+    for split in ("train", "val", "test"):
+        (dataset_dir / split / "images").mkdir(parents=True, exist_ok=True)
+        (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
+
+    shuffled_pairs = list(pair_list)
+    random.Random(seed).shuffle(shuffled_pairs)
+    total = len(shuffled_pairs)
+
+    if total == 1:
+        # Ultralytics requires a non-empty validation set. Reuse the only sample.
+        split_map = {
+            "train": shuffled_pairs[:],
+            "val": shuffled_pairs[:],
+            "test": [],
+        }
+    else:
+        train_count = int(total * train_ratio)
+        val_count = int(total * val_ratio)
+
+        train_count = max(1, train_count)
+        val_count = max(1, val_count)
+
+        if train_count + val_count > total:
+            overflow = train_count + val_count - total
+            reducible_train = max(0, train_count - 1)
+            reduce_train = min(reducible_train, overflow)
+            train_count -= reduce_train
+            overflow -= reduce_train
+            if overflow > 0:
+                val_count = max(1, val_count - overflow)
+
+        if train_count + val_count > total:
+            val_count = max(1, total - train_count)
+
+        if train_count + val_count > total:
+            train_count = max(1, total - val_count)
+
+        train_end = train_count
+        val_end = train_end + val_count
+        split_map = {
+            "train": shuffled_pairs[:train_end],
+            "val": shuffled_pairs[train_end:val_end],
+            "test": shuffled_pairs[val_end:],
+        }
+
+    for split, pairs in split_map.items():
+        img_dst_root = dataset_dir / split / "images"
+        lbl_dst_root = dataset_dir / split / "labels"
+        for lbl_path, img_path, base in pairs:
+            shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
+            shutil.copy(img_path, img_dst_root / f"{base}{img_path.suffix.lower()}")
+
+    return {split: len(pairs) for split, pairs in split_map.items()}
+
+
+def create_online_training_dataset(
+    current_project,
+    frame_type: str = "images",
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.2,
+    *,
+    dataset_root: str | Path | None = None,
+    seed: int | None = None,
+    label_dirs: dict[str, Path] | None = None,
+) -> tuple[Path, dict[str, int]]:
+    project_dir = Path(current_project.project_dir)
+    dataset_root = Path(dataset_root) if dataset_root is not None else project_dir / "runs" / ONLINE_DATASET_ROOT
+    stamp = datetime.now().strftime("%y%m%d_%H%M%S")
+    dataset_dir = dataset_root / f"online_training_dataset_{stamp}"
+    counts = create_dataset_split(
+        current_project,
+        list(current_project.files),
+        frame_type,
+        dataset_dir,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        clear_existing=False,
+        seed=seed,
+        label_dirs=label_dirs,
+    )
+    return dataset_dir, counts
+
+
 class DataSplitDialog(QDialog):
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
@@ -34,15 +197,15 @@ class DataSplitDialog(QDialog):
         scroll.setWidget(inner_widget)
         layout.addWidget(scroll)
 
-        layout.addSpacing(40) 
+        layout.addSpacing(40)
         self.count_label = QLabel("Label number: 0 / Image number: 0")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         count_font = QFont()
-        count_font.setPointSize(11) 
+        count_font.setPointSize(11)
         self.count_label.setFont(count_font)
         layout.addWidget(self.count_label)
 
-        layout.addSpacing(20) 
+        layout.addSpacing(20)
 
         ratio_layout = QFormLayout()
 
@@ -101,31 +264,25 @@ class DataSplitDialog(QDialog):
         self._update_selection_count()
 
     def _populate_file_items(self) -> None:
-        self._clear_file_items()  
+        self._clear_file_items()
         for fe in self.files:
             current_project = self.current_project
             video_path = Path(fe.video)
             video_stem = video_path.stem
             frame_type = self.frame_type_combo.currentText()
-
-            if frame_type in ["davis", "contour"]:
-                frame_dir  = (Path(current_project.project_dir) /
-                            "frames" / video_stem / "visualization" / frame_type)
-            else:
-                frame_dir  = (Path(current_project.project_dir) /
-                            "frames" / video_stem / "images")
-            label_dir  = Path(current_project.project_dir) / "labels" / video_stem / "txt"
+            frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_stem, frame_type)
+            label_dir = Path(current_project.project_dir) / "labels" / video_stem / "txt"
             frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
             label_cnt = sum(1 for _ in label_dir.glob("*.txt"))
 
             row_lay = QHBoxLayout()
             chk = QCheckBox()
             chk.stateChanged.connect(self._update_selection_count)
-            chk._frame_cnt  = frame_cnt
-            chk._label_cnt  = label_cnt
+            chk._frame_cnt = frame_cnt
+            chk._label_cnt = label_cnt
             chk._file_entry = fe
 
-            name_lbl  = QLabel(video_path.name)
+            name_lbl = QLabel(video_path.name)
             count_lbl = QLabel(f"({frame_cnt:,} frames, {label_cnt:,} labels)")
             count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -150,28 +307,28 @@ class DataSplitDialog(QDialog):
                         w.deleteLater()
 
     def _update_selection_count(self):
-        total_files  = 0
+        total_files = 0
         total_frames = 0
         total_labels = 0
 
-        for i in range(self.files_lay.count() - 1): 
+        for i in range(self.files_lay.count() - 1):
             lay = self.files_lay.itemAt(i)
             if not isinstance(lay, QHBoxLayout):
                 continue
             chk = lay.itemAt(0).widget()
             if isinstance(chk, QCheckBox) and chk.isChecked():
-                total_files  += 1
+                total_files += 1
                 total_frames += getattr(chk, "_frame_cnt", 0)
                 total_labels += getattr(chk, "_label_cnt", 0)
 
         self.count_label.setText(
-            f"{total_files} files selected ㆍ "
-            f"{total_frames:,} frames ㆍ "
+            f"{total_files} files selected / "
+            f"{total_frames:,} frames / "
             f"{total_labels:,} labels"
         )
 
     def get_selected_entries(self):
-        selected_entries: list[FileEntry] = []
+        selected_entries = []
         for i in range(self.files_lay.count() - 1):
             lay = self.files_lay.itemAt(i)
             if not isinstance(lay, QHBoxLayout):
@@ -188,86 +345,34 @@ class DataSplitDialog(QDialog):
         return hlayout
 
     def run_split(self):
-        selected_entries: List[FileEntry] = self.get_selected_entries()
+        selected_entries = self.get_selected_entries()
         if not selected_entries:
             QMessageBox.warning(self, "Error", "First, select a video file.")
             return
 
-        project_dir = Path(self.current_project.project_dir)
-        dataset_dir = project_dir / "runs" / "dataset"
-
-        if dataset_dir.exists():
-            shutil.rmtree(dataset_dir)
-        for split in ("train", "val", "test"):
-            (dataset_dir / split / "images").mkdir(parents=True, exist_ok=True)
-            (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
-
-        frame_type = self.frame_type_combo.currentText()
-        pair_list: List[Tuple[Path, Path, str]] = []
-
-        digit_re = re.compile(r'(\d+)$')        # video1_0000042 → 0000042
-
-        for fe in selected_entries:
-            video_path = Path(fe.video)
-            video_name = video_path.stem
-            label_dir  = project_dir / "labels" / video_name / "txt"
-            if label_dir.is_dir():
-                label_files = sorted(label_dir.glob("*.txt"))  
-            else:
-                continue
-            for lbl_file in label_files:
-                m = digit_re.search(lbl_file.stem)
-                if not m:
-                    continue
-                
-                orig_num_str   = m.group(1)
-                digits_len     = 7
-                base_digit_len = len(orig_num_str)
-                frame_idx      = int(orig_num_str) 
-                frame_num      = f"{frame_idx:0{digits_len}d}"
-                base_name      = f"{video_name}_{frame_idx:0{base_digit_len}d}"
-                
-                if frame_type in ["davis", "contour"]:
-                    img_dir  = project_dir / "frames" / video_name / "visualization" / frame_type
-                else:
-                    img_dir  = project_dir / "frames" / video_name / "images"
-                img_path = img_dir / f"{frame_num}.jpg"
-                pair_list.append((lbl_file, img_path, base_name))
-
-        if not pair_list:
-            QMessageBox.warning(self, "Error", "Could not find label-image pair.")
+        dataset_dir = Path(self.current_project.project_dir) / "runs" / "dataset"
+        try:
+            split_counts = create_dataset_split(
+                self.current_project,
+                selected_entries,
+                self.frame_type_combo.currentText(),
+                dataset_dir,
+                train_ratio=self.train_spin.value() / 100.0,
+                val_ratio=self.valid_spin.value() / 100.0,
+                clear_existing=True,
+            )
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
             return
-
-        random.shuffle(pair_list)
-
-        train_ratio = self.train_spin.value() / 100.0
-        val_ratio   = self.valid_spin.value() / 100.0
-
-        total = len(pair_list)
-        train_end = int(total * train_ratio)
-        val_end   = train_end + int(total * val_ratio)
-
-        split_map = {
-            "train": pair_list[:train_end],
-            "val":   pair_list[train_end:val_end],
-            "test":  pair_list[val_end:],
-        }
-
-        for split, pairs in split_map.items():
-            img_dst_root = dataset_dir / split / "images"
-            lbl_dst_root = dataset_dir / split / "labels"
-
-            for lbl_path, img_path, base in pairs:
-                print(lbl_path, img_path, base)
-                shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
-                img_ext = img_path.suffix.lower()
-                shutil.copy(img_path, img_dst_root / f"{base}{img_ext}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create dataset split:\n{e}")
+            return
 
         QMessageBox.information(
             self,
             "Success",
             (f"Data Split completed\n"
-            f"Train: {len(split_map['train'])}\n"
-            f"Val:   {len(split_map['val'])}\n"
-            f"Test:  {len(split_map['test'])}")
+             f"Train: {split_counts['train']}\n"
+             f"Val:   {split_counts['val']}\n"
+             f"Test:  {split_counts['test']}")
         )

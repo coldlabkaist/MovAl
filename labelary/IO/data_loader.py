@@ -155,6 +155,8 @@ class DataLoader:
     def get_keypoint_coordinates_by_frame(cls, frame_idx):
         if cls.loaded_data is None or cls.loaded_data.empty:
             return {}
+        if cls._inference_mode:
+            frame_idx += 1
         coords = {t: {} for t in cls.animals_name}
         try:
             frame_df = cls.loaded_data.xs(frame_idx, level="frame_idx")
@@ -475,7 +477,6 @@ class DataLoader:
                 return False
             df_total = pd.concat(chunks, ignore_index=True)
             result = cls._load_generic(df_total, from_dataframe=True)
-            cls._inference_mode = False
             return result
 
         print("Attempting to read incorrect txt directory")

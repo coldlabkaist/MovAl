@@ -1,9 +1,10 @@
 from __future__ import annotations
 import colorsys
+import math
 from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import Qt, QPoint, QPointF, QSize, QRectF, pyqtSignal
-from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen, QBrush, QPixmap, QFontMetrics
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen, QBrush, QPixmap, QFontMetrics
 from PyQt6.QtWidgets import QLabel, QMenu
 
 from ..IO.data_loader import DataLoader
@@ -181,15 +182,115 @@ class ClickableImageLabel(QLabel):
                     painter.drawEllipse(QPointF(cx, cy), r, r)
                     
             if self.mouse_controller.selected_instance == track:
-                xs = [nx * ow * act + self.translation.x() for nx, ny, vis in pts.values()]
-                ys = [ny * oh * act + self.translation.y() for nx, ny, vis in pts.values()]
-                if xs and ys:
-                    min_x, max_x = min(xs), max(xs)
-                    min_y, max_y = min(ys), max(ys)
-                    box_pen = QPen(self._skeleton_color(track), 1, Qt.PenStyle.DashLine)
+                geom = self.mouse_controller._rotation_geometry(track) if self.mouse_controller else None
+                if geom is not None:
+                    min_x, min_y = geom["box_min"]
+                    max_x, max_y = geom["box_max"]
+                    box_pen = QPen(self._skeleton_color(track), 2, Qt.PenStyle.DashLine)
+                    box_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                    box_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                     painter.setPen(box_pen)
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.drawRect(QRectF(min_x, min_y, max_x - min_x, max_y - min_y))
+                    painter.setBrush(QBrush(QColor(121, 166, 255, 16)))
+                    painter.drawRoundedRect(QRectF(min_x, min_y, max_x - min_x, max_y - min_y), 4, 4)
+
+                    for handle_x, handle_y in geom["resize_handles"].values():
+                        self._draw_resize_handle(
+                            painter,
+                            QPointF(handle_x, handle_y),
+                            self._skeleton_color(track),
+                        )
+
+                    hx, hy = geom["handle"]
+                    ax, ay = geom["anchor"]
+                    self._draw_rotation_handle(
+                        painter,
+                        QPointF(hx, hy),
+                        QPointF(ax, ay),
+                        self._skeleton_color(track),
+                    )
+
+    def _draw_resize_handle(
+        self,
+        painter: QPainter,
+        handle_pos: QPointF,
+        color: QColor,
+    ) -> None:
+        handle_size = 5.0
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(255, 255, 255, 235), 1.2))
+        painter.setBrush(QBrush(color))
+        painter.drawRect(
+            QRectF(
+                handle_pos.x() - handle_size,
+                handle_pos.y() - handle_size,
+                handle_size * 2,
+                handle_size * 2,
+            )
+        )
+        painter.restore()
+
+    def _draw_rotation_handle(
+        self,
+        painter: QPainter,
+        handle_pos: QPointF,
+        anchor_pos: QPointF,
+        color: QColor,
+    ) -> None:
+        outer_r = 8.0
+        inner_r = 4.2
+        arrow_r = 5.8
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        halo = QColor(255, 255, 255, 235)
+        painter.setPen(QPen(QColor(0, 0, 0, 24), 1))
+        painter.setBrush(QBrush(halo))
+        painter.drawEllipse(handle_pos, outer_r, outer_r)
+
+        ring_pen = QPen(color, 1.8)
+        ring_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        ring_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(ring_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(handle_pos, inner_r, inner_r)
+
+        arc_path = QPainterPath()
+        arc_rect = QRectF(
+            handle_pos.x() - arrow_r,
+            handle_pos.y() - arrow_r,
+            arrow_r * 2,
+            arrow_r * 2,
+        )
+        arc_path.arcMoveTo(arc_rect, 35)
+        arc_path.arcTo(arc_rect, 35, 250)
+        painter.drawPath(arc_path)
+
+        end_angle = math.radians(35 + 250)
+        tip = QPointF(
+            handle_pos.x() + arrow_r * math.cos(end_angle),
+            handle_pos.y() - arrow_r * math.sin(end_angle),
+        )
+        head_left = QPointF(
+            tip.x() - 5.0 * math.cos(end_angle - math.pi / 6),
+            tip.y() + 5.0 * math.sin(end_angle - math.pi / 6),
+        )
+        head_right = QPointF(
+            tip.x() - 5.0 * math.cos(end_angle + math.pi / 6),
+            tip.y() + 5.0 * math.sin(end_angle + math.pi / 6),
+        )
+
+        arrow_pen = QPen(color, 1.8)
+        arrow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        arrow_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(arrow_pen)
+        painter.drawLine(anchor_pos, handle_pos)
+        painter.drawLine(tip, head_left)
+        painter.drawLine(tip, head_right)
+
+        painter.restore()
 
     def _pos_to_norm(self, pos: QPointF) -> tuple[float, float] | None:
         if not self.original_pixmap:

@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
+from datetime import datetime
 
 import cv2
 import pandas as pd
@@ -20,6 +21,8 @@ from .data_loader import DataLoader
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np   
 import shutil 
+
+ONLINE_TXT_EXPORT_ROOT = "online_label_exports"
 
 class _SaveActionDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -134,11 +137,9 @@ def save_modified_data(parent: QWidget):
             )
             if res != QMessageBox.StandardButton.Yes:
                 return 
-            shutil.rmtree(txt_dir)
-            txt_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            _export_txt_files(txt_dir, df_orig)
+            export_loaded_data_to_txt_dir(txt_dir, df=df_orig, clear_existing=has_existing)
             QMessageBox.information(parent, "Success", f"TXT Exported:\n{txt_dir}")
             if not has_existing:
                 modify_yaml(video_path, "txt", txt_dir, config_path, project_info)
@@ -154,6 +155,48 @@ def save_modified_data(parent: QWidget):
         from .video_saver import _export_video_stub
         _export_video_stub(parent)
         return
+
+
+def export_loaded_data_to_txt_dir(
+    target_dir: str | Path,
+    *,
+    df: pd.DataFrame | None = None,
+    clear_existing: bool = False,
+) -> Path:
+    if df is None:
+        if DataLoader.loaded_data is None:
+            raise ValueError("Load CSV/TXT first")
+        df = _sanitize_index(DataLoader.loaded_data.copy())
+
+    target_dir = Path(target_dir)
+    if clear_existing and target_dir.exists():
+        shutil.rmtree(target_dir)
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    _export_txt_files(target_dir, df)
+    return target_dir
+
+
+def export_current_labels_to_txt_snapshot(
+    parent: QWidget,
+    target_dir: str | Path | None = None,
+) -> Path:
+    project = _find_project(parent)
+    if project is None or not hasattr(project, "project_dir"):
+        raise ValueError("Project information not found.")
+
+    _, video_name = _current_video(parent)
+    if target_dir is None:
+        stamp = datetime.now().strftime("%y%m%d_%H%M%S")
+        target_dir = (
+            Path(project.project_dir)
+            / "runs"
+            / ONLINE_TXT_EXPORT_ROOT
+            / video_name
+            / f"txt_snapshot_{stamp}"
+        )
+
+    return export_loaded_data_to_txt_dir(target_dir)
 
 def _current_video(parent: QWidget) -> str:
     if hasattr(parent, "video_combo"):
@@ -264,14 +307,11 @@ def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
         (target_dir / f"{fid:0{pad}d}.txt").write_text("\n".join(out_lines),
                                                        encoding="utf-8")
 
-    cpu_n = max(os.cpu_count() * 2, 4)
+    cpu_n = max((os.cpu_count() or 1) * 2, 4)
     with ThreadPoolExecutor(max_workers=cpu_n) as pool:
         futures = [pool.submit(_one_frame, fid) for fid in unique_frames]
-        counter = 0
         with tqdm(total=len(futures), desc="Exporting TXT") as pbar:
             for _ in as_completed(futures):
-                counter += 1
-                if counter % 50 == 0:
-                    pbar.update(50)
+                pbar.update(1)
 
     print(f"TXT files saved to {target_dir}")

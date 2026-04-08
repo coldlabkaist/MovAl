@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from PyQt6.QtCore import QObject, QEvent, QPoint, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent, QWheelEvent, QKeySequence
 from PyQt6.QtWidgets import QMenu
@@ -20,6 +21,16 @@ class MouseController(QObject):
         self.selected_instance: str | None = None
         self.selected_node: tuple[str, str] | None = None
         self.new_selection = False
+        self._rotation_center_norm: tuple[float, float] | None = None
+        self._rotation_center_px: tuple[float, float] | None = None
+        self._rotation_start_angle: float | None = None
+        self._rotation_source_points: dict[str, tuple[float, float, int]] = {}
+        self._resize_center_norm: tuple[float, float] | None = None
+        self._resize_source_points: dict[str, tuple[float, float, int]] = {}
+        self._resize_start_distance_px: float | None = None
+        self._node_hit_margin_px = 10
+        self._instance_handle_thresh = 16
+        self._resize_handle_thresh = 12
 
     def eventFilter(self, obj, event) -> bool:
         if obj is not self.video_viewer:
@@ -79,21 +90,43 @@ class MouseController(QObject):
         # ---------- left click ----------
         if e.button() == Qt.MouseButton.LeftButton:
             near = self._nearest_csv_kp(pos)
-            inside_track = None
-            if near:
-                track, kp = near
-                inside_track = track
-            else:
-                inside_track = self._instance_at_point(pos)
+            inside_track = near[0] if near else self._instance_at_point(pos)
+            selected_resize_hit = (
+                self._resize_handle_at_point(pos, self.selected_instance)
+                if self.selected_instance is not None
+                else None
+            )
+            rotation_track = self.selected_instance if self.selected_instance is not None else inside_track
+            if rotation_track is not None and self._point_near_rotation_handle(pos, rotation_track):
+                self.selected_instance = rotation_track
+                self.selected_node = None
+                self._dragging = True
+                self.video_viewer.dragging_target = ("rotate_instance", rotation_track)
+                self._start_instance_rotation(rotation_track, pos)
+                self.video_viewer.update()
+                self._sync_list_selection()
+                return True
+
+            if selected_resize_hit:
+                track, corner = selected_resize_hit
+                self.selected_instance = track
+                self.selected_node = None
+                self._dragging = True
+                self.video_viewer.dragging_target = ("resize_instance", track, corner)
+                self._start_instance_resize(track, corner)
+                self.video_viewer.update()
+                self._sync_list_selection()
+                return True
 
             if self.selected_instance is not None and inside_track == self.selected_instance:
-                if near and near[0] == self.selected_instance:
-                    track, kp = near
+                selected_node_hit = self._nearest_csv_kp(pos, track=self.selected_instance)
+                if selected_node_hit:
+                    track, kp = selected_node_hit
                     self.selected_instance = track
                     self.selected_node = (track, kp)
                     self._dragging = True
                     self.video_viewer.dragging_target = ("csv", track, kp)
-                if not near:
+                else:
                     self.selected_node = None
                     track = self.selected_instance
                     self._dragging = True
@@ -102,12 +135,19 @@ class MouseController(QObject):
                 self.video_viewer.update()
                 self._sync_list_selection()
                 return True
+
             if near:
                 track, kp = near
                 self.selected_instance = track
-                self.selected_node = (track, kp)
-                self._dragging = True
-                self.video_viewer.dragging_target = ("csv", track, kp)
+                if self._point_near_csv_kp(pos, track, kp):
+                    self.selected_node = (track, kp)
+                    self._dragging = True
+                    self.video_viewer.dragging_target = ("csv", track, kp)
+                else:
+                    self.selected_node = None
+                    self._dragging = True
+                    self.video_viewer.dragging_target = ("instance", track)
+                    self._last_pos = pos
                 self.video_viewer.update()
                 self._sync_list_selection()
                 return True
@@ -167,6 +207,12 @@ class MouseController(QObject):
                     ny_new = max(0.0, min(ny + dy_norm, 1.0))
                     self.video_viewer.csv_points[track][kp] = (nx_new, ny_new, vis)
                 self._last_pos = pos
+            elif kind == "rotate_instance":
+                _, track = self.video_viewer.dragging_target
+                self._rotate_instance(track, pos)
+            elif kind == "resize_instance":
+                _, track, corner = self.video_viewer.dragging_target
+                self._resize_instance(track, corner, pos)
             elif kind == "click":
                 _, idx = self.video_viewer.dragging_target
                 nx = (pos.x() - self.video_viewer.translation.x()) / act
@@ -188,8 +234,11 @@ class MouseController(QObject):
                     _, track, kp = self.video_viewer.dragging_target
                     nx, ny, _ = self.video_viewer.csv_points[track][kp]
                     DataLoader.update_point(track, frame_idx, kp, nx, ny)
-                elif kind == "instance":
-                    _, track = self.video_viewer.dragging_target
+                elif kind in ("instance", "rotate_instance", "resize_instance"):
+                    if kind == "resize_instance":
+                        _, track, _ = self.video_viewer.dragging_target
+                    else:
+                        _, track = self.video_viewer.dragging_target
                     if track in self.video_viewer.csv_points:
                         for kp, (nx, ny, _) in self.video_viewer.csv_points[track].items():
                             DataLoader.update_point(track, frame_idx, kp, nx, ny)
@@ -198,6 +247,8 @@ class MouseController(QObject):
 
         self._dragging = False
         self.video_viewer.dragging_target = None
+        self._clear_rotation_state()
+        self._clear_resize_state()
         return True
 
     def _wheel(self, e: QWheelEvent) -> bool:
@@ -275,8 +326,8 @@ class MouseController(QObject):
             act_next_lbl = menu.addAction("Move to Next Labeled Frame")
             act_prev_lbl.triggered.connect(lambda: self._move_labeled(-1))
             act_next_lbl.triggered.connect(lambda: self._move_labeled(+1))
-            act_prev_lbl.setShortcut(QKeySequence("Ctrl+ ←"))
-            act_next_lbl.setShortcut(QKeySequence("Ctrl+ →"))
+            act_prev_lbl.setShortcut(QKeySequence("Ctrl+Left"))
+            act_next_lbl.setShortcut(QKeySequence("Ctrl+Right"))
 
         act_add.setEnabled(self.video_viewer.current_animal_num <= self.max_animals)
         act_delete.setEnabled(self.selected_instance is not None)
@@ -292,22 +343,31 @@ class MouseController(QObject):
         menu.popup(global_pt)
         return True
 
-    def _nearest_csv_kp(self, pos: QPoint, thresh: int = 30) -> tuple[str, str] | None:
-        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+    def _nearest_csv_kp(self, pos: QPoint, track: str | None = None) -> tuple[str, str] | None:
         ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
         oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
 
         best = None
-        best_d = thresh + 1
-        for track, pts in self.video_viewer.csv_points.items():
+        best_d = float("inf")
+        for track_name, pts in self.video_viewer.csv_points.items():
+            if track is not None and track_name != track:
+                continue
             for kp, (nx, ny, vis) in pts.items():
-                px = nx * ow * act + self.video_viewer.translation.x()
-                py = ny * oh * act + self.video_viewer.translation.y()
-                d = (pos - QPoint(int(px), int(py))).manhattanLength()
+                px, py = self._point_to_viewer_px(nx, ny, ow, oh)
+                d = math.hypot(pos.x() - px, pos.y() - py)
                 if d < best_d:
-                    best = (track, kp)
+                    best = (track_name, kp)
                     best_d = d
-        return best if best_d <= thresh else None
+        hit_radius = self._node_display_radius_px() + self._node_hit_margin_px
+        return best if best is not None and best_d <= hit_radius else None
+
+    def _point_near_csv_kp(self, pos: QPoint, track: str, kp: str) -> bool:
+        ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
+        oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
+        nx, ny, _ = self.video_viewer.csv_points.get(track, {}).get(kp, (0.0, 0.0, 0))
+        px, py = self._point_to_viewer_px(nx, ny, ow, oh)
+        d = math.hypot(pos.x() - px, pos.y() - py)
+        return d <= (self._node_display_radius_px() + self._node_hit_margin_px)
 
     def _instance_at_point(self, pos: QPoint) -> str | None:
         act = self.video_viewer.base_scale * self.video_viewer.current_scale
@@ -317,13 +377,197 @@ class MouseController(QObject):
         for track, pts in self.video_viewer.csv_points.items():
             if not pts:
                 continue
-            min_x = min(nx * ow * act + self.video_viewer.translation.x() for nx, ny, vis in pts.values())
-            max_x = max(nx * ow * act + self.video_viewer.translation.x() for nx, ny, vis in pts.values())
-            min_y = min(ny * oh * act + self.video_viewer.translation.y() for nx, ny, vis in pts.values())
-            max_y = max(ny * oh * act + self.video_viewer.translation.y() for nx, ny, vis in pts.values())
+            min_x, max_x, min_y, max_y = self._instance_bounds_px(track, padding=max(8, int(6 * (act ** 0.5))))
             if min_x <= pos.x() <= max_x and min_y <= pos.y() <= max_y:
                 return track
         return None
+
+    def _instance_bounds_px(self, track: str, padding: int = 0) -> tuple[float, float, float, float]:
+        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+        ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
+        oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
+        pts = self.video_viewer.csv_points.get(track, {})
+        xs = [nx * ow * act + self.video_viewer.translation.x() for nx, ny, vis in pts.values()]
+        ys = [ny * oh * act + self.video_viewer.translation.y() for nx, ny, vis in pts.values()]
+        if not xs or not ys:
+            return 0.0, 0.0, 0.0, 0.0
+        return min(xs) - padding, max(xs) + padding, min(ys) - padding, max(ys) + padding
+
+    def _rotation_handle_px(self, track: str) -> tuple[float, float] | None:
+        geom = self._rotation_geometry(track)
+        if geom is None:
+            return None
+        return geom["handle"]
+
+    def _point_near_rotation_handle(self, pos: QPoint, track: str) -> bool:
+        geom = self._rotation_geometry(track)
+        if geom is None:
+            return False
+        handle_x, handle_y = geom["handle"]
+        return math.hypot(pos.x() - handle_x, pos.y() - handle_y) <= self._instance_handle_thresh
+
+    def _resize_handle_at_point(self, pos: QPoint, track: str) -> tuple[str, str] | None:
+        geom = self._rotation_geometry(track)
+        if geom is None:
+            return None
+        for corner_name, (hx, hy) in geom["resize_handles"].items():
+            if math.hypot(pos.x() - hx, pos.y() - hy) <= self._resize_handle_thresh:
+                return track, corner_name
+        return None
+
+    def _rotation_geometry(self, track: str) -> dict[str, tuple[float, float]] | None:
+        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+        ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
+        oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
+        pts = self.video_viewer.csv_points.get(track, {})
+        if not pts:
+            return None
+
+        xs = [nx * ow * act + self.video_viewer.translation.x() for nx, ny, vis in pts.values()]
+        ys = [ny * oh * act + self.video_viewer.translation.y() for nx, ny, vis in pts.values()]
+        if not xs or not ys:
+            return None
+
+        box_margin = 15.0
+        lift = 14.0
+        min_x, max_x = min(xs) - box_margin, max(xs) + box_margin
+        min_y, max_y = min(ys) - box_margin, max(ys) + box_margin
+        handle = ((min_x + max_x) / 2.0, min_y - lift)
+        anchor = ((min_x + max_x) / 2.0, min_y)
+        resize_handles = {
+            "top_left": (min_x, min_y),
+            "top_right": (max_x, min_y),
+            "bottom_left": (min_x, max_y),
+            "bottom_right": (max_x, max_y),
+        }
+        return {
+            "box_min": (min_x, min_y),
+            "box_max": (max_x, max_y),
+            "handle": handle,
+            "anchor": anchor,
+            "resize_handles": resize_handles,
+        }
+
+    def _start_instance_rotation(self, track: str, pos: QPoint) -> None:
+        pts = self.video_viewer.csv_points.get(track, {})
+        if not pts:
+            self._clear_rotation_state()
+            return
+
+        xs = [nx for nx, ny, vis in pts.values()]
+        ys = [ny for nx, ny, vis in pts.values()]
+        center_norm = ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+        center_px = self._norm_to_viewer_px(*center_norm)
+
+        self._rotation_center_norm = center_norm
+        self._rotation_center_px = center_px
+        self._rotation_start_angle = math.atan2(pos.y() - center_px[1], pos.x() - center_px[0])
+        self._rotation_source_points = {
+            kp: (nx, ny, vis) for kp, (nx, ny, vis) in pts.items()
+        }
+
+    def _rotate_instance(self, track: str, pos: QPoint) -> None:
+        if (
+            self._rotation_center_norm is None
+            or self._rotation_center_px is None
+            or self._rotation_start_angle is None
+        ):
+            return
+
+        center_nx, center_ny = self._rotation_center_norm
+        center_px_x, center_px_y = self._rotation_center_px
+        current_angle = math.atan2(pos.y() - center_px_y, pos.x() - center_px_x)
+        delta_angle = current_angle - self._rotation_start_angle
+        cos_a = math.cos(delta_angle)
+        sin_a = math.sin(delta_angle)
+
+        for kp, (src_x, src_y, vis) in self._rotation_source_points.items():
+            dx = src_x - center_nx
+            dy = src_y - center_ny
+            rot_x = center_nx + dx * cos_a - dy * sin_a
+            rot_y = center_ny + dx * sin_a + dy * cos_a
+            self.video_viewer.csv_points[track][kp] = (
+                max(0.0, min(rot_x, 1.0)),
+                max(0.0, min(rot_y, 1.0)),
+                vis,
+            )
+
+    def _clear_rotation_state(self) -> None:
+        self._rotation_center_norm = None
+        self._rotation_center_px = None
+        self._rotation_start_angle = None
+        self._rotation_source_points = {}
+
+    def _start_instance_resize(self, track: str, corner: str) -> None:
+        pts = self.video_viewer.csv_points.get(track, {})
+        geom = self._rotation_geometry(track)
+        if not pts or geom is None:
+            self._clear_resize_state()
+            return
+
+        xs = [nx for nx, ny, vis in pts.values()]
+        ys = [ny for nx, ny, vis in pts.values()]
+        center_norm = ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+        center_px = self._norm_to_viewer_px(*center_norm)
+        corner_px = geom["resize_handles"][corner]
+
+        self._resize_center_norm = center_norm
+        self._resize_source_points = {
+            kp: (nx, ny, vis) for kp, (nx, ny, vis) in pts.items()
+        }
+        self._resize_start_distance_px = max(
+            math.hypot(corner_px[0] - center_px[0], corner_px[1] - center_px[1]),
+            1.0,
+        )
+
+    def _resize_instance(self, track: str, corner: str, pos: QPoint) -> None:
+        if (
+            self._resize_center_norm is None
+            or not self._resize_source_points
+            or self._resize_start_distance_px is None
+        ):
+            return
+
+        center_nx, center_ny = self._resize_center_norm
+        center_px_x, center_px_y = self._norm_to_viewer_px(center_nx, center_ny)
+        current_distance = math.hypot(pos.x() - center_px_x, pos.y() - center_px_y)
+        scale = max(current_distance / self._resize_start_distance_px, 0.1)
+
+        for kp, (src_x, src_y, vis) in self._resize_source_points.items():
+            dx = src_x - center_nx
+            dy = src_y - center_ny
+            scaled_x = center_nx + dx * scale
+            scaled_y = center_ny + dy * scale
+            self.video_viewer.csv_points[track][kp] = (
+                max(0.0, min(scaled_x, 1.0)),
+                max(0.0, min(scaled_y, 1.0)),
+                vis,
+            )
+
+    def _clear_resize_state(self) -> None:
+        self._resize_center_norm = None
+        self._resize_source_points = {}
+        self._resize_start_distance_px = None
+
+    def _norm_to_viewer_px(self, nx: float, ny: float) -> tuple[float, float]:
+        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+        ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
+        oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
+        px = nx * ow * act + self.video_viewer.translation.x()
+        py = ny * oh * act + self.video_viewer.translation.y()
+        return px, py
+
+    def _point_to_viewer_px(self, nx: float, ny: float, ow: int | None = None, oh: int | None = None) -> tuple[float, float]:
+        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+        ow = ow if ow is not None else (self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1)
+        oh = oh if oh is not None else (self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1)
+        px = nx * ow * act + self.video_viewer.translation.x()
+        py = ny * oh * act + self.video_viewer.translation.y()
+        return px, py
+
+    def _node_display_radius_px(self) -> float:
+        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+        return 5.0 * (act ** 0.5)
 
     def _get_clamped_translation(self, new_tx: int, new_ty: int) -> tuple[int, int]:
         vw, vh = self.video_viewer.width(), self.video_viewer.height()
@@ -455,3 +699,6 @@ class MouseController(QObject):
         if self.video_loader is None:
             return
         self.video_loader.move_to_labeled_frame(direction)
+
+    def _pos_to_norm(self, pos: QPointF):
+        return self.video_viewer._pos_to_norm(pos)

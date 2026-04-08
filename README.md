@@ -37,6 +37,7 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 - Fixed Labelary key release error
 - New Feature: Labeled-Frame Navigation in Labelary
 - CSV files from versions 1.0.x may be incompatible.
+
 **In such cases, rename the column frame.idx to frame_idx in the CSV file.**
 
 **25.09.15.** MovAl v1.0.4 released

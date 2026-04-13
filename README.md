@@ -29,6 +29,13 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 ## News
 [Update Notes!](https://github.com/coldlabkaist/MovAl/blob/main/CHANGELOG.md )
 
+If your local MovAl version is outdated compared to the latest release version on github, you can see a message recommending an update when running the code. You can simply update it using the following command
+```
+cd (MovAl_folder)
+git fetch --tags
+git checkout (version) # git checkout v1.1.1
+```
+
 ## Liscense
 MovAl basically follow the MIT license. We allows free use for academic/research purposes, but not for commercial purposes.
 We recommends using Cutie and YOLO as part of our pipeline. The usage rights for each part follow the license of each program. 

@@ -27,6 +27,12 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 
 
 ## News
+**26.04.08.** MovAl v1.1.3 released
+- Add “Select All” option for video frames in inference
+
+**26.04.09.** MovAl v1.1.2 released
+- Fix frame misalignment issue in Labelary
+
 **26.04.08.** MovAl v1.1.1 released
 - Auto-labeling assistant update
 - Improved labeling convenience

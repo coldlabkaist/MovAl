@@ -222,7 +222,7 @@ class YoloInferenceDialog(QDialog):
 
     def build_ui(self):
         self.setWindowTitle("YOLO Pose Inference")
-        self.setMinimumSize(600, 500)
+        self.setMinimumSize(600, 620)
 
         main_layout = QVBoxLayout(self)
         main_layout.addLayout(self.build_model_row())
@@ -320,6 +320,13 @@ class YoloInferenceDialog(QDialog):
         scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
         scroll.setWidget(container)
         lay.addWidget(scroll)
+
+        button_row = QHBoxLayout()
+        self.select_all_images_btn = QPushButton("Select All", clicked=self.select_all_image_sources)
+        self.deselect_all_images_btn = QPushButton("Deselect All", clicked=self.deselect_all_image_sources)
+        button_row.addWidget(self.select_all_images_btn)
+        button_row.addWidget(self.deselect_all_images_btn)
+        lay.addLayout(button_row)
         return sect
 
     def build_video_section(self):
@@ -408,6 +415,14 @@ class YoloInferenceDialog(QDialog):
 
     def clear_videos(self):
         self.loaded_list.clear()
+
+    def select_all_image_sources(self):
+        for cb, _ in self.video_checks:
+            cb.setChecked(True)
+
+    def deselect_all_image_sources(self):
+        for cb, _ in self.video_checks:
+            cb.setChecked(False)
 
     def load_videos(self):
         paths, _ = QFileDialog.getOpenFileNames(

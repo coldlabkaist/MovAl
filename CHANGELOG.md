@@ -1,3 +1,5 @@
+## MovAl v1.1.x
+
 **26.04.08.** MovAl v1.1.3 released
 - Add “Select All” option for video frames in inference
 
@@ -16,6 +18,10 @@
 - CSV files from versions 1.0.x may be incompatible.
 
 **In such cases, rename the column frame.idx to frame_idx in the CSV file.**
+
+
+
+## MovAl v1.0.x
 
 **25.09.15.** MovAl v1.0.4 released
 - Resolve index shift issue of labelary

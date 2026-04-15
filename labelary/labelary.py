@@ -28,6 +28,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.setupUi(self)
 
         self.project = project
+        self._restoring_ui_state = False
         self.auto_label_model = None
         self.auto_label_model_path: Optional[str] = None
         self.auto_label_model_mode: Optional[str] = None
@@ -62,11 +63,14 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.mini_training_button.clicked.connect(self.run_mini_training)
 
         self.video_combo.currentIndexChanged.connect(self.update_label_combo)
+        self.video_combo.currentIndexChanged.connect(self._on_video_selection_changed)
+        self.label_combo.currentIndexChanged.connect(self._on_label_selection_changed)
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         self.file_entry_idx = 0
-        self.update_label_combo(video_index = self.file_entry_idx)
 
         self.set_color_combo()
         self.color_combo.currentIndexChanged.connect(self.set_color_mode)
+        self._restore_ui_state()
 
         self.save_button.clicked.connect(self.open_save_dialog)
         self._refresh_model_button_state()
@@ -98,20 +102,34 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         QApplication.instance().installEventFilter(keyboard_controller)
 
     def load_video_combo(self):
+        self.video_combo.clear()
         for video in self.project.get_video_list():
             p = Path(video)
             self.video_combo.addItem(p.name, p)
 
     def load_mode_combo(self):
+        self.mode_combo.clear()
         for display_mode in ["images", "davis", "contour"]:
             self.mode_combo.addItem(display_mode)
-        self.mode_combo.setCurrentIndex(1)
+        preferred_mode = self.project.get_preferred_frame_mode()
+        index = self.mode_combo.findText(preferred_mode, Qt.MatchFlag.MatchExactly)
+        self.mode_combo.setCurrentIndex(index if index >= 0 else 1)
 
     def update_label_combo(self, video_index = None, set_text = None):
+        files = self.project.files
+        if not files:
+            self.label_combo.clear()
+            return
+
         if video_index is None:
             video_index = self.file_entry_idx
+        if not (0 <= int(video_index) < len(files)):
+            video_index = 0
+        self.file_entry_idx = int(video_index)
 
-        file_entry = self.project.files[video_index]
+        file_entry = files[self.file_entry_idx]
+        saved_state = self.project.get_labelary_state()
+        self.label_combo.blockSignals(True)
         self.label_combo.clear()
 
         for csv_path in file_entry.csv:
@@ -132,12 +150,25 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                     and self.label_combo.itemData(i).stem == target_stem),
                 self.label_combo.count() - 1
             )
+        elif (
+            saved_state.get("video_name") == file_entry.name
+            and saved_state.get("label_name")
+        ):
+            default_idx = self._find_saved_label_index(
+                saved_state.get("label_name"),
+                saved_state.get("label_type"),
+            )
         elif num_csv > 0:
             default_idx = num_csv - 1
+        elif file_entry.txt:
+            default_idx = 0
         else:
             default_idx = self.label_combo.count() - 1
 
         self.label_combo.setCurrentIndex(default_idx)
+        self.label_combo.blockSignals(False)
+        if not self._restoring_ui_state:
+            self._persist_ui_state()
 
     def on_show_clicked(self):
         video_path = self.video_combo.currentData(Qt.ItemDataRole.UserRole)
@@ -176,9 +207,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
         self.mouse_controller.enable_control = True
         self.is_video_paused = True
+        self._restore_saved_frame_index()
         self.update_keypoint_list()
         self.update_csv_points_on_image()
         self.auto_label_current_frame()
+        self._persist_ui_state(include_frame=True)
 
     def load_csv(self, path):
         DataLoader.load_csv_data(path)
@@ -236,15 +269,132 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.kpt_list.build(tracks, DataLoader.kp_order, self.skeleton)
 
     def set_color_combo(self):
+        self.color_combo.clear()
         self.color_combo.addItem("cutie_light")
         self.color_combo.addItem("cutie_dark")
         self.color_combo.addItem("white")
         self.color_combo.addItem("black")
-        self.color_combo.setCurrentIndex(0)
+        saved_color = self.project.get_labelary_state().get("color_mode")
+        index = self.color_combo.findText(saved_color, Qt.MatchFlag.MatchExactly)
+        self.color_combo.setCurrentIndex(index if index >= 0 else 0)
 
     def set_color_mode(self):
         color_mode = self.color_combo.currentText()
         self.skeleton_video_viewer.set_skeleton_color_mode(color_mode)
+        if not self._restoring_ui_state:
+            self._persist_ui_state()
+
+    def _restore_ui_state(self) -> None:
+        self._restoring_ui_state = True
+        try:
+            if self.video_combo.count() == 0:
+                return
+
+            saved_state = self.project.get_labelary_state()
+            saved_video_name = saved_state.get("video_name")
+            if saved_video_name:
+                video_index = self._find_video_index(saved_video_name)
+            else:
+                video_index = 0
+
+            self.file_entry_idx = video_index
+            self.video_combo.setCurrentIndex(video_index)
+            self.update_label_combo(video_index=video_index)
+
+            saved_color = saved_state.get("color_mode")
+            if saved_color:
+                color_index = self.color_combo.findText(saved_color, Qt.MatchFlag.MatchExactly)
+                if color_index >= 0:
+                    self.color_combo.setCurrentIndex(color_index)
+        finally:
+            self._restoring_ui_state = False
+
+        self.set_color_mode()
+
+    def _find_video_index(self, video_name: str) -> int:
+        for index in range(self.video_combo.count()):
+            video_path = self.video_combo.itemData(index, Qt.ItemDataRole.UserRole)
+            if isinstance(video_path, Path) and video_path.stem == video_name:
+                return index
+        return 0
+
+    def _find_saved_label_index(self, label_name: Optional[str], label_type: Optional[str]) -> int:
+        if not label_name:
+            return self.label_combo.count() - 1
+
+        for index in range(self.label_combo.count()):
+            data = self.label_combo.itemData(index, Qt.ItemDataRole.UserRole)
+            if not isinstance(data, Path):
+                continue
+            if data.name != label_name:
+                continue
+            if label_type == "txt" and data.is_dir():
+                return index
+            if label_type == "csv" and data.suffix.lower() == ".csv":
+                return index
+            if label_type is None:
+                return index
+        return self.label_combo.count() - 1
+
+    def _current_video_name(self) -> Optional[str]:
+        video_path = self.video_combo.currentData(Qt.ItemDataRole.UserRole)
+        if isinstance(video_path, Path):
+            return video_path.stem
+        return None
+
+    def _current_label_state(self) -> tuple[Optional[str], Optional[str]]:
+        data = self.label_combo.currentData(Qt.ItemDataRole.UserRole)
+        if isinstance(data, Path):
+            if data.is_dir():
+                return data.name, "txt"
+            if data.suffix.lower() == ".csv":
+                return data.name, "csv"
+        return None, None
+
+    def _persist_ui_state(self, *, include_frame: bool = False) -> None:
+        if self._restoring_ui_state:
+            return
+
+        label_name, label_type = self._current_label_state()
+        frame_index = None
+        if include_frame and getattr(self.skeleton_video_viewer, "video_loaded", False):
+            frame_index = self.video_loader.current_frame
+
+        self.project.save_labelary_state(
+            video_name=self._current_video_name(),
+            label_name=label_name,
+            label_type=label_type,
+            frame_index=frame_index,
+            color_mode=self.color_combo.currentText() if self.color_combo.count() else None,
+            mode=self.mode_combo.currentText(),
+        )
+
+    def _restore_saved_frame_index(self) -> None:
+        saved_state = self.project.get_labelary_state()
+        if saved_state.get("video_name") != self._current_video_name():
+            return
+        frame_index = int(saved_state.get("frame_index", 0) or 0)
+        if 0 <= frame_index < self.video_loader.total_frames:
+            self.video_loader.move_to_frame(frame_index, force=True)
+
+    def _on_video_selection_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        self.file_entry_idx = index
+        if not self._restoring_ui_state:
+            self._persist_ui_state()
+
+    def _on_label_selection_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        if not self._restoring_ui_state:
+            self._persist_ui_state()
+
+    def _on_mode_changed(self, mode: str) -> None:
+        if self._restoring_ui_state:
+            return
+        self.project.set_preferred_frame_mode(mode)
+        self._refresh_mini_training_button_state()
 
     def open_save_dialog(self):
         save_modified_data(self)
@@ -646,6 +796,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             }
             for _, item in sorted(best_by_class.items())
         ]
+
+    def closeEvent(self, event) -> None:
+        self._persist_ui_state(include_frame=True)
+        super().closeEvent(event)
 
 def run_labelary_with_project(current_project, parent=None):
     app = QApplication.instance() or QApplication(sys.argv)

@@ -329,6 +329,11 @@ class YoloInferenceDialog(QDialog):
         lay.setContentsMargins(0,0,0,0)
         self.image_mode_combo = QComboBox()
         self.image_mode_combo.addItems(["images", "davis", "contour"])
+        preferred_mode = self.current_project.get_preferred_frame_mode()
+        preferred_index = self.image_mode_combo.findText(preferred_mode, Qt.MatchFlag.MatchExactly)
+        if preferred_index >= 0:
+            self.image_mode_combo.setCurrentIndex(preferred_index)
+        self.image_mode_combo.currentTextChanged.connect(self._save_image_mode)
         lay.addWidget(self.image_mode_combo)
 
         container = QWidget()
@@ -353,6 +358,9 @@ class YoloInferenceDialog(QDialog):
         button_row.addWidget(self.deselect_all_images_btn)
         lay.addLayout(button_row)
         return sect
+
+    def _save_image_mode(self, image_mode: str) -> None:
+        self.current_project.set_preferred_frame_mode(image_mode)
 
     def build_video_section(self):
         sect = QWidget()

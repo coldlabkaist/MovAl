@@ -36,7 +36,10 @@ class CutieDialog(QDialog):
         self.video_list = QListWidget()
         self.video_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         for fe in self.current_project.files:
-            fname = os.path.basename(fe.video)
+            video_path = Path(fe.video)
+            fname = video_path.name
+            if not video_path.exists():
+                fname = f"{fname} [MISSING SOURCE]"
             item = QListWidgetItem(fname)
             item.setData(Qt.ItemDataRole.UserRole, fe.video)
             self.video_list.addItem(item)
@@ -76,6 +79,9 @@ class CutieDialog(QDialog):
         num_objects = self.current_project.num_animals
         for idx_vid in range(self.video_list.count()):
             video_path    = self.video_list.item(idx_vid).data(Qt.ItemDataRole.UserRole)
+            if not Path(video_path).exists():
+                self.log.append(f"[SKIP] {video_path} - source video not found.")
+                continue
             video_name    = Path(video_path).stem
             workspace_dir = os.path.join(self.frame_dir, video_name)
 
@@ -119,6 +125,15 @@ class CutieDialog(QDialog):
 
         num_objects = self.current_project.num_animals
         video_path = items[0].data(Qt.ItemDataRole.UserRole)
+        if not Path(video_path).exists():
+            QMessageBox.warning(
+                self,
+                "Missing source video",
+                f"The selected video source could not be found:\n{video_path}\n\n"
+                "If this project was created without copying the raw video, reconnect the source "
+                "or place the same file under raw_videos.",
+            )
+            return
         video_name    = Path(video_path).stem
         workspace_dir = os.path.join(self.frame_dir, video_name)
 

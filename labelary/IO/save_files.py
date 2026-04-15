@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -14,8 +13,6 @@ from PyQt6.QtWidgets import (
     QInputDialog, QWidget, QFrame
 )
 from PyQt6.QtCore import Qt
-import yaml
-from dataclasses import asdict, is_dataclass
 from tqdm import tqdm
 from .data_loader import DataLoader
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -80,8 +77,6 @@ def save_modified_data(parent: QWidget):
         QMessageBox.critical(parent, "Error", "Project information not found.")
         return
     video_path, video_name = _current_video(parent)
-    config_path = Path(project.project_dir) / "config.yaml"
-    project_info = parent.project
 
     if action == "csv":
         base_dir = Path(project.project_dir) / "labels" / video_name / "csv"
@@ -114,7 +109,6 @@ def save_modified_data(parent: QWidget):
         try:
             df_to_save.to_csv(csv_path, index=False)
             QMessageBox.information(parent, "Success", f"CSV Saved!:\n{csv_path}")
-            modify_yaml(video_path, "csv", csv_path, config_path, project_info)
             parent.update_label_combo(
                 video_index = (parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
                 set_text = csv_path
@@ -141,8 +135,6 @@ def save_modified_data(parent: QWidget):
         try:
             export_loaded_data_to_txt_dir(txt_dir, df=df_orig, clear_existing=has_existing)
             QMessageBox.information(parent, "Success", f"TXT Exported:\n{txt_dir}")
-            if not has_existing:
-                modify_yaml(video_path, "txt", txt_dir, config_path, project_info)
             parent.update_label_combo(
                 video_index = (parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
                 set_text = txt_dir
@@ -198,7 +190,7 @@ def export_current_labels_to_txt_snapshot(
 
     return export_loaded_data_to_txt_dir(target_dir)
 
-def _current_video(parent: QWidget) -> str:
+def _current_video(parent: QWidget) -> tuple[Path, str]:
     if hasattr(parent, "video_combo"):
         p: Path | None = parent.video_combo.currentData(Qt.ItemDataRole.UserRole)
         if p is None:
@@ -225,46 +217,6 @@ def _find_project(parent: QWidget):
             return getattr(cur, "project")
         cur = cur.parent()
     return None
-
-def modify_yaml(video_path, file_type, file_path, yaml_path, project_info):
-    video_path = str(_norm(video_path))
-    file_path  = str(_norm(file_path))
-    entry = next((fe for fe in project_info.files if _norm(fe.video) == video_path), None)
-    if file_type == "csv":
-        if file_path not in entry.csv:
-            entry.csv.append(file_path)
-    elif file_type == "txt":
-        if file_path not in entry.txt:
-            entry.txt.append(file_path)
-
-    def _serialize(obj):
-        if is_dataclass(obj):
-            return {k: _serialize(v) for k, v in asdict(obj).items()}
-        if isinstance(obj, dict): 
-            return {k: _serialize(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_serialize(i) for i in obj]
-        if isinstance(obj, Path):
-            return str(obj)
-        return obj
-
-    data_dict = _serialize(project_info)
-    data_dict["skeleton"] = project_info.skeleton_name
-    data_dict.pop("skeleton_yaml", None)
-
-    yaml_path = Path(yaml_path)
-    yaml_path.parent.mkdir(parents=True, exist_ok=True)
-    with yaml_path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(
-            data_dict,
-            f,
-            allow_unicode=True,
-            sort_keys=False,
-            default_flow_style=False,
-        )
-
-def _norm(p: str | Path) -> Path:
-    return str(Path(p).expanduser().resolve())
 
 def _export_txt_files(target_dir: Path, df: pd.DataFrame) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)

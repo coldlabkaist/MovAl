@@ -19,7 +19,11 @@ class PipelineController:
         dialog.exec()
 
     def run_project_manager(self):
-        dialog = ProjectManagerDialog(self.main_window_load_project, self.parent)
+        dialog = ProjectManagerDialog(
+            self.main_window_load_project,
+            self.parent,
+            self.current_project,
+        )
         dialog.exec()
 
     def run_video_preprocess(self):

@@ -247,6 +247,10 @@ class DataSplitDialog(QDialog):
         self.frame_type_combo.addItem("images")
         self.frame_type_combo.addItem("davis")
         self.frame_type_combo.addItem("contour")
+        preferred_mode = self.current_project.get_preferred_frame_mode()
+        preferred_index = self.frame_type_combo.findText(preferred_mode, Qt.MatchFlag.MatchExactly)
+        if preferred_index >= 0:
+            self.frame_type_combo.setCurrentIndex(preferred_index)
         layout.addWidget(self.frame_type_combo)
 
         self.run_btn = QPushButton("Run")
@@ -258,10 +262,14 @@ class DataSplitDialog(QDialog):
 
         self._populate_file_items()
         self.frame_type_combo.currentTextChanged.connect(self._frame_type_changed)
+        self.frame_type_combo.currentTextChanged.connect(self._save_frame_type)
 
     def _frame_type_changed(self):
         self._populate_file_items()
         self._update_selection_count()
+
+    def _save_frame_type(self, frame_type: str) -> None:
+        self.current_project.set_preferred_frame_mode(frame_type)
 
     def _populate_file_items(self) -> None:
         self._clear_file_items()

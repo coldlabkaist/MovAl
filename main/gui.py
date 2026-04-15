@@ -1,39 +1,57 @@
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QMainWindow, QLineEdit, QFileDialog, QMessageBox, QFrame,
-)
-from PyQt6.QtCore import Qt, QStandardPaths
-from PyQt6.QtGui import QPixmap
-from utils.project import ProjectInformation
-from pathlib import Path
-from typing import Union, Optional
+from __future__ import annotations
+
 import json
 import os
-from utils import __version__
 import warnings
+from pathlib import Path
+from typing import Optional, Union
+
+from PyQt6.QtCore import QStandardPaths, Qt
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QFileDialog,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from utils import __version__
+from utils.project import ProjectInformation
+
 
 class MainWindow(QMainWindow):
     def __init__(self, controller=None):
         super().__init__()
         self.setWindowTitle("Move Altogether: MovAl")
-        self.setGeometry(100, 100, 650, 550) 
+        self.setGeometry(100, 100, 650, 550)
         self.setFixedSize(self.size())
 
         self.controller = controller
         self.controller.parent = self
-        self.last_searched_dir = None
+        self.current_project: Optional[ProjectInformation] = None
+        self.last_searched_dir: Optional[str] = None
         self.desktop_dir = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.DesktopLocation
         )
         appdata_root = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
-        self.appdata_dir = Path(appdata_root) if appdata_root else (Path.home() / "AppData" / "Roaming" / "MovAl")
+        self.appdata_dir = (
+            Path(appdata_root)
+            if appdata_root
+            else (Path.home() / "AppData" / "Roaming" / "MovAl")
+        )
         self.last_project_log_path = self.appdata_dir / "last_project.json"
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         outer_layout = QVBoxLayout()
         central_widget.setLayout(outer_layout)
 
@@ -47,18 +65,18 @@ class MainWindow(QMainWindow):
         self.proj_name = QLineEdit(self)
         self.proj_name.setReadOnly(True)
         self.proj_name.setPlaceholderText("No project loaded")
-        proj_bar.addWidget(self.proj_name, 1) 
-        self.btn_load_yaml = QPushButton("Load YAML…", self)
-        self.btn_load_yaml.clicked.connect(self.on_load_yaml_clicked)
-        proj_bar.addWidget(self.btn_load_yaml)
+        proj_bar.addWidget(self.proj_name, 1)
+
+        self.btn_load_project = QPushButton("Load Project...", self)
+        self.btn_load_project.clicked.connect(self.on_load_project_clicked)
+        proj_bar.addWidget(self.btn_load_project)
         outer_layout.addLayout(proj_bar)
 
-        self.current_project = None
-        self.controller.main_window_load_project = self.on_load_yaml_clicked
+        self.controller.main_window_load_project = self.on_load_project_clicked
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken) 
+        line.setFrameShadow(QFrame.Shadow.Sunken)
         line.setFixedHeight(2)
         outer_layout.addSpacing(5)
         outer_layout.addWidget(line)
@@ -68,24 +86,26 @@ class MainWindow(QMainWindow):
         outer_layout.addLayout(main_layout)
 
         self.button_layout = QVBoxLayout()
-        self.button_layout.setSpacing(5) 
-        self.button_layout.setContentsMargins(5, 5, 5, 5) 
+        self.button_layout.setSpacing(5)
+        self.button_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.addLayout(self.button_layout)
         main_layout.insertStretch(0, 1)
-        main_layout.addStretch(1) 
+        main_layout.addStretch(1)
 
         right_layout = QVBoxLayout()
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        image_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "background_image.png"))
+        image_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "background_image.png")
+        )
         pixmap = QPixmap(image_path)
-        self.image_label.setPixmap(pixmap.scaledToWidth(450, Qt.TransformationMode.SmoothTransformation))
-
+        self.image_label.setPixmap(
+            pixmap.scaledToWidth(450, Qt.TransformationMode.SmoothTransformation)
+        )
         right_layout.addWidget(self.image_label)
-
         main_layout.addLayout(right_layout, 2)
-        
+
         self.setup_buttons()
         self._restore_last_project()
 
@@ -96,7 +116,7 @@ class MainWindow(QMainWindow):
         if not last_path.exists():
             self._clear_last_project_log()
             return
-        self.on_load_yaml_clicked(path=last_path)
+        self.on_load_project_clicked(path=last_path)
 
     def _read_last_project_path(self) -> Optional[Path]:
         try:
@@ -129,7 +149,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def setup_buttons(self):
+    def setup_buttons(self) -> None:
         installation_label = QLabel("Installation (Cutie / YOLO)")
         installation_label.setStyleSheet("margin-top: 10px;")
         self.button_layout.addWidget(installation_label)
@@ -142,7 +162,7 @@ class MainWindow(QMainWindow):
         step1_label = QLabel("Step 1")
         step1_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         self.button_layout.addWidget(step1_label)
-        self.create_project_btn = QPushButton("Create Project")
+        self.create_project_btn = QPushButton("Create / Manage Project")
         self.create_project_btn.setFixedHeight(25)
         self.create_project_btn.setMinimumWidth(180)
         self.create_project_btn.clicked.connect(self.controller.run_project_manager)
@@ -165,7 +185,7 @@ class MainWindow(QMainWindow):
         self.label_btn.setMinimumWidth(180)
         self.label_btn.clicked.connect(self.controller.run_labelary)
         self.button_layout.addWidget(self.label_btn)
-        
+
         step4_label = QLabel("Step 4")
         step4_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         self.button_layout.addWidget(step4_label)
@@ -189,18 +209,18 @@ class MainWindow(QMainWindow):
         self.extract_btn.clicked.connect(self.controller.data_extract)
         self.button_layout.addWidget(self.extract_btn)
 
-    def on_load_yaml_clicked(
+    def on_load_project_clicked(
         self,
         checked: bool = False,
-        path: Optional[Union[str, Path]] = None
+        path: Optional[Union[str, Path]] = None,
     ) -> None:
         start_dir = self.last_searched_dir if self.last_searched_dir else self.desktop_dir
         if path is None:
             path, _ = QFileDialog.getOpenFileName(
                 self,
-                "Select project YAML",
+                "Select project file",
                 start_dir,
-                "YAML files (*.yaml *.yml)"
+                "Project files (*.json *.yaml *.yml)",
             )
             if not path:
                 return
@@ -209,22 +229,36 @@ class MainWindow(QMainWindow):
             path = str(path)
 
         try:
-            self.current_project = ProjectInformation.from_yaml(path)
-            self.controller.current_project = self.current_project
-            self.proj_name.setText(self.current_project.title or Path(path).stem)
-            self.last_searched_dir = str(Path(path).parent)
-            self._write_last_project_path(path)
+            project = ProjectInformation.from_path(path)
+            project.ensure_project_file()
 
-        except FileNotFoundError as fnf:
+            self.current_project = project
+            self.controller.current_project = project
+            self.proj_name.setText(project.title or project.project_file.stem)
+            self.last_searched_dir = str(project.project_file.parent)
+            self._write_last_project_path(project.project_file)
+        except FileNotFoundError as err:
             if Path(path).expanduser() == self._read_last_project_path():
                 self._clear_last_project_log()
-            QMessageBox.warning(self, "File not found", str(fnf))
+            QMessageBox.warning(self, "File not found", str(err))
             return
-        except Exception as e:
-            QMessageBox.critical(self, "Load Error", str(e))
+        except Exception as err:
+            QMessageBox.critical(self, "Load Error", str(err))
             return
-        
-        curr_major, curr_minor, *_ = __version__.split(".")
-        proj_major, proj_minor, *_ = self.current_project.moval_version.split(".")
+
+        self._warn_if_project_version_differs()
+
+    def _warn_if_project_version_differs(self) -> None:
+        if self.current_project is None or not self.current_project.moval_version:
+            return
+
+        curr_major, curr_minor, *_ = (__version__.split(".") + ["0", "0"])
+        proj_major, proj_minor, *_ = (
+            self.current_project.moval_version.split(".") + ["0", "0"]
+        )
         if (curr_major, curr_minor) != (proj_major, proj_minor):
-            warnings.warn("This project was created in a previous version of moval. The files may not be compatible.", UserWarning)
+            warnings.warn(
+                "This project was created in a previous version of MovAl. "
+                "Some files may not be fully compatible.",
+                UserWarning,
+            )

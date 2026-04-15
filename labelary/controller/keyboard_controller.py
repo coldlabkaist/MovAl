@@ -9,6 +9,8 @@ class KeyboardController(QObject):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.KeyPress:
+            if not getattr(self.main_dialog, "shortcuts_enabled", True):
+                return super().eventFilter(obj, event)
             key = event.key()
             if (
                 key in (Qt.Key.Key_Right, Qt.Key.Key_D)

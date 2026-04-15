@@ -33,6 +33,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.auto_label_model_mode: Optional[str] = None
         self.mini_training_thread: Optional[TrainThread] = None
         self.mini_training_run_context: Optional[dict] = None
+        self.shortcuts_enabled = True
         self.load_skeleton_model()
         self.load_video_combo()
         self.load_mode_combo()
@@ -247,7 +248,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.skeleton_video_viewer.set_skeleton_color_mode(color_mode)
 
     def open_save_dialog(self):
-        save_modified_data(self)
+        self.shortcuts_enabled = False
+        try:
+            save_modified_data(self)
+        finally:
+            self.shortcuts_enabled = True
 
     def on_automatic_label_toggled(self, checked: bool):
         if not checked:

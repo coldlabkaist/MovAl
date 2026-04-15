@@ -4,14 +4,17 @@ import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
+import yaml
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QColor, QKeyEvent
+from PyQt6.QtGui import QAction, QBrush, QColor, QKeyEvent
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -19,8 +22,11 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +37,36 @@ from utils.project import ProjectInformation
 from utils.skeleton import SkeletonModel
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _set_tooltip(widget: QWidget, text: str) -> None:
+    widget.setToolTip(text)
+
+
+def _write_training_config(project: ProjectInformation) -> Path:
+    training_base_dir = project.project_dir_path / "runs" / "dataset"
+    training_base_dir.mkdir(parents=True, exist_ok=True)
+
+    skeleton_model = SkeletonModel()
+    skeleton_model.load_from_dict(project.skeleton_data)
+    nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
+
+    config = {
+        "train": (training_base_dir / "train").as_posix(),
+        "val": (training_base_dir / "val").as_posix(),
+        "test": (training_base_dir / "test").as_posix(),
+        "nc": len(project.animals_name),
+        "names": {index: name for index, name in enumerate(project.animals_name)},
+        "nkpt": nkpt,
+        "kpt_shape": [nkpt, 3],
+        "flip_idx": flip_idx,
+        "kpt_names": kpt_names,
+    }
+
+    target_path = project.project_dir_path / "runs" / "training_config.yaml"
+    with target_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+    return target_path
 
 
 class _FileListWidget(QListWidget):
@@ -78,17 +114,21 @@ class _CreateProjectTab(QWidget):
         self._preset_dir.mkdir(parents=True, exist_ok=True)
 
         layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(16)
 
         left_col = QVBoxLayout()
-        left_col.setSpacing(12)
-        layout.addLayout(left_col, 0)
+        left_col.setSpacing(10)
+        layout.addLayout(left_col, 3)
 
         self.title_label = QLabel("<b>Project Title</b>")
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("e.g. CoLD_GH_250718")
-        self.title_edit.setFixedWidth(260)
+        self.title_edit.setMinimumWidth(360)
+        self.title_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         left_col.addWidget(self.title_label)
         left_col.addWidget(self.title_edit)
+        _set_tooltip(self.title_edit, "Name of the project folder that will be created.")
 
         self.step1_label = QLabel("<b>Step 1.</b> Set number of animals")
         self.step1_spin = QSpinBox()
@@ -96,16 +136,24 @@ class _CreateProjectTab(QWidget):
         self.step1_spin.setValue(2)
         left_col.addWidget(self.step1_label)
         left_col.addWidget(self.step1_spin)
+        _set_tooltip(self.step1_spin, "How many tracked animals the project will use.")
 
+        self.instance_label = QLabel("<b>Animal Names</b>")
         self.instance_area = QScrollArea()
-        self.instance_area.setFixedWidth(260)
         self.instance_area.setWidgetResizable(True)
+        self.instance_area.setMinimumHeight(240)
+        self.instance_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.instance_container = QWidget()
         self.instance_layout = QVBoxLayout(self.instance_container)
         self.instance_layout.setContentsMargins(10, 10, 10, 10)
-        self.instance_layout.setSpacing(4)
+        self.instance_layout.setSpacing(6)
         self.instance_area.setWidget(self.instance_container)
-        left_col.addWidget(self.instance_area)
+        left_col.addWidget(self.instance_label)
+        left_col.addWidget(self.instance_area, 1)
+        _set_tooltip(
+            self.instance_area,
+            "Enter the track names that will appear throughout the project.",
+        )
 
         self._instance_fields: list[QLineEdit] = []
         self.step1_spin.valueChanged.connect(self._generate_instance_fields)
@@ -119,6 +167,10 @@ class _CreateProjectTab(QWidget):
         left_col.addWidget(self.step2_label)
         left_col.addWidget(self.step2_button)
         left_col.addWidget(self.step2_check)
+        _set_tooltip(
+            self.step2_check,
+            "If checked, the new project stores its own local video copies under raw_videos.",
+        )
 
         self.step3_label = QLabel("<b>Step 3.</b> Load labels (Optional)")
         self.step3_button_csv = QPushButton("Load CSV Files...")
@@ -136,11 +188,15 @@ class _CreateProjectTab(QWidget):
         self.step4_button = QPushButton("Skeleton Setting...")
         self.step4_button.clicked.connect(self._open_skeleton_manager)
         left_col.addWidget(self.step4_label)
-        left_col.addWidget(self.step4_combo)
-        left_col.addWidget(self.step4_button)
+        step4_row = QHBoxLayout()
+        step4_row.addWidget(self.step4_combo, 1)
+        step4_row.addWidget(self.step4_button)
+        left_col.addLayout(step4_row)
         self._load_skeleton_items()
-
-        left_col.addStretch(1)
+        _set_tooltip(
+            self.step4_combo,
+            "Preset skeleton that will be copied into the new project's project.json.",
+        )
 
         note_label = QLabel(
             "<b>Note:</b> Put each CSV or TXT item immediately after its target video. "
@@ -152,14 +208,19 @@ class _CreateProjectTab(QWidget):
         self.create_button = QPushButton("Create Project")
         self.create_button.clicked.connect(self._create_project)
         left_col.addWidget(self.create_button)
+        left_col.addStretch(1)
 
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
-        layout.addLayout(right_col, 1)
+        layout.addLayout(right_col, 4)
 
         self.file_list = _FileListWidget()
-        self.file_list.setMinimumWidth(320)
-        right_col.addWidget(self.file_list)
+        self.file_list.setMinimumWidth(420)
+        right_col.addWidget(self.file_list, 1)
+        _set_tooltip(
+            self.file_list,
+            "Ordered import list. Each CSV or TXT entry is attached to the nearest video above it.",
+        )
 
         list_buttons = QHBoxLayout()
         self.list_button_sort = QPushButton("Auto Sort by Filename")
@@ -183,7 +244,7 @@ class _CreateProjectTab(QWidget):
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(6)
+            row_layout.setSpacing(8)
             row_layout.addWidget(QLabel(f"Animal {index + 1}:"))
             field = QLineEdit(default_name)
             row_layout.addWidget(field, 1)
@@ -356,7 +417,7 @@ class _CreateProjectTab(QWidget):
                 raise ValueError("The list must include at least one video.")
 
             project.save()
-            self._write_training_config(project)
+            _write_training_config(project)
         except Exception as err:
             if project_dir.exists():
                 shutil.rmtree(project_dir)
@@ -375,78 +436,94 @@ class _CreateProjectTab(QWidget):
         self.dialog.load_project(project.project_file)
         self.dialog.accept()
 
-    def _write_training_config(self, project: ProjectInformation) -> None:
-        training_base_dir = project.project_dir_path / "runs" / "dataset"
-        training_base_dir.mkdir(parents=True, exist_ok=True)
-
-        skeleton_model = SkeletonModel()
-        skeleton_model.load_from_yaml(project.skeleton_yaml)
-        nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
-
-        config = {
-            "train": (training_base_dir / "train").as_posix(),
-            "val": (training_base_dir / "val").as_posix(),
-            "test": (training_base_dir / "test").as_posix(),
-            "nc": len(project.animals_name),
-            "names": {index: name for index, name in enumerate(project.animals_name)},
-            "nkpt": nkpt,
-            "kpt_shape": [nkpt, 3],
-            "flip_idx": flip_idx,
-            "kpt_names": kpt_names,
-        }
-
-        import yaml
-
-        target_path = project.project_dir_path / "runs" / "training_config.yaml"
-        with target_path.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
-
 
 class _ManageProjectTab(QWidget):
+    VIDEO_TREE_COLUMNS = ["Video", "Storage", "Status", "CSV", "TXT", "Path"]
+
     def __init__(self, dialog: "ProjectManagerDialog", project: Optional[ProjectInformation]) -> None:
         super().__init__(dialog)
         self.dialog = dialog
         self.project = project
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.description_label = QLabel(
+            "Open a project to manage videos, label files, compression settings, "
+            "and the project-local skeleton."
+        )
+        self.description_label.setWordWrap(True)
+        layout.addWidget(self.description_label)
 
         project_row = QHBoxLayout()
         self.open_project_button = QPushButton("Open Project...")
-        self.use_current_project_button = QPushButton("Use Current Project")
-        self.compress_button = QPushButton("Compress Project")
-        self.refresh_button = QPushButton("Refresh")
         self.open_project_button.clicked.connect(self.dialog.open_project_from_picker)
-        self.use_current_project_button.clicked.connect(self.dialog.use_parent_current_project)
-        self.compress_button.clicked.connect(self._compress_project)
-        self.refresh_button.clicked.connect(self.refresh_views)
         project_row.addWidget(self.open_project_button)
-        project_row.addWidget(self.use_current_project_button)
         project_row.addStretch(1)
-        project_row.addWidget(self.compress_button)
-        project_row.addWidget(self.refresh_button)
         layout.addLayout(project_row)
+        _set_tooltip(
+            self.open_project_button,
+            "Open an existing MovAl project.json or a legacy config.yaml file.",
+        )
 
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
+        self.video_help_label = QLabel()
+        self.video_help_label.setWordWrap(True)
+        layout.addWidget(self.video_help_label)
+
         video_controls = QHBoxLayout()
-        self.copy_added_videos_check = QCheckBox("Copy added videos into raw_videos")
+        self.copy_added_videos_check = QCheckBox("Copy newly added videos into project raw_videos")
         self.copy_added_videos_check.setChecked(True)
         self.add_video_button = QPushButton("Add Videos...")
+        self.relink_video_button = QPushButton("Relink Source...")
+        self.copy_existing_video_button = QPushButton("Copy Into Project")
         self.remove_video_button = QPushButton("Remove Selected Videos")
         self.add_video_button.clicked.connect(self._add_videos)
+        self.relink_video_button.clicked.connect(self._relink_selected_video)
+        self.copy_existing_video_button.clicked.connect(self._copy_selected_videos_into_project)
         self.remove_video_button.clicked.connect(self._remove_selected_videos)
         video_controls.addWidget(self.copy_added_videos_check)
         video_controls.addStretch(1)
         video_controls.addWidget(self.add_video_button)
+        video_controls.addWidget(self.relink_video_button)
+        video_controls.addWidget(self.copy_existing_video_button)
         video_controls.addWidget(self.remove_video_button)
         layout.addLayout(video_controls)
+        _set_tooltip(
+            self.copy_added_videos_check,
+            "This applies only to videos added from this screen. Existing videos are not changed automatically.",
+        )
+        _set_tooltip(self.relink_video_button, "Update the absolute source path for one external video.")
+        _set_tooltip(
+            self.copy_existing_video_button,
+            "Copy selected external videos into raw_videos and switch them to project-relative paths.",
+        )
 
-        self.video_list = QListWidget()
-        self.video_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.video_list.itemSelectionChanged.connect(self._sync_video_selection_to_csv_combo)
-        layout.addWidget(self.video_list)
+        self.video_tree = QTreeWidget()
+        self.video_tree.setColumnCount(len(self.VIDEO_TREE_COLUMNS))
+        self.video_tree.setHeaderLabels(self.VIDEO_TREE_COLUMNS)
+        self.video_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.video_tree.itemSelectionChanged.connect(self._sync_video_selection_to_csv_combo)
+        header = self.video_tree.header()
+        for index in range(len(self.VIDEO_TREE_COLUMNS) - 1):
+            header.setSectionResizeMode(index, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(len(self.VIDEO_TREE_COLUMNS) - 1, QHeaderView.ResizeMode.Stretch)
+        header_item = self.video_tree.headerItem()
+        header_item.setToolTip(0, "Video name inside this project.")
+        header_item.setToolTip(1, "Project copy means raw_videos stores the file. External link means project.json stores an absolute source path.")
+        header_item.setToolTip(2, "Available, Missing source, or Fallback copy.")
+        header_item.setToolTip(3, "Number of CSV label files in labels/<video>/csv.")
+        header_item.setToolTip(4, "Number of TXT label files in labels/<video>/txt.")
+        header_item.setToolTip(5, "Resolved video path currently used by MovAl.")
+        layout.addWidget(self.video_tree, 1)
+        _set_tooltip(
+            self.video_tree,
+            "Select one or more videos to remove them, relink an external path, or copy them into the project.",
+        )
 
         csv_row = QHBoxLayout()
         csv_row.addWidget(QLabel("Manage CSVs for:"))
@@ -464,25 +541,69 @@ class _ManageProjectTab(QWidget):
         self.csv_list = QListWidget()
         self.csv_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         layout.addWidget(self.csv_list)
+        _set_tooltip(self.csv_video_combo, "Choose which video's labels/<video>/csv folder you want to manage.")
+        _set_tooltip(self.csv_list, "CSV label files currently stored inside this project.")
 
         self.txt_label = QLabel()
         self.txt_label.setWordWrap(True)
         layout.addWidget(self.txt_label)
 
-        self.note_label = QLabel(
-            "Project JSON stores the video registry and UI state. "
-            "CSV/TXT files are discovered from labels/<video>/ at runtime."
+        self.skeleton_info_label = QLabel()
+        self.skeleton_info_label.setWordWrap(True)
+        layout.addWidget(self.skeleton_info_label)
+
+        skeleton_row = QHBoxLayout()
+        self.edit_skeleton_button = QPushButton("Edit Project Skeleton...")
+        self.edit_skeleton_button.clicked.connect(self._edit_project_skeleton)
+        skeleton_row.addWidget(self.edit_skeleton_button)
+        skeleton_row.addStretch(1)
+        layout.addLayout(skeleton_row)
+        _set_tooltip(
+            self.edit_skeleton_button,
+            "Open the project-local skeleton editor. By default only node visualization can be changed.",
         )
-        self.note_label.setWordWrap(True)
-        layout.addWidget(self.note_label)
+
+        self.compress_info_label = QLabel(
+            "Compress Project removes large generated assets while keeping masks, videos, labels, "
+            "and config files. runs/dataset is always deleted."
+        )
+        self.compress_info_label.setWordWrap(True)
+        layout.addWidget(self.compress_info_label)
+
+        compress_options_row = QHBoxLayout()
+        self.delete_runs_check = QCheckBox("Also delete extra files under runs/")
+        self.delete_predicts_check = QCheckBox("Also delete predicts/")
+        compress_options_row.addWidget(self.delete_runs_check)
+        compress_options_row.addWidget(self.delete_predicts_check)
+        compress_options_row.addStretch(1)
+        layout.addLayout(compress_options_row)
+        _set_tooltip(
+            self.delete_runs_check,
+            "If checked, remove run outputs under runs/ except config files. runs/dataset is deleted either way.",
+        )
+        _set_tooltip(
+            self.delete_predicts_check,
+            "If checked, remove predict result folders under predicts/.",
+        )
+
+        compress_row = QHBoxLayout()
+        compress_row.addStretch(1)
+        self.compress_button = QPushButton("Compress Project")
+        self.compress_button.clicked.connect(self._compress_project)
+        compress_row.addWidget(self.compress_button)
+        layout.addLayout(compress_row)
 
         self._managed_widgets = [
             self.copy_added_videos_check,
             self.add_video_button,
+            self.relink_video_button,
+            self.copy_existing_video_button,
             self.remove_video_button,
+            self.video_tree,
+            self.edit_skeleton_button,
+            self.delete_runs_check,
+            self.delete_predicts_check,
             self.compress_button,
-            self.refresh_button,
-            self.video_list,
             self.csv_video_combo,
             self.add_csv_button,
             self.remove_csv_button,
@@ -498,54 +619,107 @@ class _ManageProjectTab(QWidget):
         for widget in self._managed_widgets:
             widget.setEnabled(enabled)
 
+    def _format_status_text(self, record, access_state: dict) -> str:
+        status = access_state.get("status")
+        if status == "fallback_copy":
+            return "Fallback copy"
+        if status == "missing_source":
+            return "Missing source"
+        if record.relative_path:
+            return "Available"
+        return "Missing source"
+
+    def _format_storage_text(self, record) -> str:
+        return "Project copy" if record.relative_path else "External link"
+
+    def _update_skeleton_summary(self) -> None:
+        if self.project is None:
+            self.skeleton_info_label.setText("No project skeleton loaded.")
+            return
+
+        data = self.project.skeleton_data or {}
+        node_count = len(data.get("nodes", []))
+        edge_count = len(data.get("connections", []))
+        sym_count = len(data.get("symmetry", []))
+        self.skeleton_info_label.setText(
+            f"<b>Project Skeleton</b><br>"
+            f"Base preset: {self.project.skeleton_name}<br>"
+            f"Nodes: {node_count} | Connections: {edge_count} | Symmetry pairs: {sym_count}"
+        )
+
     def refresh_views(self) -> None:
         if self.project is None:
             self._set_controls_enabled(False)
-            self.video_list.clear()
+            self.video_tree.clear()
             self.csv_list.clear()
             self.csv_video_combo.clear()
             self.info_label.setText(
                 "No project is connected yet.<br>"
-                "Use <b>Open Project...</b> or <b>Use Current Project</b> to manage an existing project."
+                "Use <b>Open Project...</b> to choose an existing project."
+            )
+            self.video_help_label.setText(
+                "Storage explains whether a video is kept inside raw_videos or linked by an external absolute path."
             )
             self.txt_label.setText("No project selected.")
+            self.skeleton_info_label.setText("No project skeleton loaded.")
             return
 
         self._set_controls_enabled(True)
         project_dir = self.project.project_dir_path
         self.info_label.setText(
             f"<b>{self.project.title}</b><br>"
-            f"Project file: {self.project.project_file}<br>"
+            f"Project file name: {self.project.project_file.name}<br>"
+            f"Project file path: {self.project.project_file}<br>"
             f"Project folder: {project_dir}"
         )
+        self.video_help_label.setText(
+            "Storage: <b>Project copy</b> means the file is under raw_videos. "
+            "<b>External link</b> means project.json stores an absolute source path.<br>"
+            "Status: <b>Available</b> means the source is reachable, <b>Fallback copy</b> means "
+            "the external path is missing but a same-named file exists in raw_videos, and "
+            "<b>Missing source</b> means MovAl cannot currently find the original video.<br>"
+            "The copy checkbox above applies only to newly added videos. Existing videos can be relinked or copied with the buttons beside it."
+        )
 
-        self.video_list.clear()
+        self.video_tree.clear()
         self.csv_video_combo.clear()
         file_entries_by_name = {entry.name: entry for entry in self.project.files}
 
         for record in self.project.video_records:
             file_entry = file_entries_by_name.get(record.name)
             csv_count = len(file_entry.csv) if file_entry else 0
-            txt_count = len(file_entry.txt) if file_entry else 0
+            txt_dir = self.project.txt_dir(record.name)
+            txt_count = sum(1 for _ in txt_dir.glob("*.txt")) if txt_dir.exists() else 0
             access_state = self.project.get_video_access_state(record)
-            if record.relative_path:
-                location_text = record.relative_path
-            else:
-                location_text = record.source_path or record.file_name
-            storage_text = "project copy" if access_state["storage"] == "project_copy" else "external source"
-            status_text = "OK" if access_state["exists"] else "MISSING"
-            item = QListWidgetItem(
-                f"{record.file_name} | {storage_text} | {status_text} | "
-                f"{location_text} | {csv_count} CSV | {txt_count} TXT"
+            item = QTreeWidgetItem(
+                [
+                    record.file_name,
+                    self._format_storage_text(record),
+                    self._format_status_text(record, access_state),
+                    str(csv_count),
+                    str(txt_count),
+                    str(access_state["path"]),
+                ]
             )
-            item.setData(Qt.ItemDataRole.UserRole, record.name)
-            self.video_list.addItem(item)
+            item.setData(0, Qt.ItemDataRole.UserRole, record.name)
+            if access_state["status"] == "missing_source":
+                for column in range(len(self.VIDEO_TREE_COLUMNS)):
+                    item.setForeground(column, QBrush(QColor("#b3261e")))
+            elif access_state["status"] == "fallback_copy":
+                for column in range(len(self.VIDEO_TREE_COLUMNS)):
+                    item.setForeground(column, QBrush(QColor("#8a5a00")))
+            self.video_tree.addTopLevelItem(item)
             self.csv_video_combo.addItem(record.file_name, record.name)
 
         self.refresh_csv_list()
+        self._update_skeleton_summary()
 
     def refresh_csv_list(self) -> None:
         self.csv_list.clear()
+        if self.project is None:
+            self.txt_label.setText("No project selected.")
+            return
+
         video_name = self.current_video_name()
         if video_name is None:
             self.txt_label.setText("No video selected.")
@@ -573,11 +747,19 @@ class _ManageProjectTab(QWidget):
             return None
         return self.csv_video_combo.currentData(Qt.ItemDataRole.UserRole)
 
+    def _selected_video_names(self) -> list[str]:
+        names: list[str] = []
+        for item in self.video_tree.selectedItems():
+            name = item.data(0, Qt.ItemDataRole.UserRole)
+            if name:
+                names.append(name)
+        return names
+
     def _sync_video_selection_to_csv_combo(self) -> None:
-        selected = self.video_list.selectedItems()
+        selected = self.video_tree.selectedItems()
         if not selected:
             return
-        video_name = selected[0].data(Qt.ItemDataRole.UserRole)
+        video_name = selected[0].data(0, Qt.ItemDataRole.UserRole)
         index = self.csv_video_combo.findData(video_name, Qt.ItemDataRole.UserRole)
         if index >= 0 and self.csv_video_combo.currentIndex() != index:
             self.csv_video_combo.setCurrentIndex(index)
@@ -617,22 +799,112 @@ class _ManageProjectTab(QWidget):
         elif added:
             QMessageBox.information(self, "Videos added", f"Added {added} video(s) to the project.")
 
+    def _relink_selected_video(self) -> None:
+        if self.project is None:
+            QMessageBox.warning(self, "No project selected", "Load a project first.")
+            return
+
+        names = self._selected_video_names()
+        if len(names) != 1:
+            QMessageBox.information(self, "Select one video", "Choose exactly one video to relink.")
+            return
+
+        record = self.project.get_video_record(names[0])
+        if record is None:
+            return
+
+        start_dir = ""
+        access_state = self.project.get_video_access_state(record)
+        try:
+            start_dir = str(Path(access_state["path"]).parent)
+        except Exception:
+            start_dir = ""
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Relink source for {record.file_name}",
+            start_dir,
+            "Videos (*.mp4 *.avi *.mov *.mkv)",
+        )
+        if not path:
+            return
+
+        try:
+            self.project.relink_video_source(record.name, path)
+        except Exception as err:
+            QMessageBox.critical(self, "Relink failed", str(err))
+            return
+
+        self.dialog.load_project(self.project.project_file)
+        self.project = self.dialog.current_project or self.project
+        self.refresh_views()
+        QMessageBox.information(
+            self,
+            "Video relinked",
+            f"{record.file_name} now points to:\n{path}",
+        )
+
+    def _copy_selected_videos_into_project(self) -> None:
+        if self.project is None:
+            QMessageBox.warning(self, "No project selected", "Load a project first.")
+            return
+
+        names = self._selected_video_names()
+        if not names:
+            QMessageBox.information(
+                self,
+                "No selection",
+                "Select one or more videos to copy into raw_videos.",
+            )
+            return
+
+        copied = 0
+        skipped = 0
+        errors: list[str] = []
+        for name in names:
+            record = self.project.get_video_record(name)
+            if record is None:
+                continue
+            if record.relative_path:
+                skipped += 1
+                continue
+            try:
+                self.project.copy_video_into_project(name, save=False)
+                copied += 1
+            except Exception as err:
+                errors.append(f"{record.file_name}: {err}")
+
+        if copied:
+            self.project.save()
+            self.dialog.load_project(self.project.project_file)
+            self.project = self.dialog.current_project or self.project
+        self.refresh_views()
+
+        lines = [f"Copied {copied} video(s) into raw_videos."]
+        if skipped:
+            lines.append(f"Skipped {skipped} video(s) that were already project copies.")
+        if errors:
+            lines.append("")
+            lines.extend(errors)
+            QMessageBox.warning(self, "Copy finished with warnings", "\n".join(lines))
+            return
+        QMessageBox.information(self, "Copy finished", "\n".join(lines))
+
     def _remove_selected_videos(self) -> None:
         if self.project is None:
             QMessageBox.warning(self, "No project selected", "Load a project first.")
             return
 
-        items = self.video_list.selectedItems()
-        if not items:
+        names = self._selected_video_names()
+        if not names:
             QMessageBox.information(self, "No selection", "Select at least one video to remove.")
             return
 
-        names = [item.data(Qt.ItemDataRole.UserRole) for item in items]
         reply = QMessageBox.question(
             self,
             "Remove videos",
             "Remove the selected videos from the project and delete their project-managed "
-            "raw copies, labels, and frames? External source videos are not deleted.",
+            "raw copies, labels, and frames?\n\nExternal source videos are not deleted.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -703,21 +975,72 @@ class _ManageProjectTab(QWidget):
         self.project.remove_csv_files(video_name, values)
         self.refresh_csv_list()
 
+    def _edit_project_skeleton(self) -> None:
+        if self.project is None:
+            QMessageBox.warning(self, "No project selected", "Load a project first.")
+            return
+
+        def save_callback(model: SkeletonModel, structure_edit_unlocked: bool) -> None:
+            txt_count = sum(1 for _ in self.project.project_dir_path.glob("labels/*/txt/*.txt"))
+            model_count = 0
+            for suffix in ("*.pt", "*.pth", "*.onnx", "*.ckpt"):
+                model_count += sum(1 for _ in (self.project.project_dir_path / "runs").rglob(suffix))
+
+            self.project.set_skeleton_data(model.to_dict(), save=True)
+            _write_training_config(self.project)
+            self.dialog.load_project(self.project.project_file)
+            self.project = self.dialog.current_project or self.project
+            self.refresh_views()
+
+            if structure_edit_unlocked:
+                detail = [
+                    "Full skeleton editing was enabled for this save.",
+                    "Existing TXT labels or trained models may no longer match the updated skeleton.",
+                    "MovAl will warn you when an incompatible TXT folder is loaded.",
+                ]
+                if txt_count or model_count:
+                    detail.append("")
+                    detail.append(f"Detected TXT files: {txt_count}")
+                    detail.append(f"Detected model files under runs/: {model_count}")
+                QMessageBox.warning(self, "Compatibility warning", "\n".join(detail))
+
+        dialog = SkeletonManagerDialog(
+            self,
+            project=self.project,
+            allow_structure_edit=False,
+            save_callback=save_callback,
+        )
+        dialog.exec()
+
     def _compress_project(self) -> None:
         if self.project is None:
             QMessageBox.warning(self, "No project selected", "Load a project first.")
             return
 
+        delete_runs = self.delete_runs_check.isChecked()
+        delete_predicts = self.delete_predicts_check.isChecked()
+        message = [
+            "Delete large generated assets to reduce project size?",
+            "",
+            "Always keeps:",
+            "- raw videos",
+            "- labels",
+            "- frames/<video>/masks",
+            "- project config files",
+            "",
+            "Always deletes:",
+            "- runs/dataset",
+            "- non-mask image files under frames/",
+        ]
+        if delete_runs:
+            message.append("- extra run outputs under runs/")
+        if delete_predicts:
+            message.append("- predicts/")
+
         reply = QMessageBox.question(
             self,
             "Compress project",
-            "Delete image-heavy assets to reduce project size?\n\n"
-            "Keeps:\n"
-            "- runs/dataset\n"
-            "- frames/<video>/masks\n"
-            "- videos, labels, configs, weights\n\n"
-            "Deletes image files in other project folders such as frames/images, "
-            "frames/visualization, predicts, and image outputs under runs.",
+            "\n".join(message),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -725,7 +1048,10 @@ class _ManageProjectTab(QWidget):
             return
 
         try:
-            result = self.project.compress_project()
+            result = self.project.compress_project(
+                delete_runs=delete_runs,
+                delete_predicts=delete_predicts,
+            )
         except Exception as err:
             QMessageBox.critical(self, "Compression failed", str(err))
             return
@@ -750,7 +1076,7 @@ class ProjectManagerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Project Manager")
-        self.resize(980, 760)
+        self.resize(1120, 780)
 
         self.main_window_load_project = main_window_load_project
         self.current_project = current_project or getattr(parent, "current_project", None)
@@ -783,6 +1109,8 @@ class ProjectManagerDialog(QDialog):
     def set_current_project(self, project: Optional[ProjectInformation]) -> None:
         self.current_project = project
         self.manage_tab.set_project(project)
+        if project is not None:
+            self.tabs.setCurrentWidget(self.manage_tab)
 
     def open_project_from_picker(self) -> None:
         start_dir = ""
@@ -800,16 +1128,4 @@ class ProjectManagerDialog(QDialog):
         if not path:
             return
         self.load_project(path)
-        self.tabs.setCurrentWidget(self.manage_tab)
-
-    def use_parent_current_project(self) -> None:
-        parent_project = getattr(self.parent(), "current_project", None)
-        if not isinstance(parent_project, ProjectInformation):
-            QMessageBox.information(
-                self,
-                "No current project",
-                "There is no project loaded in the main window right now.",
-            )
-            return
-        self.set_current_project(parent_project)
         self.tabs.setCurrentWidget(self.manage_tab)

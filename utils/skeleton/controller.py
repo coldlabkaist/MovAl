@@ -11,19 +11,25 @@ class SkeletonScene(QGraphicsScene):
         self.model = model
         self.main_window = main_window
         self.mode = 'add_node'
+        self.structure_edit_enabled = True
         self.temp_edge_start = None  
         self.temp_line = None 
         self.temp_line_is = None 
+        self._suppress_context_menu_once = False
 
     def setMode(self, mode):
         self.mode = mode
         for item in self.items():
             if isinstance(item, NodeItem):
-                movable = (mode == 'add_node')
+                movable = (mode == 'add_node' and self.structure_edit_enabled)
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
 
+    def setStructureEditEnabled(self, enabled: bool):
+        self.structure_edit_enabled = enabled
+        self.setMode(self.mode if enabled else 'view')
+
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self.structure_edit_enabled:
             if self.mode == 'add_node':
                 item = self.itemAt(event.scenePos(), QTransform())
                 if item is None:
@@ -68,7 +74,7 @@ class SkeletonScene(QGraphicsScene):
                     item.setSelected(True)
                     event.accept()
                     return
-        if event.button() == Qt.MouseButton.RightButton:
+        if event.button() == Qt.MouseButton.RightButton and self.structure_edit_enabled:
             item = self.itemAt(event.scenePos(), QTransform())
             if self.mode == 'add_node':
                 if isinstance(item, NodeItem):
@@ -93,6 +99,7 @@ class SkeletonScene(QGraphicsScene):
                     self.temp_line.setZValue(-1)
                     self.addItem(self.temp_line)
                     self.temp_line_is = "Sym"
+                    self._suppress_context_menu_once = True
                     event.accept()
                     return
                 if isinstance(item, EdgeItem):
@@ -151,6 +158,7 @@ class SkeletonScene(QGraphicsScene):
                 self.temp_line = None
                 self.temp_line_is = None
             self.temp_edge_start = None
+            self._suppress_context_menu_once = True
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -163,18 +171,23 @@ class SkeletonScene(QGraphicsScene):
             super().keyPressEvent(event)
 
     def contextMenuEvent(self, event):
+        if self._suppress_context_menu_once:
+            self._suppress_context_menu_once = False
+            event.accept()
+            return
         if not self.selectedItems():
             return
 
         menu = QMenu()
+        allow_structure_edit = getattr(self.main_window, "allow_structure_edit", lambda: True)()
         rename_act = menu.addAction("Rename node")
         visual_act = menu.addAction("visuialization option")
         delete_act = menu.addAction("Delete selected")
 
         sel_cnt = len(self.selectedItems())
-        rename_act.setEnabled(sel_cnt == 1)
+        rename_act.setEnabled(sel_cnt == 1 and allow_structure_edit)
         visual_act.setEnabled(sel_cnt == 1)
-        delete_act.setEnabled(sel_cnt >= 1)
+        delete_act.setEnabled(sel_cnt >= 1 and allow_structure_edit)
 
         act = menu.exec(event.screenPos())
 

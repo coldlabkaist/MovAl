@@ -12,7 +12,10 @@ PROJECT_FILENAME = "project.json"
 LEGACY_PROJECT_FILENAMES = ("config.yaml", "config.yml")
 FRAME_MODES = {"images", "davis", "contour"}
 IMAGE_FILE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+PROJECT_SKELETON_DIRNAME = "skeleton"
+PROJECT_SKELETON_FILENAME = "project_skeleton.yaml"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PRESET_SKELETON_DIR = REPO_ROOT / "preset" / "skeleton"
 
 
 def _project_path_from_input(path: str | Path) -> Path:
@@ -107,6 +110,67 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
+def _count_files(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return 1
+    return sum(1 for item in path.rglob("*") if item.is_file())
+
+
+def _count_dirs(path: Path) -> int:
+    if not path.exists() or path.is_file():
+        return 0
+    return sum(1 for item in path.rglob("*") if item.is_dir())
+
+
+def _count_bytes(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for item in path.rglob("*"):
+        if not item.is_file():
+            continue
+        try:
+            total += item.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _read_yaml_file(path: str | Path) -> dict[str, Any]:
+    yaml_path = Path(path).expanduser()
+    if not yaml_path.is_file():
+        raise FileNotFoundError(f"YAML not found: {yaml_path}")
+    with yaml_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid YAML structure: {yaml_path}")
+    return data
+
+
+def _load_skeleton_data_from_name(skeleton_name: str) -> dict[str, Any]:
+    if not skeleton_name:
+        return {"nodes": [], "connections": [], "symmetry": []}
+    path = PRESET_SKELETON_DIR / Path(skeleton_name).name
+    return _read_yaml_file(path)
+
+
+def _normalize_skeleton_data(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {"nodes": [], "connections": [], "symmetry": []}
+    return {
+        "nodes": list(data.get("nodes", []) or []),
+        "connections": list(data.get("connections", []) or []),
+        "symmetry": list(data.get("symmetry", []) or []),
+    }
+
+
 @dataclass
 class FileEntry:
     name: str
@@ -167,6 +231,7 @@ class ProjectInformation:
     animals_name: list[str]
     skeleton_name: str
     skeleton_yaml: Path
+    skeleton_data: dict[str, Any] = field(default_factory=dict)
     video_records: list[VideoRecord] = field(default_factory=list)
     ui_state: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 2
@@ -193,12 +258,14 @@ class ProjectInformation:
             num_animals=int(num_animals),
             animals_name=list(animals_name),
             skeleton_name=Path(skeleton_name).name,
-            skeleton_yaml=REPO_ROOT / "preset" / "skeleton" / Path(skeleton_name).name,
+            skeleton_yaml=project_dir_path / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
+            skeleton_data=_load_skeleton_data_from_name(skeleton_name),
             video_records=[],
             ui_state=ui_state or {},
         )
         project.ensure_standard_structure()
         project._ensure_ui_defaults()
+        project.ensure_project_skeleton_file()
         return project
 
     @classmethod
@@ -255,7 +322,10 @@ class ProjectInformation:
             num_animals=int(data.get("num_animals", 0)),
             animals_name=list(data.get("animals_name", [])),
             skeleton_name=skeleton_name,
-            skeleton_yaml=REPO_ROOT / "preset" / "skeleton" / skeleton_name,
+            skeleton_yaml=project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
+            skeleton_data=_normalize_skeleton_data(
+                data.get("skeleton_data", _load_skeleton_data_from_name(skeleton_name))
+            ),
             video_records=[
                 VideoRecord.from_dict(item)
                 for item in data.get("videos", [])
@@ -266,6 +336,7 @@ class ProjectInformation:
         )
         project._ensure_ui_defaults()
         project.ensure_standard_structure()
+        project.ensure_project_skeleton_file()
         return project
 
     @classmethod
@@ -288,7 +359,8 @@ class ProjectInformation:
             num_animals=int(data.get("num_animals", 0)),
             animals_name=list(data.get("animals_name", [])),
             skeleton_name=skeleton_name,
-            skeleton_yaml=REPO_ROOT / "preset" / "skeleton" / skeleton_name,
+            skeleton_yaml=project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
+            skeleton_data=_load_skeleton_data_from_name(skeleton_name),
             video_records=video_records,
             ui_state=data.get("ui_state", {}) or {},
             schema_version=2,
@@ -296,6 +368,7 @@ class ProjectInformation:
         )
         project._ensure_ui_defaults()
         project.ensure_standard_structure()
+        project.ensure_project_skeleton_file()
         return project
 
     def _ensure_ui_defaults(self) -> None:
@@ -314,7 +387,7 @@ class ProjectInformation:
 
     def ensure_standard_structure(self) -> None:
         self.project_dir_path.mkdir(parents=True, exist_ok=True)
-        for rel_path in ("frames", "labels", "runs", "raw_videos", "outputs", "predicts"):
+        for rel_path in ("frames", "labels", "runs", "raw_videos", "outputs", "predicts", PROJECT_SKELETON_DIRNAME):
             (self.project_dir_path / rel_path).mkdir(parents=True, exist_ok=True)
 
     def ensure_project_file(self) -> Path:
@@ -330,17 +403,39 @@ class ProjectInformation:
             "num_animals": self.num_animals,
             "animals_name": list(self.animals_name),
             "skeleton": self.skeleton_name,
+            "skeleton_data": self.skeleton_data,
             "videos": [record.to_dict() for record in self.video_records],
             "ui_state": self.ui_state,
         }
 
     def save(self) -> Path:
         self._ensure_ui_defaults()
+        self.ensure_project_skeleton_file()
         self.project_file.parent.mkdir(parents=True, exist_ok=True)
         with self.project_file.open("w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
         self.legacy_source_path = None
         return self.project_file
+
+    def ensure_project_skeleton_file(self) -> Path:
+        self.ensure_standard_structure()
+        self.skeleton_yaml.parent.mkdir(parents=True, exist_ok=True)
+        with self.skeleton_yaml.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(_normalize_skeleton_data(self.skeleton_data), f, sort_keys=False, allow_unicode=True)
+        return self.skeleton_yaml
+
+    def set_skeleton_data(
+        self,
+        skeleton_data: dict[str, Any],
+        *,
+        skeleton_name: Optional[str] = None,
+        save: bool = True,
+    ) -> None:
+        self.skeleton_data = _normalize_skeleton_data(skeleton_data)
+        if skeleton_name is not None:
+            self.skeleton_name = Path(skeleton_name).name
+        if save:
+            self.save()
 
     def get_video_list(self) -> list[str]:
         return [file_entry.video for file_entry in self.files]
@@ -384,17 +479,26 @@ class ProjectInformation:
             raise KeyError(f"Video not found: {record_or_name}")
 
         resolved_path = self.resolve_video_path(record)
+        source_exists = bool(record.source_path and Path(record.source_path).expanduser().exists())
+        raw_fallback_exists = (self.project_dir_path / "raw_videos" / record.file_name).exists()
         if record.relative_path:
             storage = "project_copy"
+            status = "available" if resolved_path.exists() else "missing_source"
+            using_raw_fallback = False
         else:
             storage = "external_source"
+            using_raw_fallback = bool(record.source_path and not source_exists and raw_fallback_exists)
+            status = "fallback_copy" if using_raw_fallback else ("available" if resolved_path.exists() else "missing_source")
 
         return {
             "name": record.name,
             "storage": storage,
             "path": resolved_path,
             "exists": resolved_path.exists(),
-            "raw_fallback_exists": (self.project_dir_path / "raw_videos" / record.file_name).exists(),
+            "source_exists": source_exists,
+            "raw_fallback_exists": raw_fallback_exists,
+            "using_raw_fallback": using_raw_fallback,
+            "status": status,
         }
 
     def add_video(self, source_path: str | Path, *, copy_into_project: bool, save: bool = True) -> VideoRecord:
@@ -433,6 +537,60 @@ class ProjectInformation:
 
         self.video_records.append(record)
         self._ensure_video_asset_dirs(video_name)
+        if save:
+            self.save()
+        return record
+
+    def relink_video_source(
+        self,
+        video_name_or_path: str | Path,
+        source_path: str | Path,
+        *,
+        save: bool = True,
+    ) -> VideoRecord:
+        record = self.get_video_record(video_name_or_path)
+        if record is None:
+            raise KeyError(f"Video not found: {video_name_or_path}")
+
+        src_path = Path(source_path).expanduser()
+        if not src_path.is_file():
+            raise FileNotFoundError(f"Video not found: {src_path}")
+        if src_path.stem != record.name:
+            raise ValueError(
+                "The selected file must have the same filename stem as the project video "
+                f"('{record.name}')."
+            )
+
+        record.file_name = src_path.name
+        record.relative_path = None
+        record.source_path = src_path.resolve().as_posix()
+        if save:
+            self.save()
+        return record
+
+    def copy_video_into_project(self, video_name_or_path: str | Path, *, save: bool = True) -> VideoRecord:
+        record = self.get_video_record(video_name_or_path)
+        if record is None:
+            raise KeyError(f"Video not found: {video_name_or_path}")
+        if record.relative_path:
+            return record
+
+        source_path = self.resolve_video_path(record)
+        if not source_path.exists():
+            raise FileNotFoundError(
+                "The external source video could not be found. "
+                "Relink it first or place the same file under raw_videos."
+            )
+
+        raw_dir = self.project_dir_path / "raw_videos"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dst_path = raw_dir / source_path.name
+        if not dst_path.exists():
+            shutil.copy2(source_path, dst_path)
+
+        record.file_name = dst_path.name
+        record.relative_path = dst_path.relative_to(self.project_dir_path).as_posix()
+        record.source_path = None
         if save:
             self.save()
         return record
@@ -556,57 +714,77 @@ class ProjectInformation:
         ):
             (self.project_dir_path / rel_path).mkdir(parents=True, exist_ok=True)
 
-    def compress_project(self) -> dict[str, int]:
+    def compress_project(
+        self,
+        *,
+        delete_runs: bool = False,
+        delete_predicts: bool = False,
+    ) -> dict[str, int]:
         deleted_images = 0
+        deleted_files = 0
         deleted_dirs = 0
         deleted_bytes = 0
 
-        for image_path in self.project_dir_path.rglob("*"):
-            if not image_path.is_file():
-                continue
-            if image_path.suffix.lower() not in IMAGE_FILE_SUFFIXES:
-                continue
-            if self._should_keep_image_during_compression(image_path):
-                continue
-
-            try:
-                deleted_bytes += image_path.stat().st_size
-            except OSError:
-                pass
-            image_path.unlink()
-            deleted_images += 1
-
-        for root_name in ("frames", "runs", "predicts", "outputs"):
-            root_path = self.project_dir_path / root_name
-            if not root_path.exists():
-                continue
-            directories = sorted(
-                (path for path in root_path.rglob("*") if path.is_dir()),
-                key=lambda path: len(path.parts),
-                reverse=True,
-            )
-            for directory in directories:
-                if self._should_keep_dir_during_compression(directory):
+        frames_root = self.project_dir_path / "frames"
+        if frames_root.exists():
+            for image_path in frames_root.rglob("*"):
+                if not image_path.is_file():
                     continue
+                if image_path.suffix.lower() not in IMAGE_FILE_SUFFIXES:
+                    continue
+                if self._should_keep_frame_image(image_path):
+                    continue
+                deleted_images += 1
+                deleted_files += 1
                 try:
-                    directory.rmdir()
+                    deleted_bytes += image_path.stat().st_size
                 except OSError:
-                    continue
-                deleted_dirs += 1
+                    pass
+                image_path.unlink()
+
+        dataset_root = self.project_dir_path / "runs" / "dataset"
+        if dataset_root.exists():
+            deleted_files += _count_files(dataset_root)
+            deleted_dirs += _count_dirs(dataset_root) + 1
+            deleted_bytes += _count_bytes(dataset_root)
+            shutil.rmtree(dataset_root)
+
+        if delete_runs:
+            runs_root = self.project_dir_path / "runs"
+            if runs_root.exists():
+                for child in list(runs_root.iterdir()):
+                    if child.name == "dataset":
+                        continue
+                    if child.is_file() and child.suffix.lower() in {".yaml", ".yml", ".json"}:
+                        continue
+                    deleted_files += _count_files(child) if child.is_dir() else 1
+                    deleted_dirs += _count_dirs(child) + (1 if child.is_dir() else 0)
+                    deleted_bytes += _count_bytes(child)
+                    _remove_path(child)
+
+        if delete_predicts:
+            predicts_root = self.project_dir_path / "predicts"
+            if predicts_root.exists():
+                deleted_files += _count_files(predicts_root)
+                deleted_dirs += _count_dirs(predicts_root) + 1
+                deleted_bytes += _count_bytes(predicts_root)
+                shutil.rmtree(predicts_root)
+
+        deleted_dirs += self._cleanup_empty_dirs(self.project_dir_path / "frames")
+        deleted_dirs += self._cleanup_empty_dirs(self.project_dir_path / "runs")
+        if delete_predicts:
+            deleted_dirs += self._cleanup_empty_dirs(self.project_dir_path / "predicts")
 
         return {
             "deleted_images": deleted_images,
+            "deleted_files": deleted_files,
             "deleted_dirs": deleted_dirs,
             "deleted_bytes": deleted_bytes,
         }
 
-    def _should_keep_image_during_compression(self, image_path: Path) -> bool:
-        image_path = image_path.resolve()
-        dataset_root = (self.project_dir_path / "runs" / "dataset").resolve()
-        if dataset_root.exists() and _is_inside(dataset_root, image_path):
-            return True
-
+    def _should_keep_frame_image(self, image_path: Path) -> bool:
         frames_root = (self.project_dir_path / "frames").resolve()
+        image_path = image_path.resolve()
         if frames_root.exists() and _is_inside(frames_root, image_path):
             try:
                 relative_parts = image_path.relative_to(frames_root).parts
@@ -614,25 +792,23 @@ class ProjectInformation:
                 relative_parts = ()
             if len(relative_parts) >= 2 and relative_parts[1] == "masks":
                 return True
-
         return False
 
-    def _should_keep_dir_during_compression(self, directory: Path) -> bool:
-        directory = directory.resolve()
-        dataset_root = (self.project_dir_path / "runs" / "dataset").resolve()
-        if dataset_root.exists() and (directory == dataset_root or _is_inside(dataset_root, directory)):
-            return True
-
-        frames_root = (self.project_dir_path / "frames").resolve()
-        if frames_root.exists() and _is_inside(frames_root, directory):
+    def _cleanup_empty_dirs(self, root_path: Path) -> int:
+        if not root_path.exists():
+            return 0
+        removed = 0
+        for directory in sorted(
+            (path for path in root_path.rglob("*") if path.is_dir()),
+            key=lambda path: len(path.parts),
+            reverse=True,
+        ):
             try:
-                relative_parts = directory.relative_to(frames_root).parts
-            except ValueError:
-                relative_parts = ()
-            if len(relative_parts) >= 2 and relative_parts[1] == "masks":
-                return True
-
-        return False
+                directory.rmdir()
+            except OSError:
+                continue
+            removed += 1
+        return removed
 
 
 def _legacy_video_record(item: dict[str, Any], project_dir: Path) -> VideoRecord:

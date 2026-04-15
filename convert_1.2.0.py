@@ -28,7 +28,11 @@ except ImportError:  # pragma: no cover - import guard
 SCHEMA_VERSION = 2
 PROJECT_JSON_NAME = "project.json"
 LEGACY_SUFFIXES = (".yaml", ".yml")
-STANDARD_DIRS = ("frames", "labels", "runs", "raw_videos", "outputs", "predicts")
+PROJECT_SKELETON_DIRNAME = "skeleton"
+PROJECT_SKELETON_FILENAME = "project_skeleton.yaml"
+REPO_ROOT = Path(__file__).resolve().parent
+PRESET_SKELETON_DIR = REPO_ROOT / "preset" / "skeleton"
+STANDARD_DIRS = ("frames", "labels", "runs", "raw_videos", "outputs", "predicts", PROJECT_SKELETON_DIRNAME)
 
 
 class ConversionError(RuntimeError):
@@ -173,6 +177,48 @@ def list_or_empty(value: Any) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else []
 
 
+def read_yaml_file(path: str | Path) -> dict[str, Any]:
+    yaml_path = Path(path).expanduser()
+    if not yaml_path.is_file():
+        raise ConversionError(f"Skeleton YAML not found: {yaml_path}")
+    with yaml_path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ConversionError(f"Invalid YAML structure: {yaml_path}")
+    return data
+
+
+def normalize_skeleton_data(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {"nodes": [], "connections": [], "symmetry": []}
+    return {
+        "nodes": list(data.get("nodes", []) or []),
+        "connections": list(data.get("connections", []) or []),
+        "symmetry": list(data.get("symmetry", []) or []),
+    }
+
+
+def load_skeleton_data_from_name(skeleton_name: str, report: ConversionReport) -> dict[str, Any]:
+    clean_name = Path(str(skeleton_name or "")).name
+    if not clean_name:
+        report.warnings.append("No skeleton preset was recorded in the legacy YAML.")
+        return normalize_skeleton_data({})
+    try:
+        return normalize_skeleton_data(read_yaml_file(PRESET_SKELETON_DIR / clean_name))
+    except Exception as exc:
+        report.warnings.append(f"Failed to load preset skeleton '{clean_name}': {exc}")
+        return normalize_skeleton_data({})
+
+
+def write_project_skeleton_file(project_dir: Path, skeleton_data: dict[str, Any]) -> Path:
+    skeleton_dir = project_dir / PROJECT_SKELETON_DIRNAME
+    skeleton_dir.mkdir(parents=True, exist_ok=True)
+    skeleton_path = skeleton_dir / PROJECT_SKELETON_FILENAME
+    with skeleton_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(normalize_skeleton_data(skeleton_data), f, sort_keys=False, allow_unicode=True)
+    return skeleton_path
+
+
 def standard_video_record(raw_video: str, project_dir: Path) -> dict[str, Any]:
     resolved_path = repair_video_path(raw_video, project_dir)
     file_name = Path(raw_video).name or resolved_path.name
@@ -292,13 +338,16 @@ def build_project_payload(data: dict[str, Any], project_dir: Path, report: Conve
         raise ConversionError(f"No valid video entries were found in '{report.yaml_path.name}'.")
 
     report.video_count = len(videos)
+    skeleton_name = Path(str(data.get("skeleton", "") or "")).name
+    skeleton_data = load_skeleton_data_from_name(skeleton_name, report)
     return {
         "schema_version": SCHEMA_VERSION,
         "moval_version": str(data.get("moval_version", "")),
         "title": str(data.get("title", report.yaml_path.stem)),
         "num_animals": safe_int(data.get("num_animals", 0), default=0),
         "animals_name": list_or_empty(data.get("animals_name", [])),
-        "skeleton": Path(str(data.get("skeleton", "") or "")).name,
+        "skeleton": skeleton_name,
+        "skeleton_data": skeleton_data,
         "videos": videos,
         "ui_state": normalize_ui_state(data.get("ui_state")),
     }
@@ -321,6 +370,7 @@ def convert_project_file(yaml_path: str | Path) -> ConversionReport:
     report = ConversionReport(yaml_path=yaml_path, json_path=json_path)
 
     payload = build_project_payload(data, project_dir, report)
+    write_project_skeleton_file(project_dir, payload.get("skeleton_data", {}))
 
     if json_path.exists():
         backup_path = next_backup_path(json_path)

@@ -194,9 +194,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         else:
             label_path = Path(self.label_combo.currentData(Qt.ItemDataRole.UserRole))
             if label_path.is_dir():
-                self.load_txt(label_path)
+                if not self.load_txt(label_path):
+                    return
             elif label_path.suffix.lower() == ".csv":
-                self.load_csv(label_path)
+                if not self.load_csv(label_path):
+                    return
             else:
                 QMessageBox.warning(
                     self,
@@ -214,11 +216,21 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self._persist_ui_state(include_frame=True)
 
     def load_csv(self, path):
-        DataLoader.load_csv_data(path)
+        loaded = DataLoader.load_csv_data(path)
+        if not loaded:
+            DataLoader.loaded_data = None
+            self.skeleton_video_viewer.setCSVPoints({})
+            self.kpt_list.clear()
+        return loaded
 
     def load_txt(self, path):
         inference_mode = self.label_combo.currentText() == "Load inference result"
-        DataLoader.load_txt_data(path, inference_mode=inference_mode)
+        loaded = DataLoader.load_txt_data(path, inference_mode=inference_mode)
+        if not loaded:
+            DataLoader.loaded_data = None
+            self.skeleton_video_viewer.setCSVPoints({})
+            self.kpt_list.clear()
+        return loaded
 
     def create_new_label(self):
         DataLoader.create_new_data()

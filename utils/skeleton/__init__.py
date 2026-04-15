@@ -8,6 +8,6 @@ __all__ = [
     "NodeItem",
     "EdgeItem",
     "SymItem",
-    "SkeletonModel"
-    "NodeVisualSettingDialog"
+    "SkeletonModel",
+    "NodeVisualSettingDialog",
 ]

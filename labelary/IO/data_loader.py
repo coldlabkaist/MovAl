@@ -1,16 +1,18 @@
-import pandas as pd
+from collections.abc import Sized
 from pathlib import Path
-from typing import Union, Optional, List
+from typing import List, Optional, Union
+
+import numpy as np
+import pandas as pd
 from PyQt6.QtWidgets import (
     QMessageBox, QDialog, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox
 )
-from utils.skeleton import SkeletonModel
-from typing import Optional, List
-from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
-import numpy as np, io
+from tqdm import tqdm
+
+from utils.skeleton import SkeletonModel
 
 class DataLoader:
     parent: Optional[QDialog] = None
@@ -78,11 +80,15 @@ class DataLoader:
 
     @classmethod
     def load_skeleton_info(cls, skeleton_model: "SkeletonModel") -> None:
-        if cls._skeleton_loaded:
-            return
         cls.skeleton_model = skeleton_model
         cls.kp_order = list(skeleton_model.nodes)
         cls._skeleton_loaded = True
+        cls._expected_cols = None
+        cls._col_names = None
+        cls.track_mapping = {}
+        cls.loaded_data = None
+        cls.csv_path = None
+        cls._coords_normalized = False
 
     @classmethod
     def _ensure_skeleton(cls) -> None:
@@ -90,9 +96,9 @@ class DataLoader:
             raise RuntimeError("Skeleton information has not been loaded.")
 
     @classmethod
-    def _check_skeleton_compat(cls, df: pd.DataFrame, parent=None) -> None:
+    def _check_skeleton_compat(cls, df: pd.DataFrame, parent=None) -> bool:
         if not cls.kp_order:
-            return
+            return True
 
         file_kps = list()
         for c in df.columns:
@@ -102,12 +108,42 @@ class DataLoader:
         skel_kps = list(cls.skeleton_model.nodes)
 
         if file_kps != skel_kps:
-            QMessageBox.critical(
-                cls.parent,
+            QMessageBox.warning(
+                cls.parent or parent,
                 "Skeleton Mismatch",
                 "The skeleton information in this data does not match the project configuration.\n"
                 "Please select a different label or review the project file."
             )
+            return False
+        return True
+
+    @classmethod
+    def _check_txt_skeleton_compat(cls, sample_fp: Path) -> bool:
+        cls._ensure_skeleton()
+        if cls._expected_cols is None:
+            return True
+
+        extra_cols = cls._expected_cols - 5
+        if extra_cols < 0 or extra_cols % 3 != 0:
+            QMessageBox.warning(
+                cls.parent,
+                "TXT Format Error",
+                f"The TXT layout in '{sample_fp.name}' does not match the expected YOLO pose format.",
+            )
+            return False
+
+        txt_kpt_count = extra_cols // 3
+        expected_count = len(cls.kp_order or [])
+        if expected_count and txt_kpt_count != expected_count:
+            QMessageBox.warning(
+                cls.parent,
+                "Skeleton Mismatch",
+                "This TXT folder is not compatible with the current project skeleton.\n"
+                f"TXT keypoints: {txt_kpt_count}\n"
+                f"Project skeleton keypoints: {expected_count}"
+            )
+            return False
+        return True
 
     ### Coord Normalization ###
 
@@ -443,6 +479,8 @@ class DataLoader:
                 return False
 
             cls._init_txt_schema(txt_files[0], sep)
+            if not cls._check_txt_skeleton_compat(txt_files[0]):
+                return False
             cpu_n = max(multiprocessing.cpu_count() - 1, 1)
             chunks: list[pd.DataFrame] = []
             cls.records_tmp = []
@@ -529,7 +567,8 @@ class DataLoader:
                 origin = str(src)
                 cls.csv_path = origin
 
-            cls._check_skeleton_compat(df)
+            if not cls._check_skeleton_compat(df):
+                return False
 
             unique_tracks = df["track"].unique().tolist()
             if len(unique_tracks) > cls.max_animals:

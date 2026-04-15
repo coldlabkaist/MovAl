@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QGraphicsView,
     QHBoxLayout,
     QInputDialog,
@@ -77,7 +78,6 @@ class SkeletonManagerDialog(QDialog):
 
         top_bar = QHBoxLayout()
         self.mode_label = QLabel(self)
-        top_bar.addWidget(self.mode_label)
 
         self.combo = QComboBox(self)
         self.combo.setEditable(False)
@@ -90,17 +90,25 @@ class SkeletonManagerDialog(QDialog):
 
         if self._is_project_mode:
             self.mode_label.setText("Project Skeleton")
-            top_bar.addWidget(self.project_info_label, 1)
             self.project_info_label.setText(
-                f"Project: {self.project.title} | Preset base: {self.project.skeleton_name}"
+                f"<b>{self.project.title}</b><br>"
+                f"Preset base: {self.project.skeleton_name}<br>"
+                "Visualization edits and keypoint repositioning are available by default. "
+                "Structural edits stay locked until you enable them."
             )
+            main_layout.addWidget(self.project_info_label)
         else:
+            top_bar.addWidget(self.mode_label)
             self.mode_label.setText("Preset")
             top_bar.addWidget(self.combo, 1)
             top_bar.addWidget(QLabel("Title:", self))
             top_bar.addWidget(self.title_edit, 2)
+            main_layout.addLayout(top_bar)
 
-        main_layout.addLayout(top_bar)
+        divider = QFrame(self)
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFrameShadow(QFrame.Shadow.Sunken)
+        main_layout.addWidget(divider)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         main_layout.addWidget(splitter, 1)
@@ -126,6 +134,10 @@ class SkeletonManagerDialog(QDialog):
 
         self.node_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         right_layout.addWidget(self.node_list, 1)
+
+        self.structure_help_label = QLabel(self)
+        self.structure_help_label.setWordWrap(True)
+        right_layout.addWidget(self.structure_help_label)
 
         self.add_node_radio = QRadioButton("Add Keypoint")
         self.add_skeleton_radio = QRadioButton("Add Skeleton / Symmetry")
@@ -179,8 +191,14 @@ class SkeletonManagerDialog(QDialog):
         self.add_skeleton_radio.setEnabled(enabled)
         if enabled:
             self._structure_edit_unlocked = True
+            self.structure_help_label.setText(
+                "Full edit enabled: you can add/remove keypoints and edit skeleton or symmetry links."
+            )
             self._on_mode_toggled()
         else:
+            self.structure_help_label.setText(
+                "Visualization mode: drag nodes to reposition them, and right-click a node to open its visualization settings."
+            )
             self.scene.setMode("view")
 
     def _enable_full_edit(self) -> None:

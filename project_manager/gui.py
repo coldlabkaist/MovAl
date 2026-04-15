@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QFrame,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
@@ -41,6 +42,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def _set_tooltip(widget: QWidget, text: str) -> None:
     widget.setToolTip(text)
+
+
+def _make_separator(parent: QWidget) -> QFrame:
+    line = QFrame(parent)
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Sunken)
+    return line
 
 
 def _write_training_config(project: ProjectInformation) -> Path:
@@ -470,10 +478,15 @@ class _ManageProjectTab(QWidget):
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
+        _set_tooltip(
+            self.info_label,
+            "Shows the currently opened project name, the project.json file name and path, and the project folder.",
+        )
 
-        self.video_help_label = QLabel()
-        self.video_help_label.setWordWrap(True)
-        layout.addWidget(self.video_help_label)
+        layout.addWidget(_make_separator(self))
+
+        self.project_section_label = QLabel("<b>Project Manager</b>")
+        layout.addWidget(self.project_section_label)
 
         video_controls = QHBoxLayout()
         self.copy_added_videos_check = QCheckBox("Copy newly added videos into project raw_videos")
@@ -524,6 +537,10 @@ class _ManageProjectTab(QWidget):
             self.video_tree,
             "Select one or more videos to remove them, relink an external path, or copy them into the project.",
         )
+        _set_tooltip(
+            self.project_section_label,
+            "Manage the current project's videos and label files here. Hover the table headers and buttons for details.",
+        )
 
         csv_row = QHBoxLayout()
         csv_row.addWidget(QLabel("Manage CSVs for:"))
@@ -547,10 +564,26 @@ class _ManageProjectTab(QWidget):
         self.txt_label = QLabel()
         self.txt_label.setWordWrap(True)
         layout.addWidget(self.txt_label)
+        _set_tooltip(
+            self.txt_label,
+            "Shows the TXT label folder currently linked to the selected video.",
+        )
 
+        layout.addWidget(_make_separator(self))
+
+        self.skeleton_section_label = QLabel("<b>Skeleton Manager</b>")
+        layout.addWidget(self.skeleton_section_label)
         self.skeleton_info_label = QLabel()
         self.skeleton_info_label.setWordWrap(True)
         layout.addWidget(self.skeleton_info_label)
+        _set_tooltip(
+            self.skeleton_section_label,
+            "Edit the project-local skeleton. Visualization edits are always allowed; full structural edits require confirmation.",
+        )
+        _set_tooltip(
+            self.skeleton_info_label,
+            "Shows the base preset name and the current project skeleton summary stored in project.json.",
+        )
 
         skeleton_row = QHBoxLayout()
         self.edit_skeleton_button = QPushButton("Edit Project Skeleton...")
@@ -563,20 +596,24 @@ class _ManageProjectTab(QWidget):
             "Open the project-local skeleton editor. By default only node visualization can be changed.",
         )
 
-        self.compress_info_label = QLabel(
-            "Compress Project removes large generated assets while keeping masks, videos, labels, "
-            "and config files. runs/dataset is always deleted."
-        )
-        self.compress_info_label.setWordWrap(True)
-        layout.addWidget(self.compress_info_label)
+        layout.addWidget(_make_separator(self))
 
+        self.compress_section_label = QLabel("<b>Compress</b>")
+        layout.addWidget(self.compress_section_label)
         compress_options_row = QHBoxLayout()
         self.delete_runs_check = QCheckBox("Also delete extra files under runs/")
         self.delete_predicts_check = QCheckBox("Also delete predicts/")
         compress_options_row.addWidget(self.delete_runs_check)
         compress_options_row.addWidget(self.delete_predicts_check)
+        self.compress_button = QPushButton("Compress Project")
+        self.compress_button.clicked.connect(self._compress_project)
         compress_options_row.addStretch(1)
+        compress_options_row.addWidget(self.compress_button)
         layout.addLayout(compress_options_row)
+        _set_tooltip(
+            self.compress_section_label,
+            "Removes large generated assets while keeping masks, videos, labels, and config files. runs/dataset is always deleted.",
+        )
         _set_tooltip(
             self.delete_runs_check,
             "If checked, remove run outputs under runs/ except config files. runs/dataset is deleted either way.",
@@ -585,13 +622,10 @@ class _ManageProjectTab(QWidget):
             self.delete_predicts_check,
             "If checked, remove predict result folders under predicts/.",
         )
-
-        compress_row = QHBoxLayout()
-        compress_row.addStretch(1)
-        self.compress_button = QPushButton("Compress Project")
-        self.compress_button.clicked.connect(self._compress_project)
-        compress_row.addWidget(self.compress_button)
-        layout.addLayout(compress_row)
+        _set_tooltip(
+            self.compress_button,
+            "Run project compression using the options on the same row.",
+        )
 
         self._managed_widgets = [
             self.copy_added_videos_check,
@@ -657,9 +691,6 @@ class _ManageProjectTab(QWidget):
                 "No project is connected yet.<br>"
                 "Use <b>Open Project...</b> to choose an existing project."
             )
-            self.video_help_label.setText(
-                "Storage explains whether a video is kept inside raw_videos or linked by an external absolute path."
-            )
             self.txt_label.setText("No project selected.")
             self.skeleton_info_label.setText("No project skeleton loaded.")
             return
@@ -671,14 +702,6 @@ class _ManageProjectTab(QWidget):
             f"Project file name: {self.project.project_file.name}<br>"
             f"Project file path: {self.project.project_file}<br>"
             f"Project folder: {project_dir}"
-        )
-        self.video_help_label.setText(
-            "Storage: <b>Project copy</b> means the file is under raw_videos. "
-            "<b>External link</b> means project.json stores an absolute source path.<br>"
-            "Status: <b>Available</b> means the source is reachable, <b>Fallback copy</b> means "
-            "the external path is missing but a same-named file exists in raw_videos, and "
-            "<b>Missing source</b> means MovAl cannot currently find the original video.<br>"
-            "The copy checkbox above applies only to newly added videos. Existing videos can be relinked or copied with the buttons beside it."
         )
 
         self.video_tree.clear()

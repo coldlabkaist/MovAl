@@ -109,12 +109,46 @@ class ClickableImageLabel(QLabel):
         act = self.base_scale * self.current_scale
         ow, oh = self.original_pixmap.width(), self.original_pixmap.height()
 
-        self._paint_skeleton_model(p, ow, oh, act)
+        self._paint_skeleton_model(
+            p,
+            ow,
+            oh,
+            act,
+            translation=self.translation,
+            csv_points=self.csv_points,
+        )
 
-    def _paint_skeleton_model(self, painter: QPainter, ow: int, oh: int, act: float) -> None:
+    def render_annotated_pixmap(
+        self,
+        base_pixmap: QPixmap,
+        csv_points: Dict[str, Dict[str, Tuple[float, float]]],
+    ) -> QPixmap:
+        rendered = QPixmap(base_pixmap)
+        painter = QPainter(rendered)
+        self._paint_skeleton_model(
+            painter,
+            base_pixmap.width(),
+            base_pixmap.height(),
+            1.0,
+            translation=QPoint(0, 0),
+            csv_points=csv_points,
+        )
+        painter.end()
+        return rendered
+
+    def _paint_skeleton_model(
+        self,
+        painter: QPainter,
+        ow: int,
+        oh: int,
+        act: float,
+        *,
+        translation: QPoint | QPointF,
+        csv_points: Dict[str, Dict[str, Tuple[float, float]]],
+    ) -> None:
         self.current_animal_num = 0
         for track in self.current_project.animals_name:  
-            pts = self.csv_points.get(track, {})
+            pts = csv_points.get(track, {})
             if not pts:
                 continue
             self.current_animal_num += 1
@@ -130,12 +164,12 @@ class ClickableImageLabel(QLabel):
                     continue
 
                 p1 = QPointF(
-                    pts[a][0] * ow * act + self.translation.x(),
-                    pts[a][1] * oh * act + self.translation.y()
+                    pts[a][0] * ow * act + translation.x(),
+                    pts[a][1] * oh * act + translation.y()
                 )
                 p2 = QPointF(
-                    pts[b][0] * ow * act + self.translation.x(),
-                    pts[b][1] * oh * act + self.translation.y()
+                    pts[b][0] * ow * act + translation.x(),
+                    pts[b][1] * oh * act + translation.y()
                 )
                 painter.drawLine(p1, p2)
 
@@ -143,8 +177,8 @@ class ClickableImageLabel(QLabel):
                 if node_name not in pts:
                     continue
 
-                cx = pts[node_name][0] * ow * act + self.translation.x()
-                cy = pts[node_name][1] * oh * act + self.translation.y()
+                cx = pts[node_name][0] * ow * act + translation.x()
+                cy = pts[node_name][1] * oh * act + translation.y()
                 vis = pts[node_name][2]
 
                 r = 5 * (act**0.5)

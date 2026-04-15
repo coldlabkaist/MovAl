@@ -29,6 +29,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
         self.project = project
         self._restoring_ui_state = False
+        self.shortcuts_enabled = True
         self.auto_label_model = None
         self.auto_label_model_path: Optional[str] = None
         self.auto_label_model_mode: Optional[str] = None
@@ -409,7 +410,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self._refresh_mini_training_button_state()
 
     def open_save_dialog(self):
-        save_modified_data(self)
+        self.shortcuts_enabled = False
+        try:
+            save_modified_data(self)
+        finally:
+            self.shortcuts_enabled = True
 
     def on_automatic_label_toggled(self, checked: bool):
         if not checked:

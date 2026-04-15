@@ -8,6 +8,8 @@ class KeyboardController(QObject):
         self.mouse_controller = mouse_controller
 
     def eventFilter(self, obj, event):
+        if not getattr(self.main_dialog, "shortcuts_enabled", True):
+            return super().eventFilter(obj, event)
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if (

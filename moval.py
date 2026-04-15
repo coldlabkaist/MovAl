@@ -12,7 +12,8 @@ def main():
     current_version = __version__
     latest_version = get_latest_git_tag()
     if latest_version and version.parse(latest_version) > version.parse(current_version):
-        print(f"Updates available: Current version {current_version}, Latest version {latest_version}")
+        print(f"Updates available: Current version {current_version}, Latest version {latest_version}\n")
+        print(f"Run 'python update_moval.py' to update to the latest release, or 'python update_moval.py {latest_version}' to install a specific tag.\n")
 
     app = QApplication(sys.argv)
     controller = PipelineController()

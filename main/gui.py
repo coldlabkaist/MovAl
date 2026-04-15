@@ -7,6 +7,7 @@ from PyQt6.QtGui import QPixmap
 from utils.project import ProjectInformation
 from pathlib import Path
 from typing import Union, Optional
+import json
 import os
 from utils import __version__
 import warnings
@@ -24,6 +25,11 @@ class MainWindow(QMainWindow):
         self.desktop_dir = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.DesktopLocation
         )
+        appdata_root = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        self.appdata_dir = Path(appdata_root) if appdata_root else (Path.home() / "AppData" / "Roaming" / "MovAl")
+        self.last_project_log_path = self.appdata_dir / "last_project.json"
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -81,6 +87,47 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(right_layout, 2)
         
         self.setup_buttons()
+        self._restore_last_project()
+
+    def _restore_last_project(self) -> None:
+        last_path = self._read_last_project_path()
+        if last_path is None:
+            return
+        if not last_path.exists():
+            self._clear_last_project_log()
+            return
+        self.on_load_yaml_clicked(path=last_path)
+
+    def _read_last_project_path(self) -> Optional[Path]:
+        try:
+            if not self.last_project_log_path.exists():
+                return None
+            with self.last_project_log_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return None
+
+        raw_path = data.get("last_project_path")
+        if not raw_path:
+            return None
+        return Path(raw_path).expanduser()
+
+    def _write_last_project_path(self, path: Union[str, Path]) -> None:
+        try:
+            resolved = str(Path(path).expanduser().resolve())
+            self.appdata_dir.mkdir(parents=True, exist_ok=True)
+            payload = {"last_project_path": resolved}
+            with self.last_project_log_path.open("w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _clear_last_project_log(self) -> None:
+        try:
+            if self.last_project_log_path.exists():
+                self.last_project_log_path.unlink()
+        except Exception:
+            pass
 
     def setup_buttons(self):
         installation_label = QLabel("Installation (Cutie / YOLO)")
@@ -165,11 +212,17 @@ class MainWindow(QMainWindow):
             self.current_project = ProjectInformation.from_yaml(path)
             self.controller.current_project = self.current_project
             self.proj_name.setText(self.current_project.title or Path(path).stem)
+            self.last_searched_dir = str(Path(path).parent)
+            self._write_last_project_path(path)
 
         except FileNotFoundError as fnf:
+            if Path(path).expanduser() == self._read_last_project_path():
+                self._clear_last_project_log()
             QMessageBox.warning(self, "File not found", str(fnf))
+            return
         except Exception as e:
             QMessageBox.critical(self, "Load Error", str(e))
+            return
         
         curr_major, curr_minor, *_ = __version__.split(".")
         proj_major, proj_minor, *_ = self.current_project.moval_version.split(".")

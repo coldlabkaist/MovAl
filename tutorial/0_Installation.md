@@ -63,9 +63,11 @@ If your local MovAl version is outdated compared to the latest release version o
 You can simply update it using the following command
 ```bash
 cd (MovAl_folder)
-git fetch --tags
-git checkout (version) # git checkout v1.1.1
+python update_moval.py
+# or
+python update_moval.py v1.2.0
 ```
+If no version is provided, MovAl updates to the latest release tag. If a version is provided, MovAl checks out that tag.
 
 ---
 

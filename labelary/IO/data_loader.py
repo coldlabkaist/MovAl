@@ -418,7 +418,7 @@ class DataLoader:
                 .set_index(["frame_idx", "track"], drop=False)
                 .sort_index()
             )
-        print(f"Deleted {track} @ frame {frame_idx}")
+        #print(f"Deleted {track} @ frame {frame_idx}")
         cls._bump_label_version()
         return True
 
@@ -587,7 +587,7 @@ class DataLoader:
                 cls.loaded_data = df
                 cls._coords_normalized = True
 
-            print(f"Loaded: {origin}")
+            #print(f"Loaded: {origin}")
             cls._bump_label_version()
             return True
 

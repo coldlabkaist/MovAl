@@ -114,10 +114,10 @@ class ClickableImageLabel(QLabel):
     def _paint_skeleton_model(self, painter: QPainter, ow: int, oh: int, act: float) -> None:
         self.current_animal_num = 0
         for track in self.current_project.animals_name:  
-            self.current_animal_num += 1
             pts = self.csv_points.get(track, {})
             if not pts:
                 continue
+            self.current_animal_num += 1
 
             edge_pen = QPen(self._skeleton_color(track), 2)
             edge_pen.setCapStyle(Qt.PenCapStyle.RoundCap)

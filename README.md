@@ -32,9 +32,11 @@ This pipeline overcomes the Id-switching problem of existing multi-animal tracki
 If your local MovAl version is outdated compared to the latest release version on github, you can see a message recommending an update when running the code. You can simply update it using the following command
 ```
 cd (MovAl_folder)
-git fetch --tags
-git checkout (version) # git checkout v1.1.1
+python update_moval.py
+# or
+python update_moval.py v1.1.1
 ```
+If no version is provided, MovAl updates to the latest release tag. If a version is provided, MovAl checks out that tag.
 
 ## Liscense
 MovAl basically follow the MIT license. We allows free use for academic/research purposes, but not for commercial purposes.

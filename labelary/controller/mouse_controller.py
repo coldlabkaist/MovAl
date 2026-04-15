@@ -26,6 +26,8 @@ class MouseController(QObject):
         self._rotation_start_angle: float | None = None
         self._rotation_source_points: dict[str, tuple[float, float, int]] = {}
         self._resize_center_norm: tuple[float, float] | None = None
+        self._resize_anchor_norm: tuple[float, float] | None = None
+        self._resize_initial_corner_norm: tuple[float, float] | None = None
         self._resize_source_points: dict[str, tuple[float, float, int]] = {}
         self._resize_start_distance_px: float | None = None
         self._node_hit_margin_px = 10
@@ -291,7 +293,6 @@ class MouseController(QObject):
             self._active_menu = None
 
         pos = e.pos()
-        self.video_viewer._context_click_pos = pos 
         menu = QMenu(self.video_viewer)
         self._active_menu = menu
 
@@ -299,8 +300,11 @@ class MouseController(QObject):
         act_add.setShortcut(QKeySequence("Ctrl+A"))
         act_add.setShortcutVisibleInContextMenu(True)
 
+        act_replace = menu.addAction("Replace Instance")
+        act_replace.setShortcuts([QKeySequence("Ctrl+X"), QKeySequence("Ctrl+F")])
+        act_replace.setShortcutVisibleInContextMenu(True)
+
         act_delete = menu.addAction("Delete Instance")
-        act_delete.setShortcut(QKeySequence("Delete"))
         act_delete.setShortcut(QKeySequence("Ctrl+D"))
         act_delete.setShortcutVisibleInContextMenu(True)
 
@@ -329,12 +333,15 @@ class MouseController(QObject):
             act_prev_lbl.setShortcut(QKeySequence("Ctrl+Left"))
             act_next_lbl.setShortcut(QKeySequence("Ctrl+Right"))
 
-        act_add.setEnabled(self.video_viewer.current_animal_num <= self.max_animals)
+        current_frame = getattr(self.video_viewer, "current_frame", 0)
+        act_add.setEnabled(len(self._tracks_in_frame(current_frame)) < self.max_animals)
+        act_replace.setEnabled(self.selected_instance is not None)
         act_delete.setEnabled(self.selected_instance is not None)
         act_change_num.setEnabled(self.selected_instance is not None)
         act_vis.setEnabled(self.selected_node is not None)
         
-        act_add.triggered.connect(self._add_new_skeleton_label)
+        act_add.triggered.connect(lambda: self._add_new_skeleton_label(context_pos=pos))
+        act_replace.triggered.connect(lambda: self._replace_selected_instance(context_pos=pos))
         act_delete.triggered.connect(self._delete_selected_instance)
         act_vis.triggered.connect(self._toggle_selected_node_visibility)
         
@@ -507,37 +514,62 @@ class MouseController(QObject):
 
         xs = [nx for nx, ny, vis in pts.values()]
         ys = [ny for nx, ny, vis in pts.values()]
-        center_norm = ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
-        center_px = self._norm_to_viewer_px(*center_norm)
-        corner_px = geom["resize_handles"][corner]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        center_norm = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
+        corner_norms = {
+            "top_left": (min_x, min_y),
+            "top_right": (max_x, min_y),
+            "bottom_left": (min_x, max_y),
+            "bottom_right": (max_x, max_y),
+        }
+        opposite_corners = {
+            "top_left": "bottom_right",
+            "top_right": "bottom_left",
+            "bottom_left": "top_right",
+            "bottom_right": "top_left",
+        }
+        anchor_corner = opposite_corners.get(corner)
+        if anchor_corner is None or corner not in corner_norms:
+            self._clear_resize_state()
+            return
 
         self._resize_center_norm = center_norm
+        self._resize_anchor_norm = corner_norms[anchor_corner]
+        self._resize_initial_corner_norm = corner_norms[corner]
         self._resize_source_points = {
             kp: (nx, ny, vis) for kp, (nx, ny, vis) in pts.items()
         }
-        self._resize_start_distance_px = max(
-            math.hypot(corner_px[0] - center_px[0], corner_px[1] - center_px[1]),
-            1.0,
-        )
+        self._resize_start_distance_px = 1.0
 
     def _resize_instance(self, track: str, corner: str, pos: QPoint) -> None:
         if (
-            self._resize_center_norm is None
+            self._resize_anchor_norm is None
+            or self._resize_initial_corner_norm is None
             or not self._resize_source_points
-            or self._resize_start_distance_px is None
         ):
             return
 
-        center_nx, center_ny = self._resize_center_norm
-        center_px_x, center_px_y = self._norm_to_viewer_px(center_nx, center_ny)
-        current_distance = math.hypot(pos.x() - center_px_x, pos.y() - center_px_y)
-        scale = max(current_distance / self._resize_start_distance_px, 0.1)
+        act = self.video_viewer.base_scale * self.video_viewer.current_scale
+        ow = self.video_viewer.original_pixmap.width() if self.video_viewer.original_pixmap else 1
+        oh = self.video_viewer.original_pixmap.height() if self.video_viewer.original_pixmap else 1
+        anchor_nx, anchor_ny = self._resize_anchor_norm
+        start_corner_nx, start_corner_ny = self._resize_initial_corner_norm
+        current_nx = (pos.x() - self.video_viewer.translation.x()) / (act * ow)
+        current_ny = (pos.y() - self.video_viewer.translation.y()) / (act * oh)
+        base_dx = start_corner_nx - anchor_nx
+        base_dy = start_corner_ny - anchor_ny
+
+        scale_x = (current_nx - anchor_nx) / base_dx if abs(base_dx) > 1e-6 else 1.0
+        scale_y = (current_ny - anchor_ny) / base_dy if abs(base_dy) > 1e-6 else 1.0
+        scale_x = max(scale_x, 0.05)
+        scale_y = max(scale_y, 0.05)
 
         for kp, (src_x, src_y, vis) in self._resize_source_points.items():
-            dx = src_x - center_nx
-            dy = src_y - center_ny
-            scaled_x = center_nx + dx * scale
-            scaled_y = center_ny + dy * scale
+            dx = src_x - anchor_nx
+            dy = src_y - anchor_ny
+            scaled_x = anchor_nx + dx * scale_x
+            scaled_y = anchor_ny + dy * scale_y
             self.video_viewer.csv_points[track][kp] = (
                 max(0.0, min(scaled_x, 1.0)),
                 max(0.0, min(scaled_y, 1.0)),
@@ -546,6 +578,8 @@ class MouseController(QObject):
 
     def _clear_resize_state(self) -> None:
         self._resize_center_norm = None
+        self._resize_anchor_norm = None
+        self._resize_initial_corner_norm = None
         self._resize_source_points = {}
         self._resize_start_distance_px = None
 
@@ -588,20 +622,24 @@ class MouseController(QObject):
         return new_tx, new_ty
 
     
-    def _add_new_skeleton_label(self):
+    def _add_new_skeleton_label(self, track_name: str | None = None, context_pos: QPoint | None = None):
         if not hasattr(self.video_viewer, "current_frame"):
             return
         frame_idx = self.video_viewer.current_frame
         present_tracks = self._tracks_in_frame(frame_idx)
         
-        new_track = next((name for name in self.track_list
-                      if name not in present_tracks), None)
+        new_track = track_name
+        if new_track is not None and new_track in present_tracks:
+            return
+        if new_track is None:
+            new_track = next((name for name in self.track_list
+                          if name not in present_tracks), None)
         if new_track is None:
             return
 
         anchor_norm = None
-        if hasattr(self, "_context_click_pos"):
-            anchor_norm = self._pos_to_norm(self._context_click_pos)
+        if context_pos is not None:
+            anchor_norm = self._pos_to_norm(context_pos)
         success = DataLoader.add_skeleton_instance(
             frame_idx=frame_idx,
             track_name=new_track,
@@ -614,6 +652,23 @@ class MouseController(QObject):
         self.video_viewer.setCSVPoints(coords)
         self.kpt_list.update_list_visibility(coords)
         self.video_viewer.update()
+
+    def _replace_selected_instance(self, context_pos: QPoint | None = None):
+        if self.selected_instance is None or not hasattr(self.video_viewer, "current_frame"):
+            return
+        track_name = self.selected_instance
+        frame_idx = self.video_viewer.current_frame
+        if not DataLoader.delete_instance(frame_idx, track_name):
+            return
+
+        coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
+        self.video_viewer.setCSVPoints(coords)
+        self.kpt_list.update_list_visibility(coords)
+        self.video_viewer.update()
+
+        self.selected_instance = None
+        self.selected_node = None
+        self._add_new_skeleton_label(track_name=track_name, context_pos=context_pos)
 
     def _tracks_in_frame(self, frame_idx: int):
         df = DataLoader.loaded_data

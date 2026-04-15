@@ -16,6 +16,7 @@ class VideoLoader:
                 kpt_list, 
                 frame_slider, 
                 frame_number_label, 
+                frame_jump_spin=None,
                 frame_display_mode = "davis"):
 
         self.parent = parent
@@ -24,6 +25,7 @@ class VideoLoader:
         self.kpt_list = kpt_list
         self.frame_slider = frame_slider
         self.frame_number_label = frame_number_label
+        self.frame_jump_spin = frame_jump_spin
         self.frame_display_mode = frame_display_mode
 
         self.frame_dir = None
@@ -64,7 +66,7 @@ class VideoLoader:
                 frame = cv2.imread(first_frame_path)
                 if frame is not None:
                     self.display_video(frame, len(self.frame_files))
-                    print(f"First frame displayed: {first_frame_path}")
+                    #print(f"First frame displayed: {first_frame_path}")
                 else:
                     print("Could not load first frame.")
                     return False
@@ -104,6 +106,9 @@ class VideoLoader:
         self.display_video_on_viewer(frame, reset = True)
         self.frame_slider.setMaximum(self.total_frames - 1)
         self.frame_slider.setValue(0)
+        if self.frame_jump_spin is not None:
+            self.frame_jump_spin.setMaximum(max(0, self.total_frames - 1))
+            self.frame_jump_spin.setValue(0)
 
     def display_video_on_viewer(self, frame, reset = False):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -114,6 +119,10 @@ class VideoLoader:
         self.skeleton_video_viewer.current_frame = self.current_frame
 
         self.frame_slider.setValue(self.current_frame)
+        if self.frame_jump_spin is not None and self.frame_jump_spin.value() != self.current_frame:
+            self.frame_jump_spin.blockSignals(True)
+            self.frame_jump_spin.setValue(self.current_frame)
+            self.frame_jump_spin.blockSignals(False)
         self.frame_number_label.setText(f"{self.current_frame} (total frames : {self.total_frames})")
 
         csv_points = DataLoader.get_keypoint_coordinates_by_frame(self.current_frame)

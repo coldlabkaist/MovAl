@@ -12,6 +12,30 @@ from datetime import datetime
 import yaml
 from pathlib import Path
 
+class BrowseOnlyLineEdit(QLineEdit):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setReadOnly(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.setAcceptDrops(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
+
+    def keyPressEvent(self, event):
+        event.ignore()
+
+    def inputMethodEvent(self, event):
+        event.ignore()
+
+    def dragEnterEvent(self, event):
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        event.ignore()
+
+    def dropEvent(self, event):
+        event.ignore()
+
 class YOLODialog(QDialog):
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
@@ -258,7 +282,8 @@ class YoloInferenceDialog(QDialog):
 
     def build_model_row(self):
         row = QHBoxLayout()
-        self.model_line_edit = QLineEdit(placeholderText="Select Model")
+        self.model_line_edit = BrowseOnlyLineEdit()
+        self.model_line_edit.setPlaceholderText("Select Model")
         browse_btn = QPushButton("Browse", clicked=self.select_model)
         row.addWidget(self.model_line_edit)
         row.addWidget(browse_btn)

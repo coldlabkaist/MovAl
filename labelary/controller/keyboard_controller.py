@@ -10,13 +10,19 @@ class KeyboardController(QObject):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
-            if key == Qt.Key.Key_Right and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            if (
+                key in (Qt.Key.Key_Right, Qt.Key.Key_D)
+                and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            ):
                 current = self.video_loader.current_frame
                 if current + 1 < self.video_loader.total_frames:
                     self.video_loader.move_to_frame(current + 1)
                     self.main_dialog.auto_label_current_frame()
                 return True
-            elif key == Qt.Key.Key_Left and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            elif (
+                key in (Qt.Key.Key_Left, Qt.Key.Key_A)
+                and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            ):
                 current = self.video_loader.current_frame
                 if current > 0:
                     self.video_loader.move_to_frame(current - 1)
@@ -49,11 +55,19 @@ class KeyboardController(QObject):
                 self.main_dialog.open_save_dialog()
                 return True
             elif (key == Qt.Key.Key_D and
-                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                  event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 self.mouse_controller._delete_selected_instance()
                 return True
-            elif (key == Qt.Key.Key_V and
+            elif (key == Qt.Key.Key_F and
                 event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self.mouse_controller._replace_selected_instance()
+                return True
+            elif (key == Qt.Key.Key_X and
+                event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self.mouse_controller._replace_selected_instance()
+                return True
+            elif (key == Qt.Key.Key_V and
+                  event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 self.mouse_controller._toggle_selected_node_visibility()
                 return True
             for idx, key_num in enumerate([1,2,3,4,5,6,7,8,9,0]):

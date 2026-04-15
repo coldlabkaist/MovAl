@@ -41,7 +41,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                                         self.skeleton_video_viewer, 
                                         self.kpt_list, 
                                         self.frame_slider, 
-                                        self.frame_number_label)
+                                        self.frame_number_label,
+                                        self.frame_jump_spin)
         DataLoader.parent = self
         DataLoader.max_animals = self.project.num_animals
         DataLoader.animals_name = self.project.animals_name
@@ -52,11 +53,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.play_button.clicked.connect(self.play_or_pause)
         self.speed_spin.valueChanged.connect(self.set_playback_rate)
         self.frame_slider.valueChanged.connect(self.video_loader.move_to_frame)
+        self.frame_jump_spin.valueChanged.connect(self.on_frame_jump_changed)
         self.frame_slider.sliderPressed.connect(self.on_frame_slider_pressed)
         self.frame_slider.sliderReleased.connect(self.on_frame_slider_released)
         self.load_data_button.clicked.connect(self.on_show_clicked)
         self.load_model_button.clicked.connect(self.browse_and_load_model)
-        self.model_path_edit.textChanged.connect(self.on_model_path_changed)
         self.automatic_label_checkbox.toggled.connect(self.on_automatic_label_toggled)
         self.mini_training_button.clicked.connect(self.run_mini_training)
 
@@ -193,6 +194,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.is_video_paused = self.video_loader.toggle_playback()
         self.mouse_controller.enable_control = self.is_video_paused
         self.speed_spin.setEnabled(self.mouse_controller.enable_control)
+        self.frame_jump_spin.setEnabled(self.mouse_controller.enable_control)
     
     def set_playback_rate(self):
         self.video_loader.play_rate = self.speed_spin.value()
@@ -205,6 +207,19 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
     def on_frame_slider_released(self):
         if not self.is_video_paused:
             self.video_loader.toggle_playback()
+        self.auto_label_current_frame()
+
+    def on_frame_jump_changed(self, frame_idx: int):
+        if self.video_loader.total_frames <= 0:
+            return
+        if frame_idx == self.video_loader.current_frame:
+            return
+        if not self.is_video_paused:
+            self.is_video_paused = self.video_loader.toggle_playback()
+            self.mouse_controller.enable_control = self.is_video_paused
+            self.speed_spin.setEnabled(self.mouse_controller.enable_control)
+            self.frame_jump_spin.setEnabled(self.mouse_controller.enable_control)
+        self.video_loader.move_to_frame(frame_idx, force=True)
         self.auto_label_current_frame()
 
     def update_csv_points_on_image(self):
@@ -255,10 +270,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         )
         if not model_path:
             return
-        self.model_path_edit.setText(model_path)
+        self._set_model_path_display(model_path)
 
     def browse_and_load_model(self):
-        raw_path = self.model_path_edit.text().strip()
+        raw_path = self._model_path_text()
         if raw_path:
             model_path = Path(raw_path).expanduser()
             if model_path.exists() and model_path.is_file():
@@ -266,11 +281,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 return
 
         self.browse_model()
-        if self.model_path_edit.text().strip():
+        if self._model_path_text():
             self.load_model()
 
     def load_model(self):
-        raw_path = self.model_path_edit.text().strip()
+        raw_path = self._model_path_text()
         if not raw_path:
             QMessageBox.warning(self, "No model selected", "Select a model file first.")
             return
@@ -306,9 +321,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.auto_label_model = model
         self.auto_label_model_path = resolved_path
         self.auto_label_model_mode = self.mode_combo.currentText()
-        self.model_path_edit.blockSignals(True)
-        self.model_path_edit.setText(resolved_path)
-        self.model_path_edit.blockSignals(False)
+        self._set_model_path_display(resolved_path)
         self._refresh_model_button_state()
 
         QMessageBox.information(
@@ -335,6 +348,14 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.auto_label_model_path = None
             self.auto_label_model_mode = None
         self._refresh_model_button_state()
+
+    def _model_path_text(self) -> str:
+        return self.model_path_edit.text().strip()
+
+    def _set_model_path_display(self, text: str) -> None:
+        self.model_path_edit.setText(text)
+        self.model_path_edit.setToolTip(text)
+        self.on_model_path_changed(text)
 
     def _default_model_dir(self) -> Path:
         candidates = [
@@ -379,7 +400,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         if self.auto_label_model_path:
             candidates.append(self.auto_label_model_path)
 
-        text_path = self.model_path_edit.text().strip()
+        text_path = self._model_path_text()
         if text_path:
             candidates.append(text_path)
 
@@ -500,7 +521,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             )
             return
 
-        self.model_path_edit.setText(str(best_model_path.resolve()))
+        self._set_model_path_display(str(best_model_path.resolve()))
         self.load_model()
 
     def auto_label_current_frame(self):

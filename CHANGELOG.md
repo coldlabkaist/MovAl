@@ -1,5 +1,10 @@
 ## MovAl v1.1.x
 
+**26.04.15** MovAl v1.1.4 released
+- 1.1.4 remember the last opened project config.
+- Improve Labelary detail settings behavior
+- Add update assistant
+
 **26.04.08.** MovAl v1.1.3 released
 - Add “Select All” option for video frames in inference
 

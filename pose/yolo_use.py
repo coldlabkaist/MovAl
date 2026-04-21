@@ -1,12 +1,13 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QSizePolicy, QGridLayout,
     QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
-    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QListWidgetItem, QFrame, QButtonGroup, QRadioButton
+    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QListWidgetItem, QFrame, QButtonGroup, QProgressBar
 )
 from PyQt6.QtCore import Qt
 import subprocess
 import os
 from .thread import TrainThread, InferenceThread
+from .task_state import pose_execution_state
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,7 @@ class YOLODialog(QDialog):
         self.setFixedSize(1000, 800)
 
         self.current_project = current_project
+        self.train_thread = None
 
         main_layout = QVBoxLayout(self)
 
@@ -89,10 +91,16 @@ class YOLODialog(QDialog):
         middle_layout.addLayout(right_layout, 1)
         main_layout.addLayout(middle_layout)
 
-        run_btn = QPushButton("Run Train")
-        run_btn.clicked.connect(self.run_train)
-        run_btn.setFixedHeight(30)
-        main_layout.addWidget(run_btn)
+        self.run_btn = QPushButton("Run Train")
+        self.run_btn.clicked.connect(self.run_train)
+        self.run_btn.setFixedHeight(30)
+        main_layout.addWidget(self.run_btn)
+
+        pose_execution_state.busy_changed.connect(self._on_pose_task_busy_changed)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
 
     def create_group_box(self, title, params):
         group = QGroupBox(title)
@@ -139,6 +147,16 @@ class YOLODialog(QDialog):
             
     def run_train(self):
         import os
+
+        if pose_execution_state.is_busy():
+            running = pose_execution_state.active_task() or "pose task"
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                f"Another pose task is running ({running}).\n"
+                "Please wait until it finishes.",
+            )
+            return
 
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         models_dir = os.path.join(project_root, "models")
@@ -237,11 +255,56 @@ class YOLODialog(QDialog):
 
         print("Execute Command:", command)
 
+        if not pose_execution_state.acquire("training", owner=self):
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                "Another pose task is running. Please try again later.",
+            )
+            return
+
+        pose_execution_state.update_progress(0, 0, "Training running...")
         self.train_thread = TrainThread(command)
-        self.train_thread.finished_signal.connect(
-            lambda: QMessageBox.information(self, "Done", "Training Completed")
-        )
+        self.train_thread.finished_signal.connect(self._on_train_finished)
+        self._on_pose_task_busy_changed(True, "training")
         self.train_thread.start()
+
+    def _on_train_finished(self):
+        pose_execution_state.release(owner=self)
+        self.train_thread = None
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
+        QMessageBox.information(self, "Done", "Training Completed")
+
+    def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
+        if not hasattr(self, "run_btn"):
+            return
+
+        if self.train_thread is not None and self.train_thread.isRunning():
+            self.run_btn.setEnabled(False)
+            self.run_btn.setText("Training...")
+            return
+
+        if busy:
+            self.run_btn.setEnabled(False)
+            self.run_btn.setText(f"Run Train (Busy: {task_name})")
+        else:
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Run Train")
+
+    def closeEvent(self, event):
+        if self.train_thread is not None and self.train_thread.isRunning():
+            QMessageBox.information(
+                self,
+                "Training in progress",
+                "Training is still running.\n"
+                "Close the dialog after it finishes.",
+            )
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 class YoloInferenceDialog(QDialog):
     def __init__(self, current_project, parent=None):
@@ -250,7 +313,19 @@ class YoloInferenceDialog(QDialog):
         self.animals_name = current_project.animals_name
         self.command_queue = []
         self.current_run_item = None
+        self.infer_thread = None
+        self._inference_running = False
+        self._completed_commands = 0
+        self._total_commands = 0
+        self._progress_dialog = None
+        self._progress_label = None
+        self._progress_bar = None
         self.build_ui()
+        pose_execution_state.busy_changed.connect(self._on_pose_task_busy_changed)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
 
     def build_ui(self):
         self.setWindowTitle("YOLO Pose Inference")
@@ -281,17 +356,17 @@ class YoloInferenceDialog(QDialog):
         self.grid.setColumnStretch(1, 1)
 
         main_layout.addLayout(self.grid)
-        run_btn = QPushButton("Run", clicked=self.run_inference)
-        run_btn.setFixedHeight(30)
-        main_layout.addWidget(run_btn)
+        self.run_btn = QPushButton("Run", clicked=self.run_inference)
+        self.run_btn.setFixedHeight(30)
+        main_layout.addWidget(self.run_btn)
 
     def build_model_row(self):
         row = QHBoxLayout()
         self.model_line_edit = BrowseOnlyLineEdit()
         self.model_line_edit.setPlaceholderText("Select Model")
-        browse_btn = QPushButton("Browse", clicked=self.select_model)
+        self.model_browse_btn = QPushButton("Browse", clicked=self.select_model)
         row.addWidget(self.model_line_edit)
-        row.addWidget(browse_btn)
+        row.addWidget(self.model_browse_btn)
         return row
 
     def build_track_row(self):
@@ -579,6 +654,16 @@ class YoloInferenceDialog(QDialog):
                 self.convert_txt_to_csv_checkbox.setEnabled(False)
 
     def run_inference(self):
+        if pose_execution_state.is_busy():
+            running = pose_execution_state.active_task() or "pose task"
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                f"Another pose task is running ({running}).\n"
+                "Please wait until it finishes.",
+            )
+            return
+
         model_path = self.model_line_edit.text()
         infer_params = self.get_params_from_group(self.inference_group)
         sources = self.get_video_list()
@@ -654,18 +739,58 @@ class YoloInferenceDialog(QDialog):
                 {
                     "command": cmd,
                     "run_name": run_name,
+                    "source_name": name,
                 }
             )
 
-        self.run_next_command()
+        if not self.command_queue:
+            QMessageBox.warning(self, "Warning", "No valid inference command was generated.")
+            return
+
+        if not pose_execution_state.acquire("inference", owner=self):
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                "Another pose task is running. Please try again later.",
+            )
+            return
+
+        self._inference_running = True
+        self._completed_commands = 0
+        self._total_commands = len(self.command_queue)
+        self._set_inference_ui_enabled(False)
+        self._show_progress_dialog()
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            f"Inference queued ({self._completed_commands}/{self._total_commands})",
+        )
+
+        try:
+            self.run_next_command()
+        except Exception as err:
+            self._finish_inference_run(success=False)
+            QMessageBox.critical(
+                self,
+                "Inference start failed",
+                f"Failed to start inference:\n{err}",
+            )
 
     def run_next_command(self):
         if not self.command_queue:
             print("All inference tasks completed.")
+            self._finish_inference_run()
             return
 
         self.current_run_item = self.command_queue.pop(0)
         command = self.current_run_item["command"]
+        source_name = self.current_run_item.get("source_name", "")
+        self._update_progress_dialog(source_name)
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            f"Inference running: {source_name} ({self._completed_commands + 1}/{self._total_commands})",
+        )
         print("Executing:", command)
 
         self.infer_thread = InferenceThread(command)
@@ -673,6 +798,7 @@ class YoloInferenceDialog(QDialog):
         self.infer_thread.start()
 
     def _on_inference_command_finished(self):
+        self.infer_thread = None
         run_item = self.current_run_item or {}
         run_name = run_item.get("run_name")
         if (
@@ -688,8 +814,128 @@ class YoloInferenceDialog(QDialog):
                     "TXT to CSV conversion failed",
                     f"Run: {run_name}\n{err}",
                 )
+        self._completed_commands += 1
+        self._update_progress_dialog("")
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            f"Inference completed {self._completed_commands}/{self._total_commands}",
+        )
         self.current_run_item = None
         self.run_next_command()
+
+    def _show_progress_dialog(self):
+        if self._progress_dialog is None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Inference Progress")
+            dialog.setModal(False)
+            dialog.setWindowModality(Qt.WindowModality.NonModal)
+            dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+            dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+            dialog.setMinimumWidth(420)
+            layout = QVBoxLayout(dialog)
+            self._progress_label = QLabel(dialog)
+            self._progress_bar = QProgressBar(dialog)
+            self._progress_bar.setMinimum(0)
+            layout.addWidget(self._progress_label)
+            layout.addWidget(self._progress_bar)
+            self._progress_dialog = dialog
+
+        self._update_progress_dialog("")
+        self._progress_dialog.show()
+        self._progress_dialog.raise_()
+        self._progress_dialog.activateWindow()
+
+    def _update_progress_dialog(self, source_name: str):
+        if self._progress_dialog is None or self._progress_bar is None or self._progress_label is None:
+            return
+
+        self._progress_bar.setMaximum(max(1, self._total_commands))
+        self._progress_bar.setValue(min(self._completed_commands, self._total_commands))
+
+        if self._inference_running:
+            current_idx = min(self._completed_commands + 1, self._total_commands)
+            if source_name:
+                text = (
+                    f"Inference running... ({current_idx}/{self._total_commands})\n"
+                    f"Source: {source_name}"
+                )
+            else:
+                text = (
+                    f"Inference running... ({current_idx}/{self._total_commands})\n"
+                    "Preparing next source..."
+                )
+        else:
+            text = f"Inference completed ({self._total_commands}/{self._total_commands})"
+
+        self._progress_label.setText(text)
+
+    def _set_inference_ui_enabled(self, enabled: bool):
+        widgets = [
+            getattr(self, "model_line_edit", None),
+            getattr(self, "model_browse_btn", None),
+            getattr(self, "inference_radio", None),
+            getattr(self, "tracking_radio", None),
+            getattr(self, "track_method_combo", None),
+            getattr(self, "video_group", None),
+            getattr(self, "target_group", None),
+            getattr(self, "inference_group", None),
+            getattr(self, "visualization_group", None),
+            getattr(self, "run_btn", None),
+        ]
+        for widget in widgets:
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _finish_inference_run(self, success: bool = True):
+        if not self._inference_running:
+            return
+
+        self._inference_running = False
+        self._completed_commands = self._total_commands
+        self._update_progress_dialog("")
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+
+        pose_execution_state.release(owner=self)
+        self._set_inference_ui_enabled(True)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
+        if success:
+            QMessageBox.information(self, "Done", "Inference Completed")
+
+    def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
+        if not hasattr(self, "run_btn"):
+            return
+
+        if self._inference_running:
+            self.run_btn.setEnabled(False)
+            self.run_btn.setText("Run (Running...)")
+            return
+
+        if busy:
+            self.run_btn.setEnabled(False)
+            self.run_btn.setText(f"Run (Busy: {task_name})")
+        else:
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Run")
+
+    def closeEvent(self, event):
+        if self._inference_running:
+            QMessageBox.information(
+                self,
+                "Inference in progress",
+                "Inference is still running.\n"
+                "Close the dialog after it finishes.",
+            )
+            event.ignore()
+            return
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+            self._progress_dialog = None
+        super().closeEvent(event)
 
     @staticmethod
     def _extract_frame_number(filename: str) -> int:

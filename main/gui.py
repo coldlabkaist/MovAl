@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from utils import __version__
 from utils.project import ProjectInformation
+from pose.task_state import pose_execution_state
 
 
 class MainWindow(QMainWindow):
@@ -72,7 +74,28 @@ class MainWindow(QMainWindow):
         proj_bar.addWidget(self.btn_load_project)
         outer_layout.addLayout(proj_bar)
 
+        self.pose_progress_widget = QWidget(self)
+        self.pose_progress_widget.setVisible(False)
+        pose_progress_layout = QHBoxLayout(self.pose_progress_widget)
+        pose_progress_layout.setContentsMargins(0, 0, 0, 0)
+        pose_progress_layout.setSpacing(8)
+        self.pose_progress_label = QLabel("Pose task running...", self.pose_progress_widget)
+        self.pose_progress_label.setStyleSheet("font-size: 11px;")
+        self.pose_progress_bar = QFrame(self.pose_progress_widget)
+        self.pose_progress_bar_layout = QVBoxLayout(self.pose_progress_bar)
+        self.pose_progress_bar_layout.setContentsMargins(0, 0, 0, 0)
+        self.pose_progress = QProgressBar(self.pose_progress_bar)
+        self.pose_progress.setFixedHeight(12)
+        self.pose_progress.setRange(0, 0)
+        self.pose_progress.setTextVisible(False)
+        self.pose_progress_bar_layout.addWidget(self.pose_progress)
+        pose_progress_layout.addWidget(self.pose_progress_label)
+        pose_progress_layout.addWidget(self.pose_progress_bar, 1)
+        outer_layout.addWidget(self.pose_progress_widget)
+
         self.controller.main_window_load_project = self.on_load_project_clicked
+        pose_execution_state.busy_changed.connect(self._on_pose_busy_changed)
+        pose_execution_state.progress_changed.connect(self._on_pose_progress_changed)
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -108,6 +131,34 @@ class MainWindow(QMainWindow):
 
         self.setup_buttons()
         self._restore_last_project()
+
+    def _on_pose_busy_changed(self, busy: bool, task_name: str) -> None:
+        if not busy:
+            self.pose_progress_widget.setVisible(False)
+            self.pose_progress_label.setText("Pose task running...")
+            self.pose_progress.setRange(0, 0)
+            self.pose_progress.setTextVisible(False)
+            return
+
+        self.pose_progress_widget.setVisible(True)
+        self.pose_progress_label.setText(f"{task_name.capitalize()} running...")
+
+    def _on_pose_progress_changed(self, task_name: str, done: int, total: int, message: str) -> None:
+        if not task_name:
+            return
+
+        self.pose_progress_widget.setVisible(True)
+        label_text = message if message else f"{task_name.capitalize()} running..."
+        self.pose_progress_label.setText(label_text)
+
+        if total > 0:
+            self.pose_progress.setRange(0, total)
+            self.pose_progress.setValue(min(done, total))
+            self.pose_progress.setTextVisible(True)
+            self.pose_progress.setFormat("%v/%m")
+        else:
+            self.pose_progress.setRange(0, 0)
+            self.pose_progress.setTextVisible(False)
 
     def _restore_last_project(self) -> None:
         last_path = self._read_last_project_path()

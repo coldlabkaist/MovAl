@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QMessageBox,
 )
+from PyQt6.QtCore import Qt
 from installation_manager import MainInstallDialog
 from project_manager import ProjectManagerDialog
 from video_preprocess import PreprocessDialog
@@ -13,6 +14,7 @@ class PipelineController:
         self.current_project = None
         self.main_window_load_project = None
         self.parent = None
+        self._pose_dialog = None
 
     def run_installation(self):
         dialog = MainInstallDialog(self.parent) 
@@ -43,8 +45,18 @@ class PipelineController:
         if self.current_project == None:
             QMessageBox.warning(None, "Project not found", "Please Select a Project")
             return
+        if self._pose_dialog is not None and self._pose_dialog.isVisible():
+            self._pose_dialog.raise_()
+            self._pose_dialog.activateWindow()
+            return
+
         dialog = PoseEstimationDialog(self.current_project, self.parent)
-        dialog.exec()
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.destroyed.connect(self._on_pose_dialog_destroyed)
+        self._pose_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def data_convert(self):
         dialog = DataConverterDialog()
@@ -53,3 +65,6 @@ class PipelineController:
     def data_extract(self):
         dialog = TxtToCsvDialog(current_project=self.current_project)
         dialog.exec()
+
+    def _on_pose_dialog_destroyed(self, *args):
+        self._pose_dialog = None

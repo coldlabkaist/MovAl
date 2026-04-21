@@ -225,15 +225,15 @@ class YOLODialog(QDialog):
         params["project"] = os.path.join(self.current_project.project_dir, "runs")
         params["name"]    = f"train_{ts_date}_{ts_time}"
 
-        command = "yolo pose train"
+        command = ["yolo", "pose", "train"]
         for key, value in params.items():
             if value in ["", "None"]:
                 continue
             if isinstance(value, bool):
                 if value:
-                    command += f" {key}=True"
+                    command.append(f"{key}=True")
             else:
-                command += f" {key}={value}"
+                command.append(f"{key}={value}")
 
         print("Execute Command:", command)
 

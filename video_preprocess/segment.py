@@ -103,7 +103,7 @@ class CutieDialog(QDialog):
                     continue
 
             cmd = [
-                "python", "interactive_demo.py",
+                sys.executable, "interactive_demo.py",
                 "--video", video_path,
                 "--workspace", workspace_dir,
                 "--num_objects", str(num_objects),
@@ -138,7 +138,7 @@ class CutieDialog(QDialog):
         workspace_dir = os.path.join(self.frame_dir, video_name)
 
         cmd = [
-            "python", "interactive_demo.py",
+            sys.executable, "interactive_demo.py",
             "--video", video_path,
             "--workspace", workspace_dir,
             "--num_objects", str(num_objects)

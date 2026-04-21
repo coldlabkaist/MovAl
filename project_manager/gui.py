@@ -1097,7 +1097,7 @@ class ProjectManagerDialog(QDialog):
                 and loaded_project is not previous_project
             ):
                 self.set_current_project(loaded_project)
-            return
+                return
 
         if loaded_project is None:
             loaded_project = ProjectInformation.from_path(path)

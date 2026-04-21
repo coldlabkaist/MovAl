@@ -4,7 +4,6 @@ import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
-import yaml
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QBrush, QColor, QKeyEvent
 from PyQt6.QtWidgets import (
@@ -49,32 +48,6 @@ def _make_separator(parent: QWidget) -> QFrame:
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
     return line
-
-
-def _write_training_config(project: ProjectInformation) -> Path:
-    training_base_dir = project.project_dir_path / "runs" / "dataset"
-    training_base_dir.mkdir(parents=True, exist_ok=True)
-
-    skeleton_model = SkeletonModel()
-    skeleton_model.load_from_dict(project.skeleton_data)
-    nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
-
-    config = {
-        "train": (training_base_dir / "train").as_posix(),
-        "val": (training_base_dir / "val").as_posix(),
-        "test": (training_base_dir / "test").as_posix(),
-        "nc": len(project.animals_name),
-        "names": {index: name for index, name in enumerate(project.animals_name)},
-        "nkpt": nkpt,
-        "kpt_shape": [nkpt, 3],
-        "flip_idx": flip_idx,
-        "kpt_names": kpt_names,
-    }
-
-    target_path = project.project_dir_path / "runs" / "training_config.yaml"
-    with target_path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
-    return target_path
 
 
 class _FileListWidget(QListWidget):
@@ -425,7 +398,6 @@ class _CreateProjectTab(QWidget):
                 raise ValueError("The list must include at least one video.")
 
             project.save()
-            _write_training_config(project)
         except Exception as err:
             if project_dir.exists():
                 shutil.rmtree(project_dir)
@@ -1010,7 +982,6 @@ class _ManageProjectTab(QWidget):
                 model_count += sum(1 for _ in (self.project.project_dir_path / "runs").rglob(suffix))
 
             self.project.set_skeleton_data(model.to_dict(), save=True)
-            _write_training_config(self.project)
             self.dialog.load_project(self.project.project_file)
             self.project = self.dialog.current_project or self.project
             self.refresh_views()
@@ -1118,16 +1089,66 @@ class ProjectManagerDialog(QDialog):
     def load_project(self, path: str | Path) -> None:
         loaded_project: Optional[ProjectInformation] = None
         if self.main_window_load_project is not None:
+            previous_project = getattr(self.parent(), "current_project", None)
             self.main_window_load_project(path=path)
             loaded_project = getattr(self.parent(), "current_project", None)
-            if not isinstance(loaded_project, ProjectInformation):
-                loaded_project = None
+            if (
+                isinstance(loaded_project, ProjectInformation)
+                and loaded_project is not previous_project
+            ):
+                self.set_current_project(loaded_project)
+            return
 
         if loaded_project is None:
             loaded_project = ProjectInformation.from_path(path)
-            loaded_project.ensure_project_file()
+            if not self._handle_legacy_project_conversion(loaded_project):
+                return
 
         self.set_current_project(loaded_project)
+
+    def _handle_legacy_project_conversion(self, project: ProjectInformation) -> bool:
+        legacy_path = project.legacy_source_path
+        if legacy_path is None:
+            project.ensure_project_file()
+            return True
+
+        reply = QMessageBox.question(
+            self,
+            "Legacy YAML detected",
+            "This project YAML file is from an old MovAl format and cannot be used directly in the current version.\n\n"
+            "Convert it to project.json now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(
+                self,
+                "Load canceled",
+                "Project loading was canceled because conversion to project.json was not approved.",
+            )
+            return False
+
+        json_path = project.ensure_project_file()
+        remove_reply = QMessageBox.question(
+            self,
+            "Delete old YAML?",
+            "Conversion is complete.\n\n"
+            f"New JSON: {json_path}\n"
+            f"Old YAML: {legacy_path}\n\n"
+            "Delete the old YAML file?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if remove_reply == QMessageBox.StandardButton.Yes:
+            try:
+                legacy_path.unlink()
+            except Exception as err:
+                QMessageBox.warning(
+                    self,
+                    "Delete failed",
+                    f"Could not delete legacy YAML:\n{legacy_path}\n\n{err}",
+                )
+        return True
 
     def set_current_project(self, project: Optional[ProjectInformation]) -> None:
         self.current_project = project

@@ -9,7 +9,6 @@ import os
 from .thread import TrainThread, InferenceThread
 import sys
 from datetime import datetime
-import yaml
 from pathlib import Path
 
 class BrowseOnlyLineEdit(QLineEdit):
@@ -43,7 +42,6 @@ class YOLODialog(QDialog):
         self.setFixedSize(1000, 800)
 
         self.current_project = current_project
-        self.yaml_path = os.path.join(current_project.project_dir, "runs", "training_config.yaml")
 
         main_layout = QVBoxLayout(self)
 
@@ -179,7 +177,12 @@ class YOLODialog(QDialog):
             )
             return
 
-        yaml_path = self.yaml_path
+        try:
+            yaml_path = self.current_project.write_training_config_yaml().as_posix()
+        except Exception as err:
+            QMessageBox.critical(self, "Training config error", f"Failed to generate training config:\n{err}")
+            return
+
         params = {
             "model": model_path,
             "data": yaml_path,

@@ -19,7 +19,6 @@ from pose.thread import TrainThread
 from typing import Union, Optional, List
 from datetime import datetime
 from pathlib import Path
-import yaml
 import sys
 
 class LabelaryDialog(QDialog, UI_LabelaryDialog):
@@ -586,22 +585,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         return self.mode_combo.currentText()
 
     def _write_mini_training_config(self, dataset_dir: Path, run_name: str) -> Path:
-        base_config_path = Path(self.project.project_dir) / "runs" / "training_config.yaml"
-        if not base_config_path.exists():
-            raise FileNotFoundError(f"Training config not found:\n{base_config_path}")
-
-        with base_config_path.open("r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-
-        config["train"] = (dataset_dir / "train").as_posix()
-        config["val"] = (dataset_dir / "val").as_posix()
-        config["test"] = (dataset_dir / "test").as_posix()
-
         target_config_path = Path(self.project.project_dir) / "runs" / f"{run_name}_config.yaml"
-        with target_config_path.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
-
-        return target_config_path
+        return self.project.write_training_config_yaml(
+            dataset_dir=dataset_dir,
+            target_path=target_config_path,
+        )
 
     def run_mini_training(self):
         if self.mini_training_thread is not None and self.mini_training_thread.isRunning():

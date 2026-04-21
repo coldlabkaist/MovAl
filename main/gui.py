@@ -230,6 +230,8 @@ class MainWindow(QMainWindow):
 
         try:
             project = ProjectInformation.from_path(path)
+            if not self._handle_legacy_project_conversion(project):
+                return
             project.ensure_project_file()
 
             self.current_project = project
@@ -247,6 +249,49 @@ class MainWindow(QMainWindow):
             return
 
         self._warn_if_project_version_differs()
+
+    def _handle_legacy_project_conversion(self, project: ProjectInformation) -> bool:
+        legacy_path = project.legacy_source_path
+        if legacy_path is None:
+            return True
+
+        reply = QMessageBox.question(
+            self,
+            "Legacy YAML detected",
+            "This project YAML file is from an old MovAl format and cannot be used directly in the current version.\n\n"
+            "Convert it to project.json now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(
+                self,
+                "Load canceled",
+                "Project loading was canceled because conversion to project.json was not approved.",
+            )
+            return False
+
+        json_path = project.ensure_project_file()
+        remove_reply = QMessageBox.question(
+            self,
+            "Delete old YAML?",
+            "Conversion is complete.\n\n"
+            f"New JSON: {json_path}\n"
+            f"Old YAML: {legacy_path}\n\n"
+            "Delete the old YAML file?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if remove_reply == QMessageBox.StandardButton.Yes:
+            try:
+                legacy_path.unlink()
+            except Exception as err:
+                QMessageBox.warning(
+                    self,
+                    "Delete failed",
+                    f"Could not delete legacy YAML:\n{legacy_path}\n\n{err}",
+                )
+        return True
 
     def _warn_if_project_version_differs(self) -> None:
         if self.current_project is None or not self.current_project.moval_version:

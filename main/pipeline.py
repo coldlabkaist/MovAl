@@ -51,5 +51,5 @@ class PipelineController:
         dialog.exec()
 
     def data_extract(self):
-        dialog = TxtToCsvDialog()
+        dialog = TxtToCsvDialog(current_project=self.current_project)
         dialog.exec()

@@ -5,10 +5,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 import os
+from pathlib import Path
 import pandas as pd
 import yaml
 import numpy as np
 import re
+from utils.skeleton.skeleton_model import SkeletonModel
 
 def extract_frame_number(filename):
     match = re.search(r'_(\d+)\.txt$', filename)
@@ -18,12 +20,16 @@ def extract_frame_number(filename):
     return int(match.group(1)) if match else -1
 
 class TxtToCsvDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, current_project=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("TXT to CSV Convert")
         self.setFixedSize(600, 400)
 
+        self.current_project = current_project
         self.kpt_names = []
+        self.txt_folders = []
+        self.video_to_txts = {}
+        self.video_widget_map = {}
 
         main_layout = QVBoxLayout(self)
 
@@ -31,7 +37,7 @@ class TxtToCsvDialog(QDialog):
         txt_btn.clicked.connect(self.load_txt_folders)
         main_layout.addWidget(txt_btn)
 
-        yaml_btn = QPushButton("Read Data YAML (training_config.yaml from MovAl)")
+        yaml_btn = QPushButton("Load Keypoints from YAML (Optional)")
         yaml_btn.clicked.connect(self.load_yaml)
         main_layout.addWidget(yaml_btn)
 
@@ -56,6 +62,9 @@ class TxtToCsvDialog(QDialog):
         btn_layout.addWidget(pixel_btn)
         main_layout.addLayout(btn_layout)
 
+        if self.current_project is not None:
+            self.load_keypoints_from_project(show_dialog=False)
+
     def load_yaml(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select YAML File", "", "YAML Files (*.yaml *.yml)")
         if not file_path:
@@ -64,11 +73,37 @@ class TxtToCsvDialog(QDialog):
         with open(file_path, 'r') as f:
             data = yaml.safe_load(f)
 
-        self.kpt_names = data.get('kpt_names', [])
+        self._set_kpt_names(data.get('kpt_names', []), source=file_path)
 
+    def load_keypoints_from_project(self, *, show_dialog: bool = True) -> bool:
+        if self.current_project is None:
+            return False
+
+        try:
+            skeleton_model = SkeletonModel()
+            skeleton_model.load_from_dict(self.current_project.skeleton_data)
+            _, _, kpt_names = skeleton_model.create_training_config()
+            if not kpt_names:
+                raise ValueError("No keypoints found in project skeleton.")
+            self._set_kpt_names(
+                kpt_names,
+                source=f"{Path(self.current_project.project_file).name} / skeleton_data",
+            )
+            return True
+        except Exception as err:
+            if show_dialog:
+                QMessageBox.warning(
+                    self,
+                    "Project keypoints load failed",
+                    f"Could not read keypoints from current project:\n{err}",
+                )
+            return False
+
+    def _set_kpt_names(self, names, *, source: str) -> None:
+        self.kpt_names = list(names or [])
         print("Loaded kpt_names:", self.kpt_names)
 
-        kpt_text = "Kpt Names:\n"
+        kpt_text = f"Kpt Names (source: {source}):\n"
         for idx, name in enumerate(self.kpt_names):
             kpt_text += f"{idx} : {name}\n"
         self.kpt_names_label.setText(kpt_text)
@@ -167,8 +202,11 @@ class TxtToCsvDialog(QDialog):
             return
 
         if not self.kpt_names:
-            QMessageBox.warning(self, "Error", "Load YAML file first.")
-            return
+            if self.load_keypoints_from_project(show_dialog=False):
+                pass
+            else:
+                QMessageBox.warning(self, "Error", "Load keypoints from current project or YAML first.")
+                return
 
         output_dir = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if not output_dir:
@@ -252,8 +290,11 @@ class TxtToCsvDialog(QDialog):
             return
 
         if not self.kpt_names:
-            QMessageBox.warning(self, "Error", "Load YAML file first.")
-            return
+            if self.load_keypoints_from_project(show_dialog=False):
+                pass
+            else:
+                QMessageBox.warning(self, "Error", "Load keypoints from current project or YAML first.")
+                return
 
         output_dir = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if not output_dir:

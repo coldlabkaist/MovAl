@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+from utils.skeleton.skeleton_model import SkeletonModel
 
 PROJECT_FILENAME = "project.json"
 LEGACY_PROJECT_FILENAMES = ("config.yaml", "config.yml")
@@ -394,6 +395,45 @@ class ProjectInformation:
         if not self.project_file.exists() or self.legacy_source_path is not None:
             self.save()
         return self.project_file
+
+    def build_training_config(self, dataset_dir: str | Path | None = None) -> dict[str, Any]:
+        if dataset_dir is None:
+            training_base_dir = self.project_dir_path / "runs" / "dataset"
+        else:
+            training_base_dir = Path(dataset_dir).expanduser()
+
+        skeleton_model = SkeletonModel()
+        skeleton_model.load_from_dict(self.skeleton_data)
+        nkpt, flip_idx, kpt_names = skeleton_model.create_training_config()
+
+        return {
+            "train": (training_base_dir / "train").as_posix(),
+            "val": (training_base_dir / "val").as_posix(),
+            "test": (training_base_dir / "test").as_posix(),
+            "nc": len(self.animals_name),
+            "names": {index: name for index, name in enumerate(self.animals_name)},
+            "nkpt": nkpt,
+            "kpt_shape": [nkpt, 3],
+            "flip_idx": flip_idx,
+            "kpt_names": kpt_names,
+        }
+
+    def write_training_config_yaml(
+        self,
+        *,
+        dataset_dir: str | Path | None = None,
+        target_path: str | Path | None = None,
+    ) -> Path:
+        config = self.build_training_config(dataset_dir=dataset_dir)
+        output_path = (
+            Path(target_path).expanduser()
+            if target_path is not None
+            else self.project_dir_path / "runs" / "training_config.yaml"
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+        return output_path
 
     def to_dict(self) -> dict[str, Any]:
         return {

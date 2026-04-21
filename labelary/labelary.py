@@ -109,11 +109,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def load_mode_combo(self):
         self.mode_combo.clear()
-        for display_mode in ["images", "davis", "contour"]:
+        for display_mode in ["video", "images", "davis", "contour"]:
             self.mode_combo.addItem(display_mode)
         preferred_mode = self.project.get_preferred_frame_mode()
         index = self.mode_combo.findText(preferred_mode, Qt.MatchFlag.MatchExactly)
-        self.mode_combo.setCurrentIndex(index if index >= 0 else 1)
+        self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
 
     def update_label_combo(self, video_index = None, set_text = None):
         files = self.project.files
@@ -704,12 +704,12 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         if DataLoader.frame_has_labels(frame_idx):
             return
 
-        frame_path = self.video_loader.get_current_frame_path()
-        if not frame_path:
+        frame_source = self.video_loader.get_current_frame_source()
+        if frame_source is None:
             return
 
         try:
-            instances = self.predict_current_frame(frame_path)
+            instances = self.predict_current_frame(frame_source)
         except Exception as e:
             QMessageBox.critical(self, "Auto labeling failed", f"Failed to run inference:\n{e}")
             return
@@ -722,12 +722,12 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.skeleton_video_viewer.update()
             self.kpt_list.update()
 
-    def predict_current_frame(self, frame_path: str) -> list[dict]:
+    def predict_current_frame(self, frame_source) -> list[dict]:
         confidence_threshold = float(self.auto_label_confidence_spin.value())
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             results = self.auto_label_model.predict(
-                source=frame_path,
+                source=frame_source,
                 conf=confidence_threshold,
                 verbose=False,
                 save=False,

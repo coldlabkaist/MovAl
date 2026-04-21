@@ -312,8 +312,9 @@ class YoloInferenceDialog(QDialog):
         mode_box = QWidget()
         mode_lay = QHBoxLayout(mode_box)
         mode_lay.setContentsMargins(0,0,0,0)
-        self.image_radio = QRadioButton("image frames", checked=True)
-        self.video_radio = QRadioButton("video")
+        self.image_radio = QRadioButton("image frames")
+        self.video_radio = QRadioButton("video", checked=True)
+        self._source_mode_ready = False
         for w in (self.image_radio, self.video_radio):
             mode_lay.addWidget(w)
             w.toggled.connect(self.update_source_mode_ui)
@@ -324,6 +325,7 @@ class YoloInferenceDialog(QDialog):
         self.video_section = self.build_video_section()
         form.addRow(self.video_section)
         self.update_source_mode_ui()
+        self._source_mode_ready = True
         return group
 
     def build_image_section(self):
@@ -363,7 +365,8 @@ class YoloInferenceDialog(QDialog):
         return sect
 
     def _save_image_mode(self, image_mode: str) -> None:
-        self.current_project.set_preferred_frame_mode(image_mode)
+        if self.image_radio.isChecked():
+            self.current_project.set_preferred_frame_mode(image_mode)
 
     def build_video_section(self):
         sect = QWidget()
@@ -372,6 +375,16 @@ class YoloInferenceDialog(QDialog):
         lay.setContentsMargins(0,0,0,0)
         self.load_video_btn = QPushButton("Load Video...", clicked=self.load_videos)
         self.loaded_list = QListWidget()
+        seen = set()
+        for fe in self.current_project.files:
+            path_obj = Path(fe.video)
+            if not path_obj.exists():
+                continue
+            path = str(path_obj)
+            if path in seen:
+                continue
+            seen.add(path)
+            self.loaded_list.addItem(path)
         self.clear_video_btn = QPushButton("Clear List", clicked=self.clear_videos)
         lay.addWidget(self.load_video_btn)
         lay.addWidget(self.loaded_list)
@@ -448,6 +461,12 @@ class YoloInferenceDialog(QDialog):
         else:
             self.image_section.hide()
             self.video_section.show()
+
+        if getattr(self, "_source_mode_ready", False):
+            if self.video_radio.isChecked():
+                self.current_project.set_preferred_frame_mode("video")
+            else:
+                self.current_project.set_preferred_frame_mode(self.image_mode_combo.currentText())
 
     def clear_videos(self):
         self.loaded_list.clear()

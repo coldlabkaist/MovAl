@@ -6,6 +6,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+import cv2
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -28,11 +30,54 @@ ONLINE_DATASET_ROOT = "online_datasets"
 
 
 def _resolve_frame_dir(project_dir: Path, video_name: str, frame_type: str) -> Path:
+    if frame_type == "video":
+        return project_dir / "frames" / video_name / "images"
     if frame_type in ("davis", "contour"):
         return project_dir / "frames" / video_name / "visualization" / frame_type
     if frame_type == "images":
         return project_dir / "frames" / video_name / "images"
     raise ValueError(f"Unsupported frame type: {frame_type}")
+
+
+def _extract_video_frames_to_images(video_path: Path, image_dir: Path) -> int:
+    image_dir.mkdir(parents=True, exist_ok=True)
+
+    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
+    if not cap.isOpened():
+        cap.release()
+        cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Unable to open video for frame extraction: {video_path}")
+
+    frame_idx = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            break
+
+        out_path = image_dir / f"{frame_idx:07d}.jpg"
+        if not cv2.imwrite(str(out_path), frame):
+            cap.release()
+            raise RuntimeError(f"Failed to write frame image: {out_path}")
+        frame_idx += 1
+
+    cap.release()
+
+    if frame_idx == 0:
+        raise ValueError(f"No decodable frames found in video: {video_path}")
+    return frame_idx
+
+
+def _count_video_frames(video_path: Path) -> int:
+    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
+    if not cap.isOpened():
+        cap.release()
+        cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return 0
+    count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    cap.release()
+    return max(0, count)
 
 
 def _collect_label_image_pairs(
@@ -54,6 +99,9 @@ def _collect_label_image_pairs(
             continue
 
         img_dir = _resolve_frame_dir(project_dir, video_name, frame_type)
+        if frame_type == "video" and not any(img_dir.glob("*.jpg")):
+            _extract_video_frames_to_images(video_path, img_dir)
+
         for lbl_file in sorted(label_dir.glob("*.txt")):
             match = digit_re.search(lbl_file.stem)
             if not match:
@@ -154,7 +202,7 @@ def create_dataset_split(
 
 def create_online_training_dataset(
     current_project,
-    frame_type: str = "images",
+    frame_type: str = "video",
     train_ratio: float = 0.8,
     val_ratio: float = 0.2,
     *,
@@ -244,6 +292,7 @@ class DataSplitDialog(QDialog):
         layout.addSpacing(20)
 
         self.frame_type_combo = QComboBox()
+        self.frame_type_combo.addItem("video")
         self.frame_type_combo.addItem("images")
         self.frame_type_combo.addItem("davis")
         self.frame_type_combo.addItem("contour")
@@ -281,6 +330,8 @@ class DataSplitDialog(QDialog):
             frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_stem, frame_type)
             label_dir = Path(current_project.project_dir) / "labels" / video_stem / "txt"
             frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
+            if frame_type == "video" and frame_cnt == 0:
+                frame_cnt = _count_video_frames(video_path)
             label_cnt = sum(1 for _ in label_dir.glob("*.txt"))
 
             row_lay = QHBoxLayout()

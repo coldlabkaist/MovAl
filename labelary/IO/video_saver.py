@@ -249,7 +249,9 @@ def _export_video_stub(parent: QWidget) -> None:
     video_name = Path(parent.video_combo.currentText()).stem
     mode_text = parent.mode_combo.currentText() if hasattr(parent, "mode_combo") else "images"
 
-    if mode_text == "images":
+    if mode_text == "video":
+        mode_subdir = "images"
+    elif mode_text == "images":
         mode_subdir = "images"
     elif mode_text == "davis":
         mode_subdir = "visualization/davis"

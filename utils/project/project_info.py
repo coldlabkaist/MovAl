@@ -11,7 +11,7 @@ from utils.skeleton.skeleton_model import SkeletonModel
 
 PROJECT_FILENAME = "project.json"
 LEGACY_PROJECT_FILENAMES = ("config.yaml", "config.yml")
-FRAME_MODES = {"images", "davis", "contour"}
+FRAME_MODES = {"video", "images", "davis", "contour"}
 IMAGE_FILE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 PROJECT_SKELETON_DIRNAME = "skeleton"
 PROJECT_SKELETON_FILENAME = "project_skeleton.yaml"
@@ -52,7 +52,7 @@ def _load_document(path: Path) -> dict[str, Any]:
 def _normalize_frame_mode(mode: str | None) -> str:
     if mode in FRAME_MODES:
         return mode
-    return "davis"
+    return "video"
 
 
 def _is_inside(parent: Path, child: Path) -> bool:

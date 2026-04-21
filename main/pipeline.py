@@ -15,6 +15,7 @@ class PipelineController:
         self.main_window_load_project = None
         self.parent = None
         self._pose_dialog = None
+        self._labelary_dialog = None
 
     def run_installation(self):
         dialog = MainInstallDialog(self.parent) 
@@ -39,7 +40,15 @@ class PipelineController:
         if self.current_project == None:
             QMessageBox.warning(None, "Project not found", "Please Select a Project")
             return
-        run_labelary_with_project(self.current_project, self.parent)
+        if self._labelary_dialog is not None and self._labelary_dialog.isVisible():
+            self._labelary_dialog.raise_()
+            self._labelary_dialog.activateWindow()
+            return
+
+        dialog = run_labelary_with_project(self.current_project, self.parent)
+        self._labelary_dialog = dialog
+        if self._labelary_dialog is not None:
+            self._labelary_dialog.destroyed.connect(self._on_labelary_dialog_destroyed)
 
     def run_pose_estimation(self):
         if self.current_project == None:
@@ -68,3 +77,6 @@ class PipelineController:
 
     def _on_pose_dialog_destroyed(self, *args):
         self._pose_dialog = None
+
+    def _on_labelary_dialog_destroyed(self, *args):
+        self._labelary_dialog = None

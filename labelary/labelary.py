@@ -34,6 +34,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.auto_label_model_mode: Optional[str] = None
         self.mini_training_thread: Optional[TrainThread] = None
         self.mini_training_run_context: Optional[dict] = None
+        self._suppress_mini_training_feedback = False
         self.load_skeleton_model()
         self.load_video_combo()
         self.load_mode_combo()
@@ -663,8 +664,24 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def on_mini_training_finished(self):
         context = self.mini_training_run_context or {}
+        thread = self.mini_training_thread
+        was_stopped = bool(thread and thread.was_stopped)
         self.mini_training_thread = None
         self._refresh_mini_training_button_state()
+
+        if was_stopped:
+            if not self._suppress_mini_training_feedback:
+                QMessageBox.information(
+                    self,
+                    "Mini training stopped",
+                    "Mini training was stopped before completion.",
+                )
+            self._suppress_mini_training_feedback = False
+            return
+
+        if self._suppress_mini_training_feedback:
+            self._suppress_mini_training_feedback = False
+            return
 
         best_model_path = Path(context.get("output_dir", "")) / "weights" / "best.pt"
         if not best_model_path.exists():
@@ -803,11 +820,41 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         ]
 
     def closeEvent(self, event) -> None:
+        if self.mini_training_thread is not None and self.mini_training_thread.isRunning():
+            thread = self.mini_training_thread
+            reply = QMessageBox.question(
+                self,
+                "Mini training in progress",
+                "Mini training is currently running.\n\n"
+                "Stop training and close Labelary?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
+            self._suppress_mini_training_feedback = True
+            thread.stop()
+            thread.wait(5000)
+            if thread.isRunning():
+                self._suppress_mini_training_feedback = False
+                QMessageBox.warning(
+                    self,
+                    "Stop failed",
+                    "Mini training is still running, so Labelary cannot be closed yet.",
+                )
+                event.ignore()
+                return
+
         self._persist_ui_state(include_frame=True)
         super().closeEvent(event)
 
 def run_labelary_with_project(current_project, parent=None):
     app = QApplication.instance() or QApplication(sys.argv)
     dlg = LabelaryDialog(current_project, parent) 
-    dlg.exec()  
-    return 
+    dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+    dlg.show()
+    dlg.raise_()
+    dlg.activateWindow()
+    return dlg

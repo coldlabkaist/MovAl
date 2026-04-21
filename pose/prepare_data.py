@@ -8,7 +8,7 @@ from pathlib import Path
 
 import cv2
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from pose.task_state import pose_execution_state
 
 ONLINE_DATASET_ROOT = "online_datasets"
 
@@ -131,7 +132,11 @@ def create_dataset_split(
     clear_existing: bool = True,
     seed: int | None = None,
     label_dirs: dict[str, Path] | None = None,
+    progress_callback=None,
 ) -> dict[str, int]:
+    if progress_callback is not None:
+        progress_callback(0, 0, "Collecting label-image pairs...")
+
     dataset_dir = Path(dataset_dir)
     pair_list = _collect_label_image_pairs(
         current_project,
@@ -141,6 +146,10 @@ def create_dataset_split(
     )
     if not pair_list:
         raise ValueError("Could not find label-image pair.")
+
+    total_pairs = len(pair_list)
+    if progress_callback is not None:
+        progress_callback(0, total_pairs, "Copying split files...")
 
     if dataset_dir.exists() and clear_existing:
         shutil.rmtree(dataset_dir)
@@ -190,13 +199,23 @@ def create_dataset_split(
             "test": shuffled_pairs[val_end:],
         }
 
+    copied_pairs = 0
     for split, pairs in split_map.items():
         img_dst_root = dataset_dir / split / "images"
         lbl_dst_root = dataset_dir / split / "labels"
         for lbl_path, img_path, base in pairs:
             shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
             shutil.copy(img_path, img_dst_root / f"{base}{img_path.suffix.lower()}")
+            copied_pairs += 1
+            if progress_callback is not None:
+                progress_callback(
+                    copied_pairs,
+                    total_pairs,
+                    f"Copying {split} split ({copied_pairs}/{total_pairs})",
+                )
 
+    if progress_callback is not None:
+        progress_callback(total_pairs, total_pairs, "Dataset split complete")
     return {split: len(pairs) for split, pairs in split_map.items()}
 
 
@@ -236,6 +255,7 @@ class DataSplitDialog(QDialog):
 
         self.current_project = current_project
         self.files = current_project.files
+        self.split_worker = None
 
         layout = QVBoxLayout(self)
         scroll = QScrollArea()
@@ -404,29 +424,54 @@ class DataSplitDialog(QDialog):
         return hlayout
 
     def run_split(self):
+        if self.split_worker is not None and self.split_worker.isRunning():
+            return
+
         selected_entries = self.get_selected_entries()
         if not selected_entries:
             QMessageBox.warning(self, "Error", "First, select a video file.")
             return
 
-        dataset_dir = Path(self.current_project.project_dir) / "runs" / "dataset"
-        try:
-            split_counts = create_dataset_split(
-                self.current_project,
-                selected_entries,
-                self.frame_type_combo.currentText(),
-                dataset_dir,
-                train_ratio=self.train_spin.value() / 100.0,
-                val_ratio=self.valid_spin.value() / 100.0,
-                clear_existing=True,
+        if pose_execution_state.is_busy():
+            running = pose_execution_state.active_task() or "pose task"
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                f"Another pose task is running ({running}).\n"
+                "Please wait until it finishes.",
             )
-        except ValueError as e:
-            QMessageBox.warning(self, "Error", str(e))
-            return
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create dataset split:\n{e}")
             return
 
+        if not pose_execution_state.acquire("data preparation", owner=self):
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                "Another pose task is running. Please try again later.",
+            )
+            return
+
+        pose_execution_state.update_progress(0, 0, "Preparing training dataset...")
+        self.run_btn.setEnabled(False)
+
+        dataset_dir = Path(self.current_project.project_dir) / "runs" / "dataset"
+        self.split_worker = DataSplitWorker(
+            current_project=self.current_project,
+            selected_entries=selected_entries,
+            frame_type=self.frame_type_combo.currentText(),
+            dataset_dir=dataset_dir,
+            train_ratio=self.train_spin.value() / 100.0,
+            val_ratio=self.valid_spin.value() / 100.0,
+        )
+        self.split_worker.progress.connect(self._on_split_progress)
+        self.split_worker.success.connect(self._on_split_success)
+        self.split_worker.failure.connect(self._on_split_failure)
+        self.split_worker.finished.connect(self._on_split_finished)
+        self.split_worker.start()
+
+    def _on_split_progress(self, done: int, total: int, message: str):
+        pose_execution_state.update_progress(done, total, message)
+
+    def _on_split_success(self, split_counts: dict):
         QMessageBox.information(
             self,
             "Success",
@@ -435,3 +480,70 @@ class DataSplitDialog(QDialog):
              f"Val:   {split_counts['val']}\n"
              f"Test:  {split_counts['test']}")
         )
+
+    def _on_split_failure(self, error_text: str):
+        if error_text.startswith("ValueError: "):
+            QMessageBox.warning(self, "Error", error_text[len("ValueError: "):])
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to create dataset split:\n{error_text}")
+
+    def _on_split_finished(self):
+        pose_execution_state.release(owner=self)
+        self.run_btn.setEnabled(True)
+        self.split_worker = None
+
+    def closeEvent(self, event):
+        if self.split_worker is not None and self.split_worker.isRunning():
+            QMessageBox.information(
+                self,
+                "Data preparation in progress",
+                "Data preparation is still running.\n"
+                "Please close this dialog after it finishes.",
+            )
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+
+class DataSplitWorker(QThread):
+    progress = pyqtSignal(int, int, str)
+    success = pyqtSignal(dict)
+    failure = pyqtSignal(str)
+
+    def __init__(
+        self,
+        current_project,
+        selected_entries,
+        frame_type: str,
+        dataset_dir: Path,
+        train_ratio: float,
+        val_ratio: float,
+    ):
+        super().__init__()
+        self.current_project = current_project
+        self.selected_entries = list(selected_entries)
+        self.frame_type = frame_type
+        self.dataset_dir = Path(dataset_dir)
+        self.train_ratio = float(train_ratio)
+        self.val_ratio = float(val_ratio)
+
+    def run(self):
+        try:
+            split_counts = create_dataset_split(
+                self.current_project,
+                self.selected_entries,
+                self.frame_type,
+                self.dataset_dir,
+                train_ratio=self.train_ratio,
+                val_ratio=self.val_ratio,
+                clear_existing=True,
+                progress_callback=self._report_progress,
+            )
+            self.success.emit(split_counts)
+        except ValueError as err:
+            self.failure.emit(f"ValueError: {err}")
+        except Exception as err:
+            self.failure.emit(str(err))
+
+    def _report_progress(self, done: int, total: int, message: str):
+        self.progress.emit(int(done), int(total), str(message))

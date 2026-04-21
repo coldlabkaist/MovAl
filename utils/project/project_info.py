@@ -315,6 +315,27 @@ class ProjectInformation:
     def _from_json(cls, config_path: Path, data: dict[str, Any]) -> "ProjectInformation":
         project_dir = config_path.parent.resolve()
         skeleton_name = Path(data.get("skeleton", "")).name
+        raw_skeleton_data = data.get("skeleton_data")
+        if raw_skeleton_data is not None:
+            skeleton_data = _normalize_skeleton_data(raw_skeleton_data)
+        else:
+            skeleton_data = None
+            if skeleton_name:
+                try:
+                    skeleton_data = _normalize_skeleton_data(
+                        _load_skeleton_data_from_name(skeleton_name)
+                    )
+                except FileNotFoundError:
+                    skeleton_data = None
+
+            if skeleton_data is None:
+                project_skeleton_path = (
+                    project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME
+                )
+                try:
+                    skeleton_data = _normalize_skeleton_data(_read_yaml_file(project_skeleton_path))
+                except Exception:
+                    skeleton_data = {"nodes": [], "connections": [], "symmetry": []}
         project = cls(
             moval_version=str(data.get("moval_version", "")),
             project_dir=project_dir.as_posix(),
@@ -324,9 +345,7 @@ class ProjectInformation:
             animals_name=list(data.get("animals_name", [])),
             skeleton_name=skeleton_name,
             skeleton_yaml=project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
-            skeleton_data=_normalize_skeleton_data(
-                data.get("skeleton_data", _load_skeleton_data_from_name(skeleton_name))
-            ),
+            skeleton_data=skeleton_data,
             video_records=[
                 VideoRecord.from_dict(item)
                 for item in data.get("videos", [])
@@ -344,6 +363,13 @@ class ProjectInformation:
     def _from_legacy_yaml(cls, config_path: Path, data: dict[str, Any]) -> "ProjectInformation":
         project_dir = config_path.parent.resolve()
         skeleton_name = Path(data.get("skeleton", "")).name
+        if skeleton_name:
+            try:
+                skeleton_data = _normalize_skeleton_data(_load_skeleton_data_from_name(skeleton_name))
+            except FileNotFoundError:
+                skeleton_data = {"nodes": [], "connections": [], "symmetry": []}
+        else:
+            skeleton_data = {"nodes": [], "connections": [], "symmetry": []}
         video_records: list[VideoRecord] = []
         for item in data.get("files", []):
             if not isinstance(item, dict):
@@ -361,7 +387,7 @@ class ProjectInformation:
             animals_name=list(data.get("animals_name", [])),
             skeleton_name=skeleton_name,
             skeleton_yaml=project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
-            skeleton_data=_load_skeleton_data_from_name(skeleton_name),
+            skeleton_data=skeleton_data,
             video_records=video_records,
             ui_state=data.get("ui_state", {}) or {},
             schema_version=2,

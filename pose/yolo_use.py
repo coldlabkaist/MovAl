@@ -10,6 +10,9 @@ from .thread import TrainThread, InferenceThread
 import sys
 from datetime import datetime
 from pathlib import Path
+import re
+import pandas as pd
+from utils.skeleton.skeleton_model import SkeletonModel
 
 class BrowseOnlyLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -245,6 +248,8 @@ class YoloInferenceDialog(QDialog):
         super().__init__(parent)
         self.current_project = current_project
         self.animals_name = current_project.animals_name
+        self.command_queue = []
+        self.current_run_item = None
         self.build_ui()
 
     def build_ui(self):
@@ -263,10 +268,7 @@ class YoloInferenceDialog(QDialog):
             {"imgsz": 640, "conf": 0.5, "iou": 0.7,
              "augment": False, "half": False, "device": "None"}
         )
-        self.visualization_group = self.create_params_group(
-            "Visualization",
-            {"show": False, "save": False, "save_txt": True}
-        )
+        self.visualization_group = self.build_visualization_group()
 
         self.grid.addWidget(self.video_group, 0, 0)
         self.grid.addWidget(self.target_group, 0, 1)
@@ -413,6 +415,24 @@ class YoloInferenceDialog(QDialog):
         form.addRow(scroll)
         return group
 
+    def build_visualization_group(self):
+        group = QGroupBox("Visualization")
+        form = QFormLayout(group)
+
+        self.show_tracking_checkbox = QCheckBox(checked=False)
+        self.save_media_checkbox = QCheckBox(checked=False)
+        self.save_txt_checkbox = QCheckBox(checked=True)
+        self.convert_txt_to_csv_checkbox = QCheckBox(checked=True)
+
+        form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
+        form.addRow(QLabel("save image/video"), self.save_media_checkbox)
+        form.addRow(QLabel("save txt"), self.save_txt_checkbox)
+        form.addRow(QLabel("convert txt to csv"), self.convert_txt_to_csv_checkbox)
+
+        self.save_txt_checkbox.toggled.connect(self._update_visualization_option_states)
+        self._update_visualization_option_states()
+        return group
+
     def create_params_group(self, title, params: dict):
         group = QGroupBox(title)
         form  = QFormLayout(group)
@@ -461,6 +481,8 @@ class YoloInferenceDialog(QDialog):
         else:
             self.image_section.hide()
             self.video_section.show()
+
+        self._update_visualization_option_states()
 
         if getattr(self, "_source_mode_ready", False):
             if self.video_radio.isChecked():
@@ -541,10 +563,24 @@ class YoloInferenceDialog(QDialog):
         max_det = len(classes)
         return classes, max_det
 
+    def _update_visualization_option_states(self):
+        if hasattr(self, "show_tracking_checkbox"):
+            if self.image_radio.isChecked():
+                self.show_tracking_checkbox.setChecked(False)
+                self.show_tracking_checkbox.setEnabled(False)
+            else:
+                self.show_tracking_checkbox.setEnabled(True)
+
+        if hasattr(self, "save_txt_checkbox") and hasattr(self, "convert_txt_to_csv_checkbox"):
+            if self.save_txt_checkbox.isChecked():
+                self.convert_txt_to_csv_checkbox.setEnabled(True)
+            else:
+                self.convert_txt_to_csv_checkbox.setChecked(False)
+                self.convert_txt_to_csv_checkbox.setEnabled(False)
+
     def run_inference(self):
         model_path = self.model_line_edit.text()
         infer_params = self.get_params_from_group(self.inference_group)
-        vis_params = self.get_params_from_group(self.visualization_group)
         sources = self.get_video_list()
         classes, max_det = self.get_inference_target()
         if not model_path:
@@ -560,7 +596,8 @@ class YoloInferenceDialog(QDialog):
         infer_params["classes"] = classes
         infer_params["max_det"] = max_det
 
-        self.command_queue = [] 
+        self.command_queue = []
+        self.current_run_item = None
 
         ts = datetime.now()
         ts_date = ts.strftime("%y%m%d")
@@ -606,23 +643,163 @@ class YoloInferenceDialog(QDialog):
                 else:
                     cmd.append(f"{k}={v}")
 
-            for k in ["show", "save", "save_txt"]:
-                if vis_params.get(k, False):
-                    cmd.append(f"{k}=True")
+            if self.show_tracking_checkbox.isChecked():
+                cmd.append("show=True")
+            if self.save_media_checkbox.isChecked():
+                cmd.append("save=True")
+            if self.save_txt_checkbox.isChecked():
+                cmd.append("save_txt=True")
 
-            self.command_queue.append(cmd)
+            self.command_queue.append(
+                {
+                    "command": cmd,
+                    "run_name": run_name,
+                }
+            )
 
         self.run_next_command()
 
-    
     def run_next_command(self):
         if not self.command_queue:
             print("All inference tasks completed.")
             return
 
-        command = self.command_queue.pop(0)
-        print("▶Executing:", command)
+        self.current_run_item = self.command_queue.pop(0)
+        command = self.current_run_item["command"]
+        print("Executing:", command)
 
         self.infer_thread = InferenceThread(command)
-        self.infer_thread.finished.connect(self.run_next_command) 
+        self.infer_thread.finished.connect(self._on_inference_command_finished)
         self.infer_thread.start()
+
+    def _on_inference_command_finished(self):
+        run_item = self.current_run_item or {}
+        run_name = run_item.get("run_name")
+        if (
+            run_name
+            and self.save_txt_checkbox.isChecked()
+            and self.convert_txt_to_csv_checkbox.isChecked()
+        ):
+            try:
+                self._convert_txt_result_to_csv(run_name)
+            except Exception as err:
+                QMessageBox.warning(
+                    self,
+                    "TXT to CSV conversion failed",
+                    f"Run: {run_name}\n{err}",
+                )
+        self.current_run_item = None
+        self.run_next_command()
+
+    @staticmethod
+    def _extract_frame_number(filename: str) -> int:
+        match = re.search(r"_(\d+)\.txt$", filename)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"(\d+)\.txt$", filename)
+        return int(match.group(1)) if match else -1
+
+    def _project_kpt_names(self) -> list[str]:
+        skeleton_model = SkeletonModel()
+        skeleton_model.load_from_dict(self.current_project.skeleton_data)
+        _, _, kpt_names = skeleton_model.create_training_config()
+        return list(kpt_names)
+
+    def _convert_txt_result_to_csv(self, run_name: str):
+        run_dir = Path(self.current_project.project_dir) / "predicts" / run_name
+        txt_dir = run_dir / "labels"
+        if not txt_dir.is_dir():
+            return
+
+        txt_files = sorted(
+            txt_dir.glob("*.txt"),
+            key=lambda p: self._extract_frame_number(p.name),
+        )
+        if not txt_files:
+            return
+
+        kpt_names = self._project_kpt_names()
+        if not kpt_names:
+            return
+
+        rows = []
+        has_instance_id = False
+
+        for idx, txt_path in enumerate(txt_files):
+            with txt_path.open("r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            detections = []
+            for line in lines:
+                items = line.strip().split()
+                if len(items) < 6:
+                    continue
+                try:
+                    track_id = int(float(items[0]))
+                except Exception:
+                    continue
+                raw = items[5:]
+
+                if len(raw) % 3 == 1:
+                    try:
+                        instance_id = int(float(raw[-1]))
+                        kpt_data = list(map(float, raw[:-1]))
+                        has_instance_id = True
+                    except Exception:
+                        continue
+                else:
+                    instance_id = None
+                    try:
+                        kpt_data = list(map(float, raw))
+                    except Exception:
+                        continue
+
+                remapped_id = instance_id if instance_id is not None else ""
+                detections.append((track_id, remapped_id, kpt_data))
+
+            frame_num = self._extract_frame_number(txt_path.name)
+            if frame_num < 0:
+                frame_num = idx + 1
+
+            track_data = {}
+            for track_id, remapped_id, kpt_data in detections:
+                key = (track_id, remapped_id if remapped_id != "" else None)
+                if key not in track_data:
+                    track_data[key] = (kpt_data, remapped_id)
+                    continue
+                prev, rid = track_data[key]
+                for kp in range(min(len(kpt_names), len(prev) // 3, len(kpt_data) // 3)):
+                    if kpt_data[kp * 3 + 2] > prev[kp * 3 + 2]:
+                        prev[kp * 3:kp * 3 + 3] = kpt_data[kp * 3:kp * 3 + 3]
+                track_data[key] = (prev, rid)
+
+            for (track_id, _), (kpt_data, remapped_id) in track_data.items():
+                track_name = (
+                    self.animals_name[track_id]
+                    if 0 <= track_id < len(self.animals_name)
+                    else f"track_{track_id}"
+                )
+                row = [track_name, frame_num, 0.9]
+                for kp in range(len(kpt_names)):
+                    base = kp * 3
+                    if base + 2 < len(kpt_data):
+                        x, y, conf = kpt_data[base:base + 3]
+                    else:
+                        x, y, conf = 0.0, 0.0, 0.0
+                    row.extend([x, y, conf])
+                if has_instance_id:
+                    row.append(remapped_id)
+                rows.append(row)
+
+        if not rows:
+            return
+
+        columns = ["track", "frame_idx", "instance.score"]
+        for name in kpt_names:
+            columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
+        if has_instance_id:
+            columns.append("instance.id")
+
+        df = pd.DataFrame(rows, columns=columns)
+        csv_path = run_dir / "inference_result.csv"
+        df.to_csv(csv_path, index=False)

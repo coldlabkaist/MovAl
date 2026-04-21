@@ -1103,6 +1103,12 @@ class ProjectManagerDialog(QDialog):
             loaded_project = ProjectInformation.from_path(path)
             if not self._handle_legacy_project_conversion(loaded_project):
                 return
+            parent_ensure = getattr(self.parent(), "_ensure_project_has_skeleton", None)
+            if callable(parent_ensure):
+                if not parent_ensure(loaded_project):
+                    return
+            elif not self._ensure_project_has_skeleton(loaded_project):
+                return
 
         self.set_current_project(loaded_project)
 
@@ -1149,6 +1155,87 @@ class ProjectManagerDialog(QDialog):
                     f"Could not delete legacy YAML:\n{legacy_path}\n\n{err}",
                 )
         return True
+
+    @staticmethod
+    def _project_has_skeleton_nodes(project: ProjectInformation) -> bool:
+        data = project.skeleton_data or {}
+        nodes = data.get("nodes", []) if isinstance(data, dict) else []
+        return isinstance(nodes, list) and len(nodes) > 0
+
+    def _ensure_project_has_skeleton(self, project: ProjectInformation) -> bool:
+        if self._project_has_skeleton_nodes(project):
+            return True
+
+        while not self._project_has_skeleton_nodes(project):
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("Skeleton required")
+            msg_box.setText(
+                "This project has no valid skeleton.\n\n"
+                "Please match a skeleton preset or draw a new skeleton before loading."
+            )
+            preset_btn = msg_box.addButton("Match From Preset...", QMessageBox.ButtonRole.AcceptRole)
+            draw_btn = msg_box.addButton("Draw/Edit Skeleton...", QMessageBox.ButtonRole.ActionRole)
+            cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
+            msg_box.setDefaultButton(preset_btn)
+            msg_box.exec()
+            clicked = msg_box.clickedButton()
+
+            if clicked == cancel_btn:
+                return False
+            if clicked == preset_btn:
+                self._apply_skeleton_preset_to_project(project)
+                continue
+            if clicked == draw_btn:
+                self._draw_project_skeleton(project)
+                continue
+            return False
+        return True
+
+    def _apply_skeleton_preset_to_project(self, project: ProjectInformation) -> None:
+        preset_dir = REPO_ROOT / "preset" / "skeleton"
+        preset_dir.mkdir(parents=True, exist_ok=True)
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select skeleton preset YAML",
+            str(preset_dir),
+            "YAML files (*.yaml *.yml);;All Files (*)",
+        )
+        if not selected_path:
+            return
+
+        try:
+            model = SkeletonModel()
+            model.load_from_yaml(selected_path)
+            model_dict = model.to_dict()
+            if not model_dict.get("nodes"):
+                raise ValueError("Selected preset has no keypoints.")
+            project.set_skeleton_data(
+                model_dict,
+                skeleton_name=Path(selected_path).name,
+                save=True,
+            )
+        except Exception as err:
+            QMessageBox.critical(
+                self,
+                "Skeleton preset failed",
+                f"Failed to apply selected preset:\n{err}",
+            )
+
+    def _draw_project_skeleton(self, project: ProjectInformation) -> None:
+        def save_callback(model: SkeletonModel, _structure_edit_unlocked: bool) -> None:
+            model_dict = model.to_dict()
+            if not model_dict.get("nodes"):
+                raise ValueError("Add at least one keypoint before saving.")
+            project.set_skeleton_data(model_dict, save=True)
+
+        dialog = SkeletonManagerDialog(
+            self,
+            project=project,
+            allow_structure_edit=True,
+            save_callback=save_callback,
+        )
+        dialog.exec()
 
     def set_current_project(self, project: Optional[ProjectInformation]) -> None:
         self.current_project = project

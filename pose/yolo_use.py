@@ -1,14 +1,12 @@
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QSizePolicy, QGridLayout,
-    QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
-    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QListWidgetItem, QFrame, QButtonGroup, QProgressBar
+    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QGridLayout,
+    QDialog, QLineEdit, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QFrame
 )
 from PyQt6.QtCore import Qt
-import subprocess
 import os
 from .thread import TrainThread, InferenceThread
 from .task_state import pose_execution_state
-import sys
 from datetime import datetime
 from pathlib import Path
 import re
@@ -47,6 +45,7 @@ class YOLODialog(QDialog):
 
         self.current_project = current_project
         self.train_thread = None
+        self._training_running = False
 
         main_layout = QVBoxLayout(self)
 
@@ -91,8 +90,8 @@ class YOLODialog(QDialog):
         middle_layout.addLayout(right_layout, 1)
         main_layout.addLayout(middle_layout)
 
-        self.run_btn = QPushButton("Run Train")
-        self.run_btn.clicked.connect(self.run_train)
+        self.run_btn = QPushButton("Run Training")
+        self.run_btn.clicked.connect(self._on_run_button_clicked)
         self.run_btn.setFixedHeight(30)
         main_layout.addWidget(self.run_btn)
 
@@ -101,6 +100,32 @@ class YOLODialog(QDialog):
             pose_execution_state.is_busy(),
             pose_execution_state.active_task() or "",
         )
+
+    def _on_run_button_clicked(self):
+        if self._is_training_running():
+            self._stop_training()
+            return
+        self.run_train()
+
+    def _is_training_running(self) -> bool:
+        return self._training_running or (self.train_thread is not None and self.train_thread.isRunning())
+
+    def _set_training_parameter_controls_enabled(self, enabled: bool):
+        widgets = [self.model_combo, self.size_combo]
+        for box in self.findChildren(QGroupBox):
+            widgets.append(box)
+        for widget in widgets:
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _stop_training(self):
+        if not self._is_training_running():
+            return
+        print("[Training] Stop requested by user.", flush=True)
+        self.run_btn.setEnabled(False)
+        self.run_btn.setText("Stopping training...")
+        if self.train_thread is not None:
+            self.train_thread.stop()
 
     def create_group_box(self, title, params):
         group = QGroupBox(title)
@@ -149,13 +174,16 @@ class YOLODialog(QDialog):
         import os
 
         if pose_execution_state.is_busy():
-            running = pose_execution_state.active_task() or "pose task"
-            QMessageBox.information(
-                self,
-                "Pose task already running",
-                f"Another pose task is running ({running}).\n"
-                "Please wait until it finishes.",
-            )
+            running = (pose_execution_state.active_task() or "pose task").lower()
+            if running == "training":
+                QMessageBox.information(self, "Training in progress", "Training is already running.")
+            else:
+                QMessageBox.information(
+                    self,
+                    "Pose task already running",
+                    f"Another pose task is running ({running}).\n"
+                    "Please wait until it finishes.",
+                )
             return
 
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -264,44 +292,56 @@ class YOLODialog(QDialog):
             return
 
         pose_execution_state.update_progress(0, 0, "Training running...")
+        self._training_running = True
         self.train_thread = TrainThread(command)
         self.train_thread.finished_signal.connect(self._on_train_finished)
-        self._on_pose_task_busy_changed(True, "training")
+        self._set_training_parameter_controls_enabled(False)
         self.train_thread.start()
+        self._on_pose_task_busy_changed(True, "training")
 
     def _on_train_finished(self):
+        was_stopped = self.train_thread.was_stopped if self.train_thread is not None else False
         pose_execution_state.release(owner=self)
         self.train_thread = None
+        self._training_running = False
+        self._set_training_parameter_controls_enabled(True)
         self._on_pose_task_busy_changed(
             pose_execution_state.is_busy(),
             pose_execution_state.active_task() or "",
         )
-        QMessageBox.information(self, "Done", "Training Completed")
+        if was_stopped:
+            print("[Training] Stopped.", flush=True)
+            QMessageBox.information(self, "Stopped", "Training stopped.")
+        else:
+            print("[Training] Completed.", flush=True)
+            QMessageBox.information(self, "Done", "Training Completed")
 
     def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
         if not hasattr(self, "run_btn"):
             return
 
-        if self.train_thread is not None and self.train_thread.isRunning():
-            self.run_btn.setEnabled(False)
-            self.run_btn.setText("Training...")
+        if self._is_training_running():
+            self._set_training_parameter_controls_enabled(False)
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Stop Training")
             return
 
+        active = (task_name or "").lower()
         if busy:
+            self._set_training_parameter_controls_enabled(False)
             self.run_btn.setEnabled(False)
-            self.run_btn.setText(f"Run Train (Busy: {task_name})")
+            if active == "inference":
+                self.run_btn.setText("Run Training (Disabled during inference)")
+            else:
+                self.run_btn.setText("Run Training")
         else:
+            self._set_training_parameter_controls_enabled(True)
             self.run_btn.setEnabled(True)
-            self.run_btn.setText("Run Train")
+            self.run_btn.setText("Run Training")
 
     def closeEvent(self, event):
-        if self.train_thread is not None and self.train_thread.isRunning():
-            QMessageBox.information(
-                self,
-                "Training in progress",
-                "Training is still running.\n"
-                "Close the dialog after it finishes.",
-            )
+        if self._is_training_running():
+            self.hide()
             event.ignore()
             return
         super().closeEvent(event)
@@ -315,11 +355,9 @@ class YoloInferenceDialog(QDialog):
         self.current_run_item = None
         self.infer_thread = None
         self._inference_running = False
+        self._stop_requested = False
         self._completed_commands = 0
         self._total_commands = 0
-        self._progress_dialog = None
-        self._progress_label = None
-        self._progress_bar = None
         self.build_ui()
         pose_execution_state.busy_changed.connect(self._on_pose_task_busy_changed)
         self._on_pose_task_busy_changed(
@@ -356,9 +394,15 @@ class YoloInferenceDialog(QDialog):
         self.grid.setColumnStretch(1, 1)
 
         main_layout.addLayout(self.grid)
-        self.run_btn = QPushButton("Run", clicked=self.run_inference)
+        self.run_btn = QPushButton("Run Inference", clicked=self._on_run_button_clicked)
         self.run_btn.setFixedHeight(30)
         main_layout.addWidget(self.run_btn)
+
+    def _on_run_button_clicked(self):
+        if self._inference_running:
+            self._stop_inference()
+            return
+        self.run_inference()
 
     def build_model_row(self):
         row = QHBoxLayout()
@@ -655,13 +699,16 @@ class YoloInferenceDialog(QDialog):
 
     def run_inference(self):
         if pose_execution_state.is_busy():
-            running = pose_execution_state.active_task() or "pose task"
-            QMessageBox.information(
-                self,
-                "Pose task already running",
-                f"Another pose task is running ({running}).\n"
-                "Please wait until it finishes.",
-            )
+            running = (pose_execution_state.active_task() or "pose task").lower()
+            if running != "inference":
+                QMessageBox.information(
+                    self,
+                    "Pose task already running",
+                    f"Another pose task is running ({running}).\n"
+                    "Please wait until it finishes.",
+                )
+            else:
+                QMessageBox.information(self, "Inference in progress", "Inference is already running.")
             return
 
         model_path = self.model_line_edit.text()
@@ -756,10 +803,11 @@ class YoloInferenceDialog(QDialog):
             return
 
         self._inference_running = True
+        self._stop_requested = False
         self._completed_commands = 0
         self._total_commands = len(self.command_queue)
-        self._set_inference_ui_enabled(False)
-        self._show_progress_dialog()
+        self._set_inference_config_controls_enabled(False)
+        self._on_pose_task_busy_changed(True, "inference")
         pose_execution_state.update_progress(
             self._completed_commands,
             self._total_commands,
@@ -777,6 +825,11 @@ class YoloInferenceDialog(QDialog):
             )
 
     def run_next_command(self):
+        if self._stop_requested:
+            self.command_queue.clear()
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+
         if not self.command_queue:
             print("All inference tasks completed.")
             self._finish_inference_run()
@@ -785,7 +838,6 @@ class YoloInferenceDialog(QDialog):
         self.current_run_item = self.command_queue.pop(0)
         command = self.current_run_item["command"]
         source_name = self.current_run_item.get("source_name", "")
-        self._update_progress_dialog(source_name)
         pose_execution_state.update_progress(
             self._completed_commands,
             self._total_commands,
@@ -794,11 +846,20 @@ class YoloInferenceDialog(QDialog):
         print("Executing:", command)
 
         self.infer_thread = InferenceThread(command)
-        self.infer_thread.finished.connect(self._on_inference_command_finished)
+        self.infer_thread.finished_signal.connect(self._on_inference_command_finished)
         self.infer_thread.start()
 
     def _on_inference_command_finished(self):
+        thread = self.infer_thread
         self.infer_thread = None
+
+        if self._stop_requested or (thread is not None and thread.was_stopped):
+            print("[Inference] Stop confirmed. Cleaning up queued tasks.", flush=True)
+            self.command_queue.clear()
+            self.current_run_item = None
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+
         run_item = self.current_run_item or {}
         run_name = run_item.get("run_name")
         if (
@@ -815,7 +876,6 @@ class YoloInferenceDialog(QDialog):
                     f"Run: {run_name}\n{err}",
                 )
         self._completed_commands += 1
-        self._update_progress_dialog("")
         pose_execution_state.update_progress(
             self._completed_commands,
             self._total_commands,
@@ -824,53 +884,7 @@ class YoloInferenceDialog(QDialog):
         self.current_run_item = None
         self.run_next_command()
 
-    def _show_progress_dialog(self):
-        if self._progress_dialog is None:
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Inference Progress")
-            dialog.setModal(False)
-            dialog.setWindowModality(Qt.WindowModality.NonModal)
-            dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
-            dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
-            dialog.setMinimumWidth(420)
-            layout = QVBoxLayout(dialog)
-            self._progress_label = QLabel(dialog)
-            self._progress_bar = QProgressBar(dialog)
-            self._progress_bar.setMinimum(0)
-            layout.addWidget(self._progress_label)
-            layout.addWidget(self._progress_bar)
-            self._progress_dialog = dialog
-
-        self._update_progress_dialog("")
-        self._progress_dialog.show()
-        self._progress_dialog.raise_()
-        self._progress_dialog.activateWindow()
-
-    def _update_progress_dialog(self, source_name: str):
-        if self._progress_dialog is None or self._progress_bar is None or self._progress_label is None:
-            return
-
-        self._progress_bar.setMaximum(max(1, self._total_commands))
-        self._progress_bar.setValue(min(self._completed_commands, self._total_commands))
-
-        if self._inference_running:
-            current_idx = min(self._completed_commands + 1, self._total_commands)
-            if source_name:
-                text = (
-                    f"Inference running... ({current_idx}/{self._total_commands})\n"
-                    f"Source: {source_name}"
-                )
-            else:
-                text = (
-                    f"Inference running... ({current_idx}/{self._total_commands})\n"
-                    "Preparing next source..."
-                )
-        else:
-            text = f"Inference completed ({self._total_commands}/{self._total_commands})"
-
-        self._progress_label.setText(text)
-
-    def _set_inference_ui_enabled(self, enabled: bool):
+    def _set_inference_config_controls_enabled(self, enabled: bool):
         widgets = [
             getattr(self, "model_line_edit", None),
             getattr(self, "model_browse_btn", None),
@@ -881,29 +895,48 @@ class YoloInferenceDialog(QDialog):
             getattr(self, "target_group", None),
             getattr(self, "inference_group", None),
             getattr(self, "visualization_group", None),
-            getattr(self, "run_btn", None),
         ]
         for widget in widgets:
             if widget is not None:
                 widget.setEnabled(enabled)
 
-    def _finish_inference_run(self, success: bool = True):
+    def _stop_inference(self):
+        if not self._inference_running:
+            return
+        print("[Inference] Stop requested by user.", flush=True)
+        self._stop_requested = True
+        self.command_queue.clear()
+        self.run_btn.setEnabled(False)
+        self.run_btn.setText("Stopping inference...")
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            "Stopping inference...",
+        )
+        if self.infer_thread is not None and self.infer_thread.isRunning():
+            self.infer_thread.stop()
+        else:
+            self._finish_inference_run(success=False, cancelled=True)
+
+    def _finish_inference_run(self, success: bool = True, cancelled: bool = False):
         if not self._inference_running:
             return
 
         self._inference_running = False
         self._completed_commands = self._total_commands
-        self._update_progress_dialog("")
-        if self._progress_dialog is not None:
-            self._progress_dialog.close()
+        self._stop_requested = False
 
         pose_execution_state.release(owner=self)
-        self._set_inference_ui_enabled(True)
+        self._set_inference_config_controls_enabled(True)
         self._on_pose_task_busy_changed(
             pose_execution_state.is_busy(),
             pose_execution_state.active_task() or "",
         )
-        if success:
+        if cancelled:
+            print("[Inference] Stopped.", flush=True)
+            QMessageBox.information(self, "Stopped", "Inference stopped.")
+        elif success:
+            print("[Inference] Completed.", flush=True)
             QMessageBox.information(self, "Done", "Inference Completed")
 
     def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
@@ -911,30 +944,29 @@ class YoloInferenceDialog(QDialog):
             return
 
         if self._inference_running:
-            self.run_btn.setEnabled(False)
-            self.run_btn.setText("Run (Running...)")
+            self._set_inference_config_controls_enabled(False)
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Stop Inference")
             return
 
+        active = (task_name or "").lower()
         if busy:
+            self._set_inference_config_controls_enabled(False)
             self.run_btn.setEnabled(False)
-            self.run_btn.setText(f"Run (Busy: {task_name})")
+            if active == "training":
+                self.run_btn.setText("Run Inference (Disabled during training)")
+            else:
+                self.run_btn.setText("Run Inference")
         else:
+            self._set_inference_config_controls_enabled(True)
             self.run_btn.setEnabled(True)
-            self.run_btn.setText("Run")
+            self.run_btn.setText("Run Inference")
 
     def closeEvent(self, event):
         if self._inference_running:
-            QMessageBox.information(
-                self,
-                "Inference in progress",
-                "Inference is still running.\n"
-                "Close the dialog after it finishes.",
-            )
+            self.hide()
             event.ignore()
             return
-        if self._progress_dialog is not None:
-            self._progress_dialog.close()
-            self._progress_dialog = None
         super().closeEvent(event)
 
     @staticmethod

@@ -30,6 +30,11 @@ from pose.task_state import pose_execution_state
 ONLINE_DATASET_ROOT = "online_datasets"
 
 
+def _raise_if_cancelled(should_cancel) -> None:
+    if callable(should_cancel) and should_cancel():
+        raise InterruptedError("Operation cancelled by user.")
+
+
 def _resolve_frame_dir(project_dir: Path, video_name: str, frame_type: str) -> Path:
     if frame_type == "video":
         return project_dir / "frames" / video_name / "images"
@@ -40,7 +45,7 @@ def _resolve_frame_dir(project_dir: Path, video_name: str, frame_type: str) -> P
     raise ValueError(f"Unsupported frame type: {frame_type}")
 
 
-def _extract_video_frames_to_images(video_path: Path, image_dir: Path) -> int:
+def _extract_video_frames_to_images(video_path: Path, image_dir: Path, *, should_cancel=None) -> int:
     image_dir.mkdir(parents=True, exist_ok=True)
 
     cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
@@ -52,6 +57,7 @@ def _extract_video_frames_to_images(video_path: Path, image_dir: Path) -> int:
 
     frame_idx = 0
     while True:
+        _raise_if_cancelled(should_cancel)
         ok, frame = cap.read()
         if not ok or frame is None:
             break
@@ -86,6 +92,8 @@ def _collect_label_image_pairs(
     selected_entries,
     frame_type: str,
     label_dirs: dict[str, Path] | None = None,
+    *,
+    should_cancel=None,
 ) -> list[tuple[Path, Path, str]]:
     project_dir = Path(current_project.project_dir)
     digit_re = re.compile(r"(\d+)$")
@@ -93,6 +101,7 @@ def _collect_label_image_pairs(
     label_dirs = label_dirs or {}
 
     for fe in selected_entries:
+        _raise_if_cancelled(should_cancel)
         video_path = Path(fe.video)
         video_name = video_path.stem
         label_dir = Path(label_dirs.get(video_name, project_dir / "labels" / video_name / "txt"))
@@ -101,9 +110,10 @@ def _collect_label_image_pairs(
 
         img_dir = _resolve_frame_dir(project_dir, video_name, frame_type)
         if frame_type == "video" and not any(img_dir.glob("*.jpg")):
-            _extract_video_frames_to_images(video_path, img_dir)
+            _extract_video_frames_to_images(video_path, img_dir, should_cancel=should_cancel)
 
         for lbl_file in sorted(label_dir.glob("*.txt")):
+            _raise_if_cancelled(should_cancel)
             match = digit_re.search(lbl_file.stem)
             if not match:
                 continue
@@ -133,7 +143,9 @@ def create_dataset_split(
     seed: int | None = None,
     label_dirs: dict[str, Path] | None = None,
     progress_callback=None,
+    should_cancel=None,
 ) -> dict[str, int]:
+    _raise_if_cancelled(should_cancel)
     if progress_callback is not None:
         progress_callback(0, 0, "Collecting label-image pairs...")
 
@@ -143,6 +155,7 @@ def create_dataset_split(
         selected_entries,
         frame_type,
         label_dirs=label_dirs,
+        should_cancel=should_cancel,
     )
     if not pair_list:
         raise ValueError("Could not find label-image pair.")
@@ -151,10 +164,12 @@ def create_dataset_split(
     if progress_callback is not None:
         progress_callback(0, total_pairs, "Copying split files...")
 
+    _raise_if_cancelled(should_cancel)
     if dataset_dir.exists() and clear_existing:
         shutil.rmtree(dataset_dir)
 
     for split in ("train", "val", "test"):
+        _raise_if_cancelled(should_cancel)
         (dataset_dir / split / "images").mkdir(parents=True, exist_ok=True)
         (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
 
@@ -201,9 +216,11 @@ def create_dataset_split(
 
     copied_pairs = 0
     for split, pairs in split_map.items():
+        _raise_if_cancelled(should_cancel)
         img_dst_root = dataset_dir / split / "images"
         lbl_dst_root = dataset_dir / split / "labels"
         for lbl_path, img_path, base in pairs:
+            _raise_if_cancelled(should_cancel)
             shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
             shutil.copy(img_path, img_dst_root / f"{base}{img_path.suffix.lower()}")
             copied_pairs += 1
@@ -243,6 +260,7 @@ def create_online_training_dataset(
         clear_existing=False,
         seed=seed,
         label_dirs=label_dirs,
+        should_cancel=None,
     )
     return dataset_dir, counts
 
@@ -432,25 +450,15 @@ class DataSplitDialog(QDialog):
             QMessageBox.warning(self, "Error", "First, select a video file.")
             return
 
-        if pose_execution_state.is_busy():
-            running = pose_execution_state.active_task() or "pose task"
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task == "training":
             QMessageBox.information(
                 self,
-                "Pose task already running",
-                f"Another pose task is running ({running}).\n"
-                "Please wait until it finishes.",
+                "Training in progress",
+                "Dataset preparation is disabled while training is running.",
             )
             return
 
-        if not pose_execution_state.acquire("data preparation", owner=self):
-            QMessageBox.information(
-                self,
-                "Pose task already running",
-                "Another pose task is running. Please try again later.",
-            )
-            return
-
-        pose_execution_state.update_progress(0, 0, "Preparing training dataset...")
         self.run_btn.setEnabled(False)
 
         dataset_dir = Path(self.current_project.project_dir) / "runs" / "dataset"
@@ -464,12 +472,13 @@ class DataSplitDialog(QDialog):
         )
         self.split_worker.progress.connect(self._on_split_progress)
         self.split_worker.success.connect(self._on_split_success)
+        self.split_worker.cancelled.connect(self._on_split_cancelled)
         self.split_worker.failure.connect(self._on_split_failure)
         self.split_worker.finished.connect(self._on_split_finished)
         self.split_worker.start()
 
     def _on_split_progress(self, done: int, total: int, message: str):
-        pose_execution_state.update_progress(done, total, message)
+        _ = (done, total, message)
 
     def _on_split_success(self, split_counts: dict):
         QMessageBox.information(
@@ -487,27 +496,43 @@ class DataSplitDialog(QDialog):
         else:
             QMessageBox.critical(self, "Error", f"Failed to create dataset split:\n{error_text}")
 
+    def _on_split_cancelled(self):
+        QMessageBox.information(self, "Cancelled", "Data split was cancelled.")
+
     def _on_split_finished(self):
-        pose_execution_state.release(owner=self)
         self.run_btn.setEnabled(True)
         self.split_worker = None
 
     def closeEvent(self, event):
         if self.split_worker is not None and self.split_worker.isRunning():
-            QMessageBox.information(
+            reply = QMessageBox.question(
                 self,
                 "Data preparation in progress",
-                "Data preparation is still running.\n"
-                "Please close this dialog after it finishes.",
+                "Data preparation is running.\n\nStop this task and close the window?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            event.ignore()
-            return
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
+            self.split_worker.request_cancel()
+            self.run_btn.setEnabled(False)
+            if not self.split_worker.wait(4000):
+                QMessageBox.warning(
+                    self,
+                    "Still stopping",
+                    "Cancellation is still in progress. Please try closing again in a moment.",
+                )
+                event.ignore()
+                return
         super().closeEvent(event)
 
 
 class DataSplitWorker(QThread):
     progress = pyqtSignal(int, int, str)
     success = pyqtSignal(dict)
+    cancelled = pyqtSignal()
     failure = pyqtSignal(str)
 
     def __init__(
@@ -526,6 +551,14 @@ class DataSplitWorker(QThread):
         self.dataset_dir = Path(dataset_dir)
         self.train_ratio = float(train_ratio)
         self.val_ratio = float(val_ratio)
+        self._cancel_requested = False
+
+    def request_cancel(self) -> None:
+        self._cancel_requested = True
+        self.requestInterruption()
+
+    def _is_cancel_requested(self) -> bool:
+        return self._cancel_requested or self.isInterruptionRequested()
 
     def run(self):
         try:
@@ -538,8 +571,11 @@ class DataSplitWorker(QThread):
                 val_ratio=self.val_ratio,
                 clear_existing=True,
                 progress_callback=self._report_progress,
+                should_cancel=self._is_cancel_requested,
             )
             self.success.emit(split_counts)
+        except InterruptedError:
+            self.cancelled.emit()
         except ValueError as err:
             self.failure.emit(f"ValueError: {err}")
         except Exception as err:

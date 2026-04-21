@@ -277,16 +277,38 @@ class MainWindow(QMainWindow):
         optional_label = QLabel("Additional Tools")
         optional_label.setStyleSheet("margin-top: 10px;")
         self.button_layout.addWidget(optional_label)
-        self.convert_btn = QPushButton("Data Convert\n(DLC/SLEAP to TXT)")
-        self.convert_btn.setFixedHeight(40)
-        self.convert_btn.setMinimumWidth(180)
-        self.convert_btn.clicked.connect(self.controller.data_convert)
-        self.button_layout.addWidget(self.convert_btn)
-        self.extract_btn = QPushButton("Data Extract\n(TXT to CSV)")
-        self.extract_btn.setFixedHeight(40)
-        self.extract_btn.setMinimumWidth(180)
-        self.extract_btn.clicked.connect(self.controller.data_extract)
-        self.button_layout.addWidget(self.extract_btn)
+        self.additional_tools_btn = QPushButton("Additional Tools")
+        self.additional_tools_btn.setFixedHeight(30)
+        self.additional_tools_btn.setMinimumWidth(180)
+        self.additional_tools_btn.clicked.connect(self._on_additional_tools_clicked)
+        self.button_layout.addWidget(self.additional_tools_btn)
+
+    def _on_additional_tools_clicked(self) -> None:
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setWindowTitle("Select Additional Tool")
+        msg_box.setText("Choose the tool you want to run.")
+        convert_btn = msg_box.addButton(
+            "Data Convert (DLC/SLEAP to TXT)",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        extract_btn = msg_box.addButton(
+            "Data Extract (TXT to CSV)",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(convert_btn)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+
+        if clicked == convert_btn:
+            self.controller.data_convert()
+            return
+        if clicked == extract_btn:
+            self.controller.data_extract()
+            return
+        if clicked == cancel_btn:
+            return
 
     def on_load_project_clicked(
         self,

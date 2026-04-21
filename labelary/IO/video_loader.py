@@ -32,6 +32,7 @@ class VideoLoader:
         self.frame_files = []
         self.video_capture = None
         self.video_source_path: Optional[str] = None
+        self._video_next_frame_idx = 0
         self.current_frame_bgr = None
         self.current_frame = 0
         self.total_frames = 0
@@ -136,6 +137,7 @@ class VideoLoader:
         self.frame_files = []
         self.video_capture = cap
         self.video_source_path = str(path)
+        self._video_next_frame_idx = 1
         self.display_video(frame, max(1, total_frames))
         return True
 
@@ -147,14 +149,17 @@ class VideoLoader:
         except Exception:
             pass
         self.video_capture = None
+        self._video_next_frame_idx = 0
 
     def _read_video_frame(self, frame_idx: int):
         if self.video_capture is None:
             return None
-        self.video_capture.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
+        if int(frame_idx) != int(self._video_next_frame_idx):
+            self.video_capture.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
         ok, frame = self.video_capture.read()
         if not ok:
             return None
+        self._video_next_frame_idx = int(frame_idx) + 1
         return frame
 
     def _ensure_display_mode(self, display_mode):

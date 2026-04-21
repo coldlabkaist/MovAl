@@ -17,6 +17,17 @@ class SkeletonScene(QGraphicsScene):
         self.temp_line_is = None 
         self._suppress_context_menu_once = False
 
+    def _link_selection_allowed(self) -> bool:
+        return self.structure_edit_enabled
+
+    def _pick_item(self, pos, *, allow_links: bool):
+        for item in self.items(pos):
+            if isinstance(item, NodeItem):
+                return item
+            if allow_links and isinstance(item, (EdgeItem, SymItem)):
+                return item
+        return None
+
     def setMode(self, mode):
         self.mode = mode
         for item in self.items():
@@ -24,6 +35,8 @@ class SkeletonScene(QGraphicsScene):
                 movable = ((mode == 'add_node' and self.structure_edit_enabled)
                            or not self.structure_edit_enabled)
                 item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, movable)
+            elif isinstance(item, (EdgeItem, SymItem)):
+                item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, self._link_selection_allowed())
 
     def setStructureEditEnabled(self, enabled: bool):
         self.structure_edit_enabled = enabled
@@ -43,17 +56,18 @@ class SkeletonScene(QGraphicsScene):
         item.setSelected(True)
 
     def mousePressEvent(self, event):
-        item = self.itemAt(event.scenePos(), QTransform())
+        raw_item = self.itemAt(event.scenePos(), QTransform())
+        item = self._pick_item(event.scenePos(), allow_links=self._link_selection_allowed())
         if not self.structure_edit_enabled:
             if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
-                selectable_item = item if isinstance(item, (NodeItem, EdgeItem, SymItem)) else None
+                selectable_item = item if isinstance(item, NodeItem) else None
                 self._select_item(selectable_item, event.modifiers())
             super().mousePressEvent(event)
             return
 
         if event.button() == Qt.MouseButton.LeftButton and self.structure_edit_enabled:
             if self.mode == 'add_node':
-                if item is None:
+                if raw_item is None:
                     node = self.model.add_node()
                     pos    = event.scenePos()
                     
@@ -80,7 +94,7 @@ class SkeletonScene(QGraphicsScene):
                     self.temp_line_is = "Edge"
                     event.accept()
                     return
-                if isinstance(item, EdgeItem):
+                if isinstance(item, (EdgeItem, SymItem)):
                     if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                         self.clearSelection()
                     item.setSelected(True)
@@ -105,7 +119,7 @@ class SkeletonScene(QGraphicsScene):
                     self._suppress_context_menu_once = True
                     event.accept()
                     return
-                if isinstance(item, EdgeItem):
+                if isinstance(item, (EdgeItem, SymItem)):
                     if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                         self.clearSelection()
                     item.setSelected(True)
@@ -125,7 +139,7 @@ class SkeletonScene(QGraphicsScene):
     def mouseReleaseEvent(self, event):
         if self.mode == 'add_edge' and self.temp_edge_start:
             target_node_item = None
-            item = self.itemAt(event.scenePos(), QTransform())
+            item = self._pick_item(event.scenePos(), allow_links=False)
             if isinstance(item, NodeItem) and item is not self.temp_edge_start:
                 target_node_item = item
             else:
@@ -148,6 +162,8 @@ class SkeletonScene(QGraphicsScene):
                     if self.model.add_edge(name1, name2):
                         edge_item = EdgeItem(self.temp_edge_start, target_node_item)
                         self.addItem(edge_item)
+                        if hasattr(self.main_window, "_refresh_link_lists"):
+                            self.main_window._refresh_link_lists()
                 elif self.temp_line_is == "Sym":
                     name1 = self.temp_edge_start.node.name
                     name2 = target_node_item.node.name
@@ -155,6 +171,8 @@ class SkeletonScene(QGraphicsScene):
                         sym_item = SymItem(self.temp_edge_start, target_node_item)
                         sym_item.setZValue(1)
                         self.addItem(sym_item)
+                        if hasattr(self.main_window, "_refresh_link_lists"):
+                            self.main_window._refresh_link_lists()
 
             if self.temp_line:
                 self.removeItem(self.temp_line)
@@ -179,7 +197,7 @@ class SkeletonScene(QGraphicsScene):
             event.accept()
             return
         if not self.selectedItems():
-            item = self.itemAt(event.scenePos(), QTransform())
+            item = self._pick_item(event.scenePos(), allow_links=self._link_selection_allowed())
             selectable_item = item if isinstance(item, (NodeItem, EdgeItem, SymItem)) else None
             if selectable_item is not None:
                 self._select_item(selectable_item, Qt.KeyboardModifier.NoModifier)
@@ -189,12 +207,14 @@ class SkeletonScene(QGraphicsScene):
         menu = QMenu()
         allow_structure_edit = getattr(self.main_window, "allow_structure_edit", lambda: True)()
         rename_act = menu.addAction("Rename node")
-        visual_act = menu.addAction("visuialization option")
+        visual_act = menu.addAction("Visualization option")
         delete_act = menu.addAction("Delete selected")
 
-        sel_cnt = len(self.selectedItems())
-        rename_act.setEnabled(sel_cnt == 1 and allow_structure_edit)
-        visual_act.setEnabled(sel_cnt == 1)
+        selected_items = self.selectedItems()
+        sel_cnt = len(selected_items)
+        single_node_selected = sel_cnt == 1 and isinstance(selected_items[0], NodeItem)
+        rename_act.setEnabled(single_node_selected and allow_structure_edit)
+        visual_act.setEnabled(single_node_selected)
         delete_act.setEnabled(sel_cnt >= 1 and allow_structure_edit)
 
         act = menu.exec(event.screenPos())

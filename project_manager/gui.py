@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -141,7 +142,7 @@ class _CreateProjectTab(QWidget):
         self._generate_instance_fields(self.step1_spin.value())
 
         self.step2_label = QLabel("<b>Step 2.</b> Load videos")
-        self.step2_button = QPushButton("Select Videos...")
+        self.step2_button = QPushButton("Select Videos")
         self.step2_button.clicked.connect(self._on_select_videos)
         self.step2_check = QCheckBox("Copy videos into project raw_videos (Recommended)")
         self.step2_check.setChecked(True)
@@ -434,13 +435,12 @@ class _ManageProjectTab(QWidget):
             "and the project-local skeleton."
         )
         self.description_label.setWordWrap(True)
-        layout.addWidget(self.description_label)
 
         project_row = QHBoxLayout()
-        self.open_project_button = QPushButton("Open Project...")
+        project_row.addWidget(self.description_label, 1)
+        self.open_project_button = QPushButton("Open Project")
         self.open_project_button.clicked.connect(self.dialog.open_project_from_picker)
         project_row.addWidget(self.open_project_button)
-        project_row.addStretch(1)
         layout.addLayout(project_row)
         _set_tooltip(
             self.open_project_button,
@@ -463,7 +463,7 @@ class _ManageProjectTab(QWidget):
         video_controls = QHBoxLayout()
         self.copy_added_videos_check = QCheckBox("Copy newly added videos into project raw_videos")
         self.copy_added_videos_check.setChecked(True)
-        self.add_video_button = QPushButton("Add Videos...")
+        self.add_video_button = QPushButton("Add Videos")
         self.relink_video_button = QPushButton("Relink Source...")
         self.copy_existing_video_button = QPushButton("Copy Into Project")
         self.remove_video_button = QPushButton("Remove Selected Videos")
@@ -504,7 +504,6 @@ class _ManageProjectTab(QWidget):
         header_item.setToolTip(3, "Number of CSV label files in labels/<video>/csv.")
         header_item.setToolTip(4, "Number of TXT label files in labels/<video>/txt.")
         header_item.setToolTip(5, "Resolved video path currently used by MovAl.")
-        layout.addWidget(self.video_tree, 1)
         _set_tooltip(
             self.video_tree,
             "Select one or more videos to remove them, relink an external path, or copy them into the project.",
@@ -514,37 +513,59 @@ class _ManageProjectTab(QWidget):
             "Manage the current project's videos and label files here. Hover the table headers and buttons for details.",
         )
 
+        self.video_csv_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        layout.addWidget(self.video_csv_splitter, 1)
+        video_panel = QWidget(self)
+        video_panel_layout = QVBoxLayout(video_panel)
+        video_panel_layout.setContentsMargins(0, 0, 0, 0)
+        video_panel_layout.addWidget(self.video_tree, 1)
+        self.video_csv_splitter.addWidget(video_panel)
+
+        csv_panel = QWidget(self)
+        csv_panel_layout = QVBoxLayout(csv_panel)
+        csv_panel_layout.setContentsMargins(0, 0, 0, 0)
+
         csv_row = QHBoxLayout()
         csv_row.addWidget(QLabel("Manage CSVs for:"))
         self.csv_video_combo = QComboBox()
         self.csv_video_combo.currentIndexChanged.connect(self.refresh_csv_list)
         csv_row.addWidget(self.csv_video_combo, 1)
-        self.add_csv_button = QPushButton("Add CSV...")
+        self.add_csv_button = QPushButton("Add CSV")
         self.remove_csv_button = QPushButton("Remove Selected CSVs")
         self.add_csv_button.clicked.connect(self._add_csvs)
         self.remove_csv_button.clicked.connect(self._remove_selected_csvs)
         csv_row.addWidget(self.add_csv_button)
         csv_row.addWidget(self.remove_csv_button)
-        layout.addLayout(csv_row)
+        csv_panel_layout.addLayout(csv_row)
 
         self.csv_list = QListWidget()
         self.csv_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        layout.addWidget(self.csv_list)
+        csv_panel_layout.addWidget(self.csv_list, 1)
         _set_tooltip(self.csv_video_combo, "Choose which video's labels/<video>/csv folder you want to manage.")
         _set_tooltip(self.csv_list, "CSV label files currently stored inside this project.")
 
         self.txt_label = QLabel()
         self.txt_label.setWordWrap(True)
-        layout.addWidget(self.txt_label)
+        csv_panel_layout.addWidget(self.txt_label)
         _set_tooltip(
             self.txt_label,
             "Shows the TXT label folder currently linked to the selected video.",
         )
+        self.video_csv_splitter.addWidget(csv_panel)
+        self.video_csv_splitter.setStretchFactor(0, 3)
+        self.video_csv_splitter.setStretchFactor(1, 2)
+        self.video_csv_splitter.setSizes([420, 260])
 
         layout.addWidget(_make_separator(self))
 
+        skeleton_header_row = QHBoxLayout()
         self.skeleton_section_label = QLabel("<b>Skeleton Manager</b>")
-        layout.addWidget(self.skeleton_section_label)
+        skeleton_header_row.addWidget(self.skeleton_section_label)
+        skeleton_header_row.addStretch(1)
+        self.edit_skeleton_button = QPushButton("Edit Project Skeleton")
+        self.edit_skeleton_button.clicked.connect(self._edit_project_skeleton)
+        skeleton_header_row.addWidget(self.edit_skeleton_button)
+        layout.addLayout(skeleton_header_row)
         self.skeleton_info_label = QLabel()
         self.skeleton_info_label.setWordWrap(True)
         layout.addWidget(self.skeleton_info_label)
@@ -556,13 +577,6 @@ class _ManageProjectTab(QWidget):
             self.skeleton_info_label,
             "Shows the base preset name and the current project skeleton summary stored in project.json.",
         )
-
-        skeleton_row = QHBoxLayout()
-        self.edit_skeleton_button = QPushButton("Edit Project Skeleton...")
-        self.edit_skeleton_button.clicked.connect(self._edit_project_skeleton)
-        skeleton_row.addWidget(self.edit_skeleton_button)
-        skeleton_row.addStretch(1)
-        layout.addLayout(skeleton_row)
         _set_tooltip(
             self.edit_skeleton_button,
             "Open the project-local skeleton editor. By default only node visualization can be changed.",
@@ -570,18 +584,18 @@ class _ManageProjectTab(QWidget):
 
         layout.addWidget(_make_separator(self))
 
+        compress_row = QHBoxLayout()
         self.compress_section_label = QLabel("<b>Compress</b>")
-        layout.addWidget(self.compress_section_label)
-        compress_options_row = QHBoxLayout()
+        compress_row.addWidget(self.compress_section_label)
         self.delete_runs_check = QCheckBox("Also delete extra files under runs/")
         self.delete_predicts_check = QCheckBox("Also delete predicts/")
-        compress_options_row.addWidget(self.delete_runs_check)
-        compress_options_row.addWidget(self.delete_predicts_check)
+        compress_row.addWidget(self.delete_runs_check)
+        compress_row.addWidget(self.delete_predicts_check)
         self.compress_button = QPushButton("Compress Project")
         self.compress_button.clicked.connect(self._compress_project)
-        compress_options_row.addStretch(1)
-        compress_options_row.addWidget(self.compress_button)
-        layout.addLayout(compress_options_row)
+        compress_row.addStretch(1)
+        compress_row.addWidget(self.compress_button)
+        layout.addLayout(compress_row)
         _set_tooltip(
             self.compress_section_label,
             "Removes large generated assets while keeping masks, videos, labels, and config files. runs/dataset is always deleted.",
@@ -661,7 +675,7 @@ class _ManageProjectTab(QWidget):
             self.csv_video_combo.clear()
             self.info_label.setText(
                 "No project is connected yet.<br>"
-                "Use <b>Open Project...</b> to choose an existing project."
+                "Use <b>Open Project</b> to choose an existing project."
             )
             self.txt_label.setText("No project selected.")
             self.skeleton_info_label.setText("No project skeleton loaded.")
@@ -733,7 +747,7 @@ class _ManageProjectTab(QWidget):
         txt_dir = self.project.txt_dir(video_name)
         txt_count = sum(1 for _ in txt_dir.glob("*.txt")) if txt_dir.exists() else 0
         self.txt_label.setText(
-            f"TXT folder for '{entry.file_name or video_name}': {txt_dir} "
+            f"TXT folder : {txt_dir} "
             f"({txt_count} txt files detected)"
         )
 
@@ -1070,7 +1084,7 @@ class ProjectManagerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Project Manager")
-        self.resize(1120, 780)
+        self.resize(800, 800)
 
         self.main_window_load_project = main_window_load_project
         self.current_project = current_project or getattr(parent, "current_project", None)
@@ -1174,8 +1188,8 @@ class ProjectManagerDialog(QDialog):
                 "This project has no valid skeleton.\n\n"
                 "Please match a skeleton preset or draw a new skeleton before loading."
             )
-            preset_btn = msg_box.addButton("Match From Preset...", QMessageBox.ButtonRole.AcceptRole)
-            draw_btn = msg_box.addButton("Draw/Edit Skeleton...", QMessageBox.ButtonRole.ActionRole)
+            preset_btn = msg_box.addButton("Match From Preset", QMessageBox.ButtonRole.AcceptRole)
+            draw_btn = msg_box.addButton("Draw/Edit Skeleton", QMessageBox.ButtonRole.ActionRole)
             cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
             msg_box.setDefaultButton(preset_btn)
             msg_box.exec()

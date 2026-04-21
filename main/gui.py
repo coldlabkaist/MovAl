@@ -69,7 +69,7 @@ class MainWindow(QMainWindow):
         self.proj_name.setPlaceholderText("No project loaded")
         proj_bar.addWidget(self.proj_name, 1)
 
-        self.btn_load_project = QPushButton("Load Project...", self)
+        self.btn_load_project = QPushButton("Load Project", self)
         self.btn_load_project.clicked.connect(self.on_load_project_clicked)
         proj_bar.addWidget(self.btn_load_project)
         outer_layout.addLayout(proj_bar)
@@ -379,8 +379,8 @@ class MainWindow(QMainWindow):
                 "This project has no valid skeleton.\n\n"
                 "Please match a skeleton preset or draw a new skeleton before loading."
             )
-            preset_btn = msg_box.addButton("Match From Preset...", QMessageBox.ButtonRole.AcceptRole)
-            draw_btn = msg_box.addButton("Draw/Edit Skeleton...", QMessageBox.ButtonRole.ActionRole)
+            preset_btn = msg_box.addButton("Match From Preset", QMessageBox.ButtonRole.AcceptRole)
+            draw_btn = msg_box.addButton("Draw/Edit Skeleton", QMessageBox.ButtonRole.ActionRole)
             cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
             msg_box.setDefaultButton(preset_btn)
             msg_box.exec()

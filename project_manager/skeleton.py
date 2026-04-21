@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional
 
-import yaml
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QBrush, QImage, QPixmap
 from PyQt6.QtWidgets import (
@@ -24,6 +23,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -61,7 +61,10 @@ class SkeletonManagerDialog(QDialog):
         self.scene.setSceneRect(-200, -200, 700, 420)
         self.view = QGraphicsView(self.scene)
         self.node_list = QListWidget()
-        self.node_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.edge_list = QListWidget()
+        self.sym_list = QListWidget()
+        for list_widget in (self.node_list, self.edge_list, self.sym_list):
+            list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
 
         self.node_items: dict[str, NodeItem] = {}
         self._sync_list = True
@@ -89,6 +92,9 @@ class SkeletonManagerDialog(QDialog):
         self.project_info_label.setWordWrap(True)
 
         if self._is_project_mode:
+            self.mode_label.hide()
+            self.combo.hide()
+            self.title_edit.hide()
             self.mode_label.setText("Project Skeleton")
             self.project_info_label.setText(
                 f"<b>{self.project.title}</b><br>"
@@ -120,8 +126,8 @@ class SkeletonManagerDialog(QDialog):
         right_widget = QWidget(self)
         right_layout = QVBoxLayout(right_widget)
         splitter.addWidget(right_widget)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 4)
 
         btn_row = QHBoxLayout()
         self.btn_load_img = QPushButton("Load Image", self)
@@ -133,7 +139,11 @@ class SkeletonManagerDialog(QDialog):
         left_layout.addWidget(self.view, 1)
 
         self.node_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        right_layout.addWidget(self.node_list, 1)
+        self.list_tabs = QTabWidget(self)
+        self.list_tabs.addTab(self.node_list, "Nodes")
+        self.list_tabs.addTab(self.edge_list, "Edges")
+        self.list_tabs.addTab(self.sym_list, "Symmetry")
+        right_layout.addWidget(self.list_tabs, 1)
 
         self.structure_help_label = QLabel(self)
         self.structure_help_label.setWordWrap(True)
@@ -145,7 +155,7 @@ class SkeletonManagerDialog(QDialog):
         right_layout.addWidget(self.add_node_radio)
         right_layout.addWidget(self.add_skeleton_radio)
 
-        self.unlock_button = QPushButton("Enable Full Skeleton Edit...", self)
+        self.unlock_button = QPushButton("Enable Full Skeleton Edit", self)
         self.unlock_button.setVisible(self._is_project_mode and not self._structure_edit_enabled)
         right_layout.addWidget(self.unlock_button)
 
@@ -154,9 +164,15 @@ class SkeletonManagerDialog(QDialog):
 
     def _connect_signals(self) -> None:
         self.scene.selectionChanged.connect(self._on_scene_selection_changed)
-        self.node_list.itemSelectionChanged.connect(self._on_list_selection_changed)
+        self.node_list.itemSelectionChanged.connect(self._on_node_list_selection_changed)
+        self.edge_list.itemSelectionChanged.connect(self._on_edge_list_selection_changed)
+        self.sym_list.itemSelectionChanged.connect(self._on_sym_list_selection_changed)
         self.node_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.node_list.customContextMenuRequested.connect(self._on_list_context_menu)
+        self.edge_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.edge_list.customContextMenuRequested.connect(self._on_edge_list_context_menu)
+        self.sym_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.sym_list.customContextMenuRequested.connect(self._on_sym_list_context_menu)
 
         self.btn_load_img.clicked.connect(self._choose_image)
         self.btn_white_bg.clicked.connect(lambda: self._fill_background(Qt.GlobalColor.white))
@@ -230,7 +246,7 @@ class SkeletonManagerDialog(QDialog):
 
     def _prepare_new_config(self) -> None:
         self.scene.clear()
-        self.node_list.clear()
+        self._clear_all_lists()
         self.node_items.clear()
         self.model = SkeletonModel()
         self.scene.model = self.model
@@ -247,7 +263,7 @@ class SkeletonManagerDialog(QDialog):
 
     def _rebuild_scene_from_model(self) -> None:
         self.scene.clear()
-        self.node_list.clear()
+        self._clear_all_lists()
         self.node_items.clear()
 
         for name, node in self.model.nodes.items():
@@ -260,19 +276,73 @@ class SkeletonManagerDialog(QDialog):
         for n1, n2 in (tuple(edge) for edge in self.model.edges):
             if n1 in self.node_items and n2 in self.node_items:
                 edge_item = EdgeItem(self.node_items[n1], self.node_items[n2])
-                edge_item.setZValue(3)
                 self.scene.addItem(edge_item)
 
         for n1, n2 in (tuple(sym) for sym in self.model.syms):
             if n1 in self.node_items and n2 in self.node_items:
                 sym_item = SymItem(self.node_items[n1], self.node_items[n2])
-                sym_item.setZValue(3.1)
                 self.scene.addItem(sym_item)
 
+        self._refresh_link_lists()
         self.scene.update()
 
     def add_node_to_list(self, node) -> None:
         self.node_list.addItem(QListWidgetItem(node.name))
+
+    @staticmethod
+    def _link_key(name1: str, name2: str) -> tuple[str, str]:
+        return tuple(sorted((name1, name2)))
+
+    @staticmethod
+    def _edge_key(item: EdgeItem) -> tuple[str, str]:
+        return SkeletonManagerDialog._link_key(item.node1.node.name, item.node2.node.name)
+
+    @staticmethod
+    def _sym_key(item: SymItem) -> tuple[str, str]:
+        return SkeletonManagerDialog._link_key(item.node1.node.name, item.node2.node.name)
+
+    def _clear_all_lists(self) -> None:
+        self.node_list.clear()
+        self.edge_list.clear()
+        self.sym_list.clear()
+
+    def _refresh_link_lists(self) -> None:
+        selected_edge_keys = {
+            self._edge_key(item) for item in self.scene.selectedItems() if isinstance(item, EdgeItem)
+        }
+        selected_sym_keys = {
+            self._sym_key(item) for item in self.scene.selectedItems() if isinstance(item, SymItem)
+        }
+
+        self._sync_list = False
+        self.edge_list.clear()
+        self.sym_list.clear()
+
+        edge_items = sorted(
+            (obj for obj in self.scene.items() if isinstance(obj, EdgeItem)),
+            key=self._edge_key,
+        )
+        for edge_item in edge_items:
+            key = self._edge_key(edge_item)
+            row = QListWidgetItem(f"{key[0]} - {key[1]}")
+            row.setData(Qt.ItemDataRole.UserRole, key)
+            self.edge_list.addItem(row)
+            if key in selected_edge_keys:
+                row.setSelected(True)
+
+        sym_items = sorted(
+            (obj for obj in self.scene.items() if isinstance(obj, SymItem)),
+            key=self._sym_key,
+        )
+        for sym_item in sym_items:
+            key = self._sym_key(sym_item)
+            row = QListWidgetItem(f"{key[0]} <-> {key[1]}")
+            row.setData(Qt.ItemDataRole.UserRole, key)
+            self.sym_list.addItem(row)
+            if key in selected_sym_keys:
+                row.setSelected(True)
+
+        self._sync_list = True
 
     def _fill_background(self, color: Qt.GlobalColor) -> None:
         self.scene.setBackgroundBrush(QBrush(color))
@@ -287,6 +357,11 @@ class SkeletonManagerDialog(QDialog):
         self.scene.setBackgroundBrush(QBrush(QPixmap.fromImage(image)))
 
     def _on_list_context_menu(self, pos) -> None:
+        if not self.node_list.selectedItems():
+            clicked_item = self.node_list.itemAt(pos)
+            if clicked_item is not None:
+                self.node_list.clearSelection()
+                clicked_item.setSelected(True)
         if not self.node_list.selectedItems():
             return
 
@@ -308,11 +383,43 @@ class SkeletonManagerDialog(QDialog):
         elif action == delete_act:
             self._delete_selected_nodes()
 
+    def _on_edge_list_context_menu(self, pos) -> None:
+        if not self.edge_list.selectedItems():
+            clicked_item = self.edge_list.itemAt(pos)
+            if clicked_item is not None:
+                self.edge_list.clearSelection()
+                clicked_item.setSelected(True)
+        if not self.edge_list.selectedItems():
+            return
+
+        menu = QMenu(self)
+        delete_act = menu.addAction("Delete selected")
+        delete_act.setEnabled(self.allow_structure_edit())
+        action = menu.exec(self.edge_list.mapToGlobal(pos))
+        if action == delete_act:
+            self._delete_selected_scene_items()
+
+    def _on_sym_list_context_menu(self, pos) -> None:
+        if not self.sym_list.selectedItems():
+            clicked_item = self.sym_list.itemAt(pos)
+            if clicked_item is not None:
+                self.sym_list.clearSelection()
+                clicked_item.setSelected(True)
+        if not self.sym_list.selectedItems():
+            return
+
+        menu = QMenu(self)
+        delete_act = menu.addAction("Delete selected")
+        delete_act.setEnabled(self.allow_structure_edit())
+        action = menu.exec(self.sym_list.mapToGlobal(pos))
+        if action == delete_act:
+            self._delete_selected_scene_items()
+
     def _rename_selected_node(self) -> None:
         if not self.allow_structure_edit():
             return
         items = self.scene.selectedItems()
-        if len(items) != 1:
+        if len(items) != 1 or not isinstance(items[0], NodeItem):
             return
         node_item = items[0]
         old_name = node_item.node.name
@@ -331,11 +438,12 @@ class SkeletonManagerDialog(QDialog):
         self.node_items[new_name] = self.node_items.pop(old_name)
         for item in self.node_list.findItems(old_name, Qt.MatchFlag.MatchExactly):
             item.setText(new_name)
+        self._refresh_link_lists()
         node_item.update()
 
     def _visualization_setting(self) -> None:
         items = self.scene.selectedItems()
-        if len(items) != 1:
+        if len(items) != 1 or not isinstance(items[0], NodeItem):
             return
         node_item = items[0]
         dialog = NodeVisualSettingDialog(node_item.node, self)
@@ -374,6 +482,8 @@ class SkeletonManagerDialog(QDialog):
                     list_item.setSelected(True)
             self._sync_list = True
             self._delete_selected_nodes()
+        else:
+            self._refresh_link_lists()
 
     def _delete_selected_nodes(self) -> None:
         if not self.allow_structure_edit():
@@ -401,29 +511,67 @@ class SkeletonManagerDialog(QDialog):
             del self.node_items[name]
             for match in self.node_list.findItems(name, Qt.MatchFlag.MatchExactly):
                 self.node_list.takeItem(self.node_list.row(match))
+        self._refresh_link_lists()
 
     def _on_scene_selection_changed(self) -> None:
         if not self._sync_scene:
             return
         self._sync_list = False
         self.node_list.clearSelection()
+        self.edge_list.clearSelection()
+        self.sym_list.clearSelection()
         for obj in self.scene.selectedItems():
             if isinstance(obj, NodeItem):
                 for item in self.node_list.findItems(obj.node.name, Qt.MatchFlag.MatchExactly):
                     item.setSelected(True)
+            elif isinstance(obj, EdgeItem):
+                key = self._edge_key(obj)
+                for row in range(self.edge_list.count()):
+                    item = self.edge_list.item(row)
+                    if item.data(Qt.ItemDataRole.UserRole) == key:
+                        item.setSelected(True)
+                        break
+            elif isinstance(obj, SymItem):
+                key = self._sym_key(obj)
+                for row in range(self.sym_list.count()):
+                    item = self.sym_list.item(row)
+                    if item.data(Qt.ItemDataRole.UserRole) == key:
+                        item.setSelected(True)
+                        break
         self._sync_list = True
 
-    def _on_list_selection_changed(self) -> None:
+    def _on_node_list_selection_changed(self) -> None:
         if not self._sync_list:
             return
         self._sync_scene = False
         selected_names = [item.text() for item in self.node_list.selectedItems()]
-        for obj in self.scene.selectedItems():
-            obj.setSelected(False)
+        self.scene.clearSelection()
         for name in selected_names:
             node_item = self.node_items.get(name)
             if node_item is not None:
                 node_item.setSelected(True)
+        self._sync_scene = True
+
+    def _on_edge_list_selection_changed(self) -> None:
+        if not self._sync_list:
+            return
+        self._sync_scene = False
+        selected_keys = {item.data(Qt.ItemDataRole.UserRole) for item in self.edge_list.selectedItems()}
+        self.scene.clearSelection()
+        for obj in self.scene.items():
+            if isinstance(obj, EdgeItem) and self._edge_key(obj) in selected_keys:
+                obj.setSelected(True)
+        self._sync_scene = True
+
+    def _on_sym_list_selection_changed(self) -> None:
+        if not self._sync_list:
+            return
+        self._sync_scene = False
+        selected_keys = {item.data(Qt.ItemDataRole.UserRole) for item in self.sym_list.selectedItems()}
+        self.scene.clearSelection()
+        for obj in self.scene.items():
+            if isinstance(obj, SymItem) and self._sym_key(obj) in selected_keys:
+                obj.setSelected(True)
         self._sync_scene = True
 
     def _on_mode_toggled(self) -> None:

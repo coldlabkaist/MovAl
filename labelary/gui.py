@@ -2,6 +2,13 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from .widget.image_label import ClickableImageLabel
 from .widget.list_widget import KeypointListWidget
 
+class NoWheelComboBox(QtWidgets.QComboBox):
+    def wheelEvent(self, event):
+        if self.view().isVisible():
+            super().wheelEvent(event)
+            return
+        event.ignore()
+
 class UI_LabelaryDialog(object):
     def setupUi(self, Dialog):
         Dialog.setObjectName("Dialog")
@@ -18,15 +25,15 @@ class UI_LabelaryDialog(object):
         self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout.setSpacing(6)
 
-        self.video_combo = QtWidgets.QComboBox(parent=Dialog)
+        self.video_combo = NoWheelComboBox(parent=Dialog)
         self.video_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.video_combo.setObjectName("video_combo")
         self.horizontalLayout.addWidget(self.video_combo)
-        self.label_combo = QtWidgets.QComboBox(parent=Dialog)
+        self.label_combo = NoWheelComboBox(parent=Dialog)
         self.label_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.label_combo.setObjectName("label_combo")
         self.horizontalLayout.addWidget(self.label_combo)
-        self.mode_combo = QtWidgets.QComboBox(parent=Dialog)
+        self.mode_combo = NoWheelComboBox(parent=Dialog)
         self.mode_combo.setMaximumSize(QtCore.QSize(100, 16777215))
         self.mode_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.mode_combo.setObjectName("mode_combo")
@@ -36,6 +43,7 @@ class UI_LabelaryDialog(object):
         self.load_data_button = QtWidgets.QPushButton(parent=Dialog)
         self.load_data_button.setFixedWidth(200)
         self.load_data_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.load_data_button.setProperty("primary", True)
         self.load_data_button.setObjectName("load_data_button")
         self.gridLayout.addWidget(self.load_data_button, 0, 1, 1, 1)
 
@@ -137,7 +145,7 @@ class UI_LabelaryDialog(object):
         self.kpt_list.setObjectName("kpt_list")
         self.gridLayout.addWidget(self.kpt_list, 4, 1, 1, 1)
 
-        self.color_combo = QtWidgets.QComboBox(parent=Dialog)
+        self.color_combo = NoWheelComboBox(parent=Dialog)
         self.color_combo.setMaximumSize(QtCore.QSize(200, 16777215))
         self.color_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.color_combo.setObjectName("color_combo")
@@ -154,6 +162,7 @@ class UI_LabelaryDialog(object):
         self.save_button = QtWidgets.QPushButton(parent=Dialog)
         self.save_button.setFixedWidth(200)
         self.save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.save_button.setProperty("primary", True)
         self.save_button.setObjectName("save_button")
         self.gridLayout.addWidget(self.save_button, 8, 1, 2, 1)
         self.horizontalLayout_2 = QtWidgets.QHBoxLayout()

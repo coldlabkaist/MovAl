@@ -10,10 +10,12 @@ import glob
 from .thread import ContourWorker
 from pathlib import Path
 from typing import Optional, List
+from utils.ui_theme import get_theme_colors
 
 class VideoMultiSelectDialog(QDialog):
     def __init__(self, parent, current_project):
         super().__init__(parent)
+        theme = get_theme_colors()
         self.setWindowTitle("Select Videos for Contour")
         self.setMinimumSize(420, 480)
         self._checks: list[QCheckBox] = []
@@ -26,19 +28,32 @@ class VideoMultiSelectDialog(QDialog):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            """
-            QScrollArea {
-                background: #ffffff;
-                border: 1px solid #d1d5db;
+        scroll_style = """
+            QScrollArea {{
+                background: {surface};
+                border: 1px solid {border};
                 border-radius: 8px;
-            }
-            QScrollArea > QWidget > QWidget {
-                background: #ffffff;
-            }
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background: {surface};
+            }}
+        """.format(surface=theme["surface"], border=theme["border"])
+        scroll.setStyleSheet(scroll_style)
+        box = QWidget(); v = QVBoxLayout(box); v.setContentsMargins(6,6,6,6); v.setSpacing(4)
+        box.setStyleSheet(
+            f"""
+            QCheckBox {{
+                padding: 4px 6px;
+                border-radius: 6px;
+            }}
+            QCheckBox:hover {{
+                background: {theme["list_item_hover"]};
+            }}
+            QCheckBox:checked {{
+                background: {theme["list_item_selected"]};
+            }}
             """
         )
-        box = QWidget(); v = QVBoxLayout(box); v.setContentsMargins(6,6,6,6); v.setSpacing(4)
         for name in names:
             cb = QCheckBox(name); cb.setChecked(True)
             v.addWidget(cb)
@@ -55,6 +70,9 @@ class VideoMultiSelectDialog(QDialog):
         layout.addLayout(tools)
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        ok_button = btns.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setProperty("primary", True)
         layout.addWidget(btns)
 
         btn_all.clicked.connect(lambda: [cb.setChecked(True) for cb in self._checks])

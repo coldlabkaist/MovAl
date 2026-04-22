@@ -12,10 +12,12 @@ import cv2
 import shutil
 import os
 import sys 
+from utils.ui_theme import get_theme_colors
         
 class CutieDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        theme = get_theme_colors()
         self.current_project = parent.current_project
         self.frame_dir = os.path.join(self.current_project.project_dir, "frames")
         self.project_root = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +37,13 @@ class CutieDialog(QDialog):
 
         self.video_list = QListWidget()
         self.video_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.video_list.setStyleSheet(
+            f"""
+            QListWidget::item:hover {{ background: {theme["list_item_hover"]}; color: {theme["text_primary"]}; }}
+            QListWidget::item:selected {{ background: {theme["list_item_selected"]}; color: {theme["text_primary"]}; }}
+            QListWidget::item:selected:!active {{ background: {theme["list_item_selected"]}; color: {theme["text_primary"]}; }}
+            """
+        )
         for fe in self.current_project.files:
             video_path = Path(fe.video)
             fname = video_path.name
@@ -60,9 +69,17 @@ class CutieDialog(QDialog):
 
         layout.addStretch()
         self.frame_button = QPushButton("Create image frames (Recommend)")
+        self.frame_button.setToolTip(
+            "Extract all frames from project videos and prepare per-video workspace folders "
+            "for segmentation."
+        )
         self.frame_button.clicked.connect(self.run_create_images)
         layout.addWidget(self.frame_button)
         self.run_button = QPushButton("Run Segmentation")
+        self.run_button.setProperty("primary", True)
+        self.run_button.setToolTip(
+            "Run CUTIE segmentation for the selected video using the prepared workspace."
+        )
         self.run_button.clicked.connect(self.run_cutie)
         layout.addWidget(self.run_button)
 

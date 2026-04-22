@@ -13,14 +13,18 @@ class PreprocessDialog(QDialog):
 
         layout = QVBoxLayout()
 
-        layout.addWidget(QLabel("Step 1"))
+        step1_label = QLabel("Step 1")
+        step1_label.setProperty("stepLabel", True)
+        layout.addWidget(step1_label)
         segment_btn = QPushButton("Segment")
         segment_btn.setFixedHeight(40) 
         segment_btn.clicked.connect(self.open_segment)
         layout.addWidget(segment_btn)
 
         layout.addSpacing(10)
-        layout.addWidget(QLabel("Step 2 (optional)"))
+        step2_label = QLabel("Step 2 (optional)")
+        step2_label.setProperty("stepLabel", True)
+        layout.addWidget(step2_label)
         contour_btn = QPushButton("Contour")
         contour_btn.setFixedHeight(40)
         contour_btn.clicked.connect(self.open_contour)

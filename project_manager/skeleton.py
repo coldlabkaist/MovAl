@@ -5,6 +5,7 @@ from typing import Callable, Optional
 
 from PyQt6.QtCore import Qt, QTimer, QRectF
 from PyQt6.QtGui import QBrush, QImage, QPixmap, QWheelEvent
+from PyQt6 import sip
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -73,6 +74,7 @@ class SkeletonManagerDialog(QDialog):
         self.node_items: dict[str, NodeItem] = {}
         self._sync_list = True
         self._sync_scene = True
+        self._is_closing = False
 
         self._build_ui()
         self._connect_signals()
@@ -190,6 +192,51 @@ class SkeletonManagerDialog(QDialog):
         if not self._is_project_mode:
             self._load_combo_items()
             self.combo.currentIndexChanged.connect(self._on_preset_changed)
+
+    def _disconnect_signals(self) -> None:
+        pairs = (
+            (self.scene.selectionChanged, self._on_scene_selection_changed),
+            (self.node_list.itemSelectionChanged, self._on_node_list_selection_changed),
+            (self.edge_list.itemSelectionChanged, self._on_edge_list_selection_changed),
+            (self.sym_list.itemSelectionChanged, self._on_sym_list_selection_changed),
+            (self.node_list.customContextMenuRequested, self._on_list_context_menu),
+            (self.edge_list.customContextMenuRequested, self._on_edge_list_context_menu),
+            (self.sym_list.customContextMenuRequested, self._on_sym_list_context_menu),
+            (self.btn_load_img.clicked, self._choose_video),
+            (self.add_node_radio.toggled, self._on_mode_toggled),
+            (self.add_skeleton_radio.toggled, self._on_mode_toggled),
+            (self.btn_save.clicked, self._save_config),
+            (self.unlock_button.clicked, self._enable_full_edit),
+        )
+        for signal, slot in pairs:
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
+        if not self._is_project_mode:
+            try:
+                self.combo.currentIndexChanged.disconnect(self._on_preset_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+    @staticmethod
+    def _is_deleted(obj) -> bool:
+        try:
+            return sip.isdeleted(obj)
+        except Exception:
+            try:
+                obj.objectName()
+            except RuntimeError:
+                return True
+            except Exception:
+                return False
+            return False
+
+    def _can_sync_selection(self) -> bool:
+        if self._is_closing:
+            return False
+        watched = (self.scene, self.node_list, self.edge_list, self.sym_list)
+        return not any(self._is_deleted(obj) for obj in watched)
 
     def _load_initial_model(self) -> None:
         if self._is_project_mode:
@@ -587,65 +634,81 @@ class SkeletonManagerDialog(QDialog):
         self._refresh_link_lists()
 
     def _on_scene_selection_changed(self) -> None:
-        if not self._sync_scene:
+        if not self._sync_scene or not self._can_sync_selection():
             return
         self._sync_list = False
-        self.node_list.clearSelection()
-        self.edge_list.clearSelection()
-        self.sym_list.clearSelection()
-        for obj in self.scene.selectedItems():
-            if isinstance(obj, NodeItem):
-                for item in self.node_list.findItems(obj.node.name, Qt.MatchFlag.MatchExactly):
-                    item.setSelected(True)
-            elif isinstance(obj, EdgeItem):
-                key = self._edge_key(obj)
-                for row in range(self.edge_list.count()):
-                    item = self.edge_list.item(row)
-                    if item.data(Qt.ItemDataRole.UserRole) == key:
+        try:
+            self.node_list.clearSelection()
+            self.edge_list.clearSelection()
+            self.sym_list.clearSelection()
+            for obj in self.scene.selectedItems():
+                if isinstance(obj, NodeItem):
+                    for item in self.node_list.findItems(obj.node.name, Qt.MatchFlag.MatchExactly):
                         item.setSelected(True)
-                        break
-            elif isinstance(obj, SymItem):
-                key = self._sym_key(obj)
-                for row in range(self.sym_list.count()):
-                    item = self.sym_list.item(row)
-                    if item.data(Qt.ItemDataRole.UserRole) == key:
-                        item.setSelected(True)
-                        break
-        self._sync_list = True
+                elif isinstance(obj, EdgeItem):
+                    key = self._edge_key(obj)
+                    for row in range(self.edge_list.count()):
+                        item = self.edge_list.item(row)
+                        if item.data(Qt.ItemDataRole.UserRole) == key:
+                            item.setSelected(True)
+                            break
+                elif isinstance(obj, SymItem):
+                    key = self._sym_key(obj)
+                    for row in range(self.sym_list.count()):
+                        item = self.sym_list.item(row)
+                        if item.data(Qt.ItemDataRole.UserRole) == key:
+                            item.setSelected(True)
+                            break
+        except RuntimeError:
+            return
+        finally:
+            self._sync_list = True
 
     def _on_node_list_selection_changed(self) -> None:
-        if not self._sync_list:
+        if not self._sync_list or not self._can_sync_selection():
             return
         self._sync_scene = False
-        selected_names = [item.text() for item in self.node_list.selectedItems()]
-        self.scene.clearSelection()
-        for name in selected_names:
-            node_item = self.node_items.get(name)
-            if node_item is not None:
-                node_item.setSelected(True)
-        self._sync_scene = True
+        try:
+            selected_names = [item.text() for item in self.node_list.selectedItems()]
+            self.scene.clearSelection()
+            for name in selected_names:
+                node_item = self.node_items.get(name)
+                if node_item is not None:
+                    node_item.setSelected(True)
+        except RuntimeError:
+            return
+        finally:
+            self._sync_scene = True
 
     def _on_edge_list_selection_changed(self) -> None:
-        if not self._sync_list:
+        if not self._sync_list or not self._can_sync_selection():
             return
         self._sync_scene = False
-        selected_keys = {item.data(Qt.ItemDataRole.UserRole) for item in self.edge_list.selectedItems()}
-        self.scene.clearSelection()
-        for obj in self.scene.items():
-            if isinstance(obj, EdgeItem) and self._edge_key(obj) in selected_keys:
-                obj.setSelected(True)
-        self._sync_scene = True
+        try:
+            selected_keys = {item.data(Qt.ItemDataRole.UserRole) for item in self.edge_list.selectedItems()}
+            self.scene.clearSelection()
+            for obj in self.scene.items():
+                if isinstance(obj, EdgeItem) and self._edge_key(obj) in selected_keys:
+                    obj.setSelected(True)
+        except RuntimeError:
+            return
+        finally:
+            self._sync_scene = True
 
     def _on_sym_list_selection_changed(self) -> None:
-        if not self._sync_list:
+        if not self._sync_list or not self._can_sync_selection():
             return
         self._sync_scene = False
-        selected_keys = {item.data(Qt.ItemDataRole.UserRole) for item in self.sym_list.selectedItems()}
-        self.scene.clearSelection()
-        for obj in self.scene.items():
-            if isinstance(obj, SymItem) and self._sym_key(obj) in selected_keys:
-                obj.setSelected(True)
-        self._sync_scene = True
+        try:
+            selected_keys = {item.data(Qt.ItemDataRole.UserRole) for item in self.sym_list.selectedItems()}
+            self.scene.clearSelection()
+            for obj in self.scene.items():
+                if isinstance(obj, SymItem) and self._sym_key(obj) in selected_keys:
+                    obj.setSelected(True)
+        except RuntimeError:
+            return
+        finally:
+            self._sync_scene = True
 
     def _on_mode_toggled(self) -> None:
         if not self.allow_structure_edit():
@@ -689,6 +752,11 @@ class SkeletonManagerDialog(QDialog):
             )
         except Exception as err:
             QMessageBox.critical(self, "Save Failed", str(err))
+
+    def closeEvent(self, event) -> None:
+        self._is_closing = True
+        self._disconnect_signals()
+        super().closeEvent(event)
 
 
 class ZoomableGraphicsView(QGraphicsView):

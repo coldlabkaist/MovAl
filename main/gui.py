@@ -73,10 +73,14 @@ class MainWindow(QMainWindow):
         appdata_root = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppDataLocation
         )
+        if not appdata_root:
+            appdata_root = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppConfigLocation
+            )
         self.appdata_dir = (
             Path(appdata_root)
             if appdata_root
-            else (Path.home() / "AppData" / "Roaming" / "MovAl")
+            else (Path.home() / ".moval")
         )
         self.last_project_log_path = self.appdata_dir / "last_project.json"
 

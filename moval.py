@@ -1,12 +1,13 @@
 import sys
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtGui import QPalette, QColor, QIcon
 from main.gui import MainWindow
 from main.pipeline import PipelineController
 import subprocess
 from packaging import version 
 from utils import __version__
 from utils.ui_theme import build_app_stylesheet, get_theme_colors
+from pathlib import Path
 
 def main():
     print(f"Move Altogether! MovAl version {__version__}")
@@ -18,6 +19,9 @@ def main():
         print(f"Run 'python update_moval.py' to update to the latest release, or 'python update_moval.py {latest_version}' to install a specific tag.\n")
 
     app = QApplication(sys.argv)
+    icon_path = Path(__file__).resolve().parent / "CoLD_icon.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyleSheet(build_app_stylesheet())
     colors = get_theme_colors()
     palette = app.palette()
@@ -27,6 +31,8 @@ def main():
     app.setPalette(palette)
     controller = PipelineController()
     window = MainWindow(controller=controller)
+    if icon_path.exists():
+        window.setWindowIcon(QIcon(str(icon_path)))
     window.show()
     sys.exit(app.exec())
 

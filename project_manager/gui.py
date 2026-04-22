@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QBrush, QColor, QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -34,8 +34,14 @@ from PyQt6.QtWidgets import (
 )
 
 from .skeleton import SkeletonManagerDialog
+from pose.split_state import is_data_split_running
+from pose.task_state import pose_execution_state
 from utils import __version__
 from utils.project import ProjectInformation
+from utils.runtime_locks import (
+    release_project_compression_lock,
+    try_acquire_project_compression_lock,
+)
 from utils.skeleton import SkeletonModel
 from utils.ui_theme import get_theme_colors
 
@@ -105,6 +111,23 @@ class _NoArrowSpinBox(QSpinBox):
 
     def wheelEvent(self, event) -> None:
         event.ignore()
+
+
+class _CompressProjectWorker(QThread):
+    success = pyqtSignal(dict)
+    failure = pyqtSignal(str)
+
+    def __init__(self, project: ProjectInformation, options: dict[str, bool]) -> None:
+        super().__init__()
+        self._project = project
+        self._options = dict(options)
+
+    def run(self) -> None:
+        try:
+            result = self._project.compress_project(**self._options)
+            self.success.emit(result)
+        except Exception as err:
+            self.failure.emit(str(err))
 
 
 class _CreateProjectTab(QWidget):
@@ -472,6 +495,7 @@ class _ManageProjectTab(QWidget):
         super().__init__(dialog)
         self.dialog = dialog
         self.project = project
+        self.compress_worker: Optional[_CompressProjectWorker] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -634,8 +658,17 @@ class _ManageProjectTab(QWidget):
         compress_row = QHBoxLayout()
         self.compress_section_label = QLabel("<b>Compress</b>")
         compress_row.addWidget(self.compress_section_label)
-        self.delete_runs_check = QCheckBox("Also delete extra files under runs/")
-        self.delete_predicts_check = QCheckBox("Also delete predicts/")
+        self.delete_frames_images_check = QCheckBox("Delete frames/images")
+        self.delete_frames_images_check.setChecked(True)
+        self.delete_frames_davis_check = QCheckBox("Delete frames/visualization/davis")
+        self.delete_frames_davis_check.setChecked(True)
+        self.delete_frames_contour_check = QCheckBox("Delete frames/visualization/contour")
+        self.delete_frames_contour_check.setChecked(True)
+        self.delete_runs_check = QCheckBox("Delete extra files under runs/")
+        self.delete_predicts_check = QCheckBox("Delete predicts/")
+        compress_row.addWidget(self.delete_frames_images_check)
+        compress_row.addWidget(self.delete_frames_davis_check)
+        compress_row.addWidget(self.delete_frames_contour_check)
         compress_row.addWidget(self.delete_runs_check)
         compress_row.addWidget(self.delete_predicts_check)
         self.compress_button = QPushButton("Compress Project")
@@ -645,7 +678,19 @@ class _ManageProjectTab(QWidget):
         layout.addLayout(compress_row)
         _set_tooltip(
             self.compress_section_label,
-            "Removes large generated assets while keeping masks, videos, labels, and config files. runs/dataset is always deleted.",
+            "Removes selected generated assets while keeping masks, videos, labels, and config files. runs/dataset is always deleted.",
+        )
+        _set_tooltip(
+            self.delete_frames_images_check,
+            "Delete extracted image frames under frames/<video>/images.",
+        )
+        _set_tooltip(
+            self.delete_frames_davis_check,
+            "Delete DAVIS visualization frames under frames/<video>/visualization/davis.",
+        )
+        _set_tooltip(
+            self.delete_frames_contour_check,
+            "Delete contour visualization frames under frames/<video>/visualization/contour.",
         )
         _set_tooltip(
             self.delete_runs_check,
@@ -668,6 +713,9 @@ class _ManageProjectTab(QWidget):
             self.remove_video_button,
             self.video_tree,
             self.edit_skeleton_button,
+            self.delete_frames_images_check,
+            self.delete_frames_davis_check,
+            self.delete_frames_contour_check,
             self.delete_runs_check,
             self.delete_predicts_check,
             self.compress_button,
@@ -1079,8 +1127,33 @@ class _ManageProjectTab(QWidget):
             QMessageBox.warning(self, "No project selected", "Load a project first.")
             return
 
+        if self.compress_worker is not None and self.compress_worker.isRunning():
+            QMessageBox.information(self, "Compression in progress", "Project compression is already running.")
+            return
+
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task in {"training", "inference"}:
+            QMessageBox.information(
+                self,
+                f"{active_task.capitalize()} running",
+                "Project compression cannot run while training or inference is running.",
+            )
+            return
+
+        if is_data_split_running():
+            QMessageBox.information(
+                self,
+                "Data split running",
+                "Project compression cannot run while data split is running.",
+            )
+            return
+
         delete_runs = self.delete_runs_check.isChecked()
         delete_predicts = self.delete_predicts_check.isChecked()
+        delete_frames_images = self.delete_frames_images_check.isChecked()
+        delete_frames_davis = self.delete_frames_davis_check.isChecked()
+        delete_frames_contour = self.delete_frames_contour_check.isChecked()
+
         message = [
             "Delete large generated assets to reduce project size?",
             "",
@@ -1092,8 +1165,18 @@ class _ManageProjectTab(QWidget):
             "",
             "Always deletes:",
             "- runs/dataset",
-            "- non-mask image files under frames/",
         ]
+        selected_frame_items = []
+        if delete_frames_images:
+            selected_frame_items.append("- frames/<video>/images")
+        if delete_frames_davis:
+            selected_frame_items.append("- frames/<video>/visualization/davis")
+        if delete_frames_contour:
+            selected_frame_items.append("- frames/<video>/visualization/contour")
+        if selected_frame_items:
+            message.append("")
+            message.append("Delete selected frame image groups:")
+            message.extend(selected_frame_items)
         if delete_runs:
             message.append("- extra run outputs under runs/")
         if delete_predicts:
@@ -1109,24 +1192,69 @@ class _ManageProjectTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        try:
-            result = self.project.compress_project(
-                delete_runs=delete_runs,
-                delete_predicts=delete_predicts,
+        if not try_acquire_project_compression_lock():
+            QMessageBox.information(
+                self,
+                "Compression in progress",
+                "Project compression is already running in another window.",
             )
-        except Exception as err:
-            QMessageBox.critical(self, "Compression failed", str(err))
             return
 
+        options = {
+            "delete_runs": delete_runs,
+            "delete_predicts": delete_predicts,
+            "delete_frames_images": delete_frames_images,
+            "delete_frames_davis": delete_frames_davis,
+            "delete_frames_contour": delete_frames_contour,
+        }
+        self.compress_worker = _CompressProjectWorker(self.project, options)
+        self.compress_worker.success.connect(self._on_compress_success)
+        self.compress_worker.failure.connect(self._on_compress_failure)
+        self.compress_worker.finished.connect(self._on_compress_finished)
+        self._set_compress_controls_enabled(False)
+        self.compress_button.setText("Compressing...")
+        try:
+            self.compress_worker.start()
+        except Exception as err:
+            release_project_compression_lock()
+            self._set_compress_controls_enabled(True)
+            self.compress_button.setText("Compress Project")
+            self.compress_worker = None
+            QMessageBox.critical(self, "Compression failed", str(err))
+
+    def _set_compress_controls_enabled(self, enabled: bool) -> None:
+        for widget in (
+            self.delete_frames_images_check,
+            self.delete_frames_davis_check,
+            self.delete_frames_contour_check,
+            self.delete_runs_check,
+            self.delete_predicts_check,
+            self.compress_button,
+        ):
+            widget.setEnabled(enabled)
+
+    def _on_compress_success(self, result: dict) -> None:
         self.refresh_views()
         freed_mb = result["deleted_bytes"] / (1024 * 1024) if result["deleted_bytes"] else 0.0
         QMessageBox.information(
             self,
             "Project compressed",
-            f"Deleted {result['deleted_images']} image file(s), "
+            f"Deleted {result['deleted_images']} image file(s) "
+            f"(images: {result.get('deleted_images_images', 0)}, "
+            f"davis: {result.get('deleted_images_davis', 0)}, "
+            f"contour: {result.get('deleted_images_contour', 0)}), "
             f"removed {result['deleted_dirs']} empty folder(s), "
             f"freed about {freed_mb:.2f} MB.",
         )
+
+    def _on_compress_failure(self, error_text: str) -> None:
+        QMessageBox.critical(self, "Compression failed", error_text)
+
+    def _on_compress_finished(self) -> None:
+        release_project_compression_lock()
+        self._set_compress_controls_enabled(True)
+        self.compress_button.setText("Compress Project")
+        self.compress_worker = None
 
 
 class ProjectManagerDialog(QDialog):

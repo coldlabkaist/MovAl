@@ -7,6 +7,7 @@ from project_manager import ProjectManagerDialog
 from video_preprocess import PreprocessDialog
 from labelary import run_labelary_with_project
 from pose import PoseEstimationDialog
+from pose.task_state import pose_execution_state
 from utils import TxtToCsvDialog, DataConverterDialog
 
 class PipelineController:
@@ -22,6 +23,14 @@ class PipelineController:
         dialog.exec()
 
     def run_project_manager(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task == "inference":
+            QMessageBox.information(
+                self.parent,
+                "Inference running",
+                "Project Manager cannot be opened while inference is running.",
+            )
+            return
         dialog = ProjectManagerDialog(
             self.main_window_load_project,
             self.parent,

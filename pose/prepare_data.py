@@ -26,6 +26,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from pose.task_state import pose_execution_state
+from pose.split_state import is_data_split_running, set_data_split_running
+from utils.runtime_locks import is_project_compression_running
 
 ONLINE_DATASET_ROOT = "online_datasets"
 
@@ -537,6 +539,18 @@ class DataSplitDialog(QDialog):
         if self.split_worker is not None and self.split_worker.isRunning():
             return
 
+        if is_data_split_running():
+            QMessageBox.information(self, "Data split in progress", "Data split is already running.")
+            return
+
+        if is_project_compression_running():
+            QMessageBox.information(
+                self,
+                "Compression in progress",
+                "Project compression is running. Please wait until it finishes.",
+            )
+            return
+
         selected_entries = self.get_selected_entries()
         if not selected_entries:
             QMessageBox.warning(self, "Error", "First, select a video file.")
@@ -567,7 +581,14 @@ class DataSplitDialog(QDialog):
         self.split_worker.cancelled.connect(self._on_split_cancelled)
         self.split_worker.failure.connect(self._on_split_failure)
         self.split_worker.finished.connect(self._on_split_finished)
-        self.split_worker.start()
+        set_data_split_running(True)
+        try:
+            self.split_worker.start()
+        except Exception:
+            set_data_split_running(False)
+            self.run_btn.setEnabled(True)
+            self.split_worker = None
+            raise
 
     def _on_split_progress(self, done: int, total: int, message: str):
         _ = (done, total, message)
@@ -592,6 +613,7 @@ class DataSplitDialog(QDialog):
         QMessageBox.information(self, "Cancelled", "Data split was cancelled.")
 
     def _on_split_finished(self):
+        set_data_split_running(False)
         self.run_btn.setEnabled(True)
         self.split_worker = None
 

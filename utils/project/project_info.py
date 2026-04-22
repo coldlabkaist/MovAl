@@ -785,8 +785,14 @@ class ProjectInformation:
         *,
         delete_runs: bool = False,
         delete_predicts: bool = False,
+        delete_frames_images: bool = True,
+        delete_frames_davis: bool = True,
+        delete_frames_contour: bool = True,
     ) -> dict[str, int]:
         deleted_images = 0
+        deleted_images_images = 0
+        deleted_images_davis = 0
+        deleted_images_contour = 0
         deleted_files = 0
         deleted_dirs = 0
         deleted_bytes = 0
@@ -800,7 +806,20 @@ class ProjectInformation:
                     continue
                 if self._should_keep_frame_image(image_path):
                     continue
+                frame_group = self._frame_image_group(image_path)
+                if frame_group == "images" and not delete_frames_images:
+                    continue
+                if frame_group == "davis" and not delete_frames_davis:
+                    continue
+                if frame_group == "contour" and not delete_frames_contour:
+                    continue
                 deleted_images += 1
+                if frame_group == "images":
+                    deleted_images_images += 1
+                elif frame_group == "davis":
+                    deleted_images_davis += 1
+                elif frame_group == "contour":
+                    deleted_images_contour += 1
                 deleted_files += 1
                 try:
                     deleted_bytes += image_path.stat().st_size
@@ -843,6 +862,9 @@ class ProjectInformation:
 
         return {
             "deleted_images": deleted_images,
+            "deleted_images_images": deleted_images_images,
+            "deleted_images_davis": deleted_images_davis,
+            "deleted_images_contour": deleted_images_contour,
             "deleted_files": deleted_files,
             "deleted_dirs": deleted_dirs,
             "deleted_bytes": deleted_bytes,
@@ -859,6 +881,22 @@ class ProjectInformation:
             if len(relative_parts) >= 2 and relative_parts[1] == "masks":
                 return True
         return False
+
+    def _frame_image_group(self, image_path: Path) -> str:
+        frames_root = self.project_dir_path / "frames"
+        try:
+            parts = image_path.resolve().relative_to(frames_root.resolve()).parts
+        except ValueError:
+            return "other"
+
+        if len(parts) >= 2 and parts[1] == "images":
+            return "images"
+        if len(parts) >= 4 and parts[1] == "visualization":
+            if parts[2] == "davis":
+                return "davis"
+            if parts[2] == "contour":
+                return "contour"
+        return "other"
 
     def _cleanup_empty_dirs(self, root_path: Path) -> int:
         if not root_path.exists():

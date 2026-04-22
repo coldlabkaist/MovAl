@@ -175,23 +175,43 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(14, 12, 14, 12)
         right_layout.setSpacing(0)
         right_card.setLayout(right_layout)
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.background_image_label = QLabel()
+        self.background_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_image_label = QLabel()
+        self.logo_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_image_label.setMinimumHeight(70)
 
-        image_path = os.path.abspath(
+        background_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "background_image.png")
         )
-        self._hero_pixmap = QPixmap(image_path)
-        if not self._hero_pixmap.isNull():
-            self.image_label.setPixmap(
-                self._hero_pixmap.scaled(
+        logo_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "logo_image.png")
+        )
+        self._background_pixmap = QPixmap(background_path)
+        self._logo_pixmap = QPixmap(logo_path)
+
+        if not self._background_pixmap.isNull():
+            self.background_image_label.setPixmap(
+                self._background_pixmap.scaled(
                     320,
-                    260,
+                    220,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
-        right_layout.addWidget(self.image_label, 1)
+        if not self._logo_pixmap.isNull():
+            self.logo_image_label.setPixmap(
+                self._logo_pixmap.scaled(
+                    240,
+                    64,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+
+        right_layout.addWidget(self.background_image_label, 1)
+        right_layout.addSpacing(2)
+        right_layout.addWidget(self.logo_image_label, 0)
         main_layout.addWidget(right_card, 2)
 
         self.setup_buttons()

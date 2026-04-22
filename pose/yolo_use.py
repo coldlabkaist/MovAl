@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 import os
 from .thread import TrainThread, InferenceThread
 from .task_state import pose_execution_state
+from utils.runtime_locks import is_project_compression_running
 from datetime import datetime
 from pathlib import Path
 import re
@@ -190,6 +191,14 @@ class YOLODialog(QDialog):
             
     def run_train(self):
         import os
+
+        if is_project_compression_running():
+            QMessageBox.information(
+                self,
+                "Compression in progress",
+                "Project compression is running. Please wait until it finishes.",
+            )
+            return
 
         if pose_execution_state.is_busy():
             running = (pose_execution_state.active_task() or "pose task").lower()
@@ -724,6 +733,14 @@ class YoloInferenceDialog(QDialog):
                 self.convert_txt_to_csv_checkbox.setEnabled(False)
 
     def run_inference(self):
+        if is_project_compression_running():
+            QMessageBox.information(
+                self,
+                "Compression in progress",
+                "Project compression is running. Please wait until it finishes.",
+            )
+            return
+
         if pose_execution_state.is_busy():
             running = (pose_execution_state.active_task() or "pose task").lower()
             if running != "inference":

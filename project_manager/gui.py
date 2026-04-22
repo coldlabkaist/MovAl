@@ -105,7 +105,7 @@ class _CreateProjectTab(QWidget):
 
         self.title_label = QLabel("<b>Project Title</b>")
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("e.g. CoLD_GH_250718")
+        self.title_edit.setPlaceholderText("e.g. CoLD_recording_250718")
         self.title_edit.setMinimumWidth(360)
         self.title_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         left_col.addWidget(self.title_label)

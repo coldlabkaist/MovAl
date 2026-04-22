@@ -29,6 +29,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.project = project
         self._restoring_ui_state = False
         self.shortcuts_enabled = True
+        self.is_video_paused = True
         self.auto_label_model = None
         self.auto_label_model_path: Optional[str] = None
         self.auto_label_model_mode: Optional[str] = None

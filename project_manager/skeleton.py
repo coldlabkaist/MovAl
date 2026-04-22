@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QBrush, QImage, QPixmap
+from PyQt6.QtCore import Qt, QTimer, QRectF
+from PyQt6.QtGui import QBrush, QImage, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsView,
+    QGraphicsPixmapItem,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -59,7 +60,10 @@ class SkeletonManagerDialog(QDialog):
         self.model = SkeletonModel()
         self.scene = SkeletonScene(self.model, self)
         self.scene.setSceneRect(-200, -200, 700, 420)
-        self.view = QGraphicsView(self.scene)
+        self.view = ZoomableGraphicsView(self.scene)
+        self.view.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._background_image_rect: Optional[QRectF] = None
+        self._background_pixmap_item: Optional[QGraphicsPixmapItem] = None
         self.node_list = QListWidget()
         self.edge_list = QListWidget()
         self.sym_list = QListWidget()
@@ -126,11 +130,12 @@ class SkeletonManagerDialog(QDialog):
         right_widget = QWidget(self)
         right_layout = QVBoxLayout(right_widget)
         splitter.addWidget(right_widget)
-        splitter.setStretchFactor(0, 5)
-        splitter.setStretchFactor(1, 4)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        QTimer.singleShot(0, lambda: splitter.setSizes([self.width() // 2, self.width() // 2]))
 
         btn_row = QHBoxLayout()
-        self.btn_load_img = QPushButton("Load Image", self)
+        self.btn_load_img = QPushButton("Load Video", self)
         self.btn_white_bg = QPushButton("White BG", self)
         self.btn_black_bg = QPushButton("Black BG", self)
         for button in (self.btn_load_img, self.btn_white_bg, self.btn_black_bg):
@@ -174,7 +179,7 @@ class SkeletonManagerDialog(QDialog):
         self.sym_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.sym_list.customContextMenuRequested.connect(self._on_sym_list_context_menu)
 
-        self.btn_load_img.clicked.connect(self._choose_image)
+        self.btn_load_img.clicked.connect(self._choose_video)
         self.btn_white_bg.clicked.connect(lambda: self._fill_background(Qt.GlobalColor.white))
         self.btn_black_bg.clicked.connect(lambda: self._fill_background(Qt.GlobalColor.black))
         self.add_node_radio.toggled.connect(self._on_mode_toggled)
@@ -251,6 +256,7 @@ class SkeletonManagerDialog(QDialog):
         self.model = SkeletonModel()
         self.scene.model = self.model
         self.title_edit.clear()
+        self._update_scene_rect()
 
     def _load_yaml_from_preset(self, file_name: str) -> None:
         try:
@@ -284,6 +290,7 @@ class SkeletonManagerDialog(QDialog):
                 self.scene.addItem(sym_item)
 
         self._refresh_link_lists()
+        self._update_scene_rect()
         self.scene.update()
 
     def add_node_to_list(self, node) -> None:
@@ -345,16 +352,80 @@ class SkeletonManagerDialog(QDialog):
         self._sync_list = True
 
     def _fill_background(self, color: Qt.GlobalColor) -> None:
+        if self._background_pixmap_item is not None:
+            self.scene.removeItem(self._background_pixmap_item)
+            self._background_pixmap_item = None
+        self._background_image_rect = None
         self.scene.setBackgroundBrush(QBrush(color))
+        self._update_scene_rect()
 
-    def _choose_image(self) -> None:
-        fname, _ = QFileDialog.getOpenFileName(self, "Open image", "", "Images (*.png *.jpg *.jpeg)")
+    def _update_scene_rect(self) -> None:
+        content_rect = self.scene.itemsBoundingRect()
+        target_rect: Optional[QRectF] = None
+
+        if self._background_image_rect is not None:
+            target_rect = QRectF(self._background_image_rect)
+
+        if not content_rect.isNull():
+            target_rect = content_rect if target_rect is None else target_rect.united(content_rect)
+
+        if target_rect is None or target_rect.isNull():
+            target_rect = QRectF(-200, -200, 700, 420)
+
+        self.scene.setSceneRect(target_rect.adjusted(-24, -24, 24, 24))
+        self.view.reset_zoom_to_fit()
+
+    def _choose_video(self) -> None:
+        fname, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open video",
+            "",
+            "Videos (*.mp4 *.avi *.mov *.mkv *.wmv *.m4v)",
+        )
         if not fname:
             return
-        image = QImage(fname)
-        if image.isNull():
+
+        try:
+            import cv2  # local import to avoid hard dependency at module import time
+        except Exception as err:
+            QMessageBox.warning(self, "Video Load Error", f"OpenCV is required to load videos.\n{err}")
             return
-        self.scene.setBackgroundBrush(QBrush(QPixmap.fromImage(image)))
+
+        cap = cv2.VideoCapture(fname, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            cap.release()
+            cap = cv2.VideoCapture(fname)
+        if not cap.isOpened():
+            QMessageBox.warning(self, "Video Load Error", f"Unable to open video:\n{fname}")
+            return
+        try:
+            ok, frame = cap.read()
+        finally:
+            cap.release()
+        if not ok or frame is None:
+            QMessageBox.warning(self, "Video Load Error", f"Unable to read the first frame:\n{fname}")
+            return
+
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
+        if image.isNull():
+            QMessageBox.warning(self, "Video Load Error", "Failed to convert the first frame to an image.")
+            return
+
+        if self._background_pixmap_item is not None:
+            self.scene.removeItem(self._background_pixmap_item)
+            self._background_pixmap_item = None
+        pixmap = QPixmap.fromImage(image)
+        self._background_pixmap_item = QGraphicsPixmapItem(pixmap)
+        self._background_pixmap_item.setZValue(-10000)
+        self._background_pixmap_item.setPos(0, 0)
+        self._background_pixmap_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._background_pixmap_item.setAcceptHoverEvents(False)
+        self.scene.addItem(self._background_pixmap_item)
+        self._background_image_rect = QRectF(0, 0, image.width(), image.height())
+        self.scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
+        self._update_scene_rect()
 
     def _on_list_context_menu(self, pos) -> None:
         if not self.node_list.selectedItems():
@@ -448,6 +519,8 @@ class SkeletonManagerDialog(QDialog):
         node_item = items[0]
         dialog = NodeVisualSettingDialog(node_item.node, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Node visual options can change its geometry (size/thickness).
+            node_item.prepareGeometryChange()
             dialog.apply_changes()
             node_item.update()
             self.scene.update()
@@ -616,3 +689,47 @@ class SkeletonManagerDialog(QDialog):
             )
         except Exception as err:
             QMessageBox.critical(self, "Save Failed", str(err))
+
+
+class ZoomableGraphicsView(QGraphicsView):
+    def __init__(self, scene, parent=None) -> None:
+        super().__init__(scene, parent)
+        self._zoom_steps = 0
+        self._zoom_min_steps = 0
+        self._zoom_max_steps = 24  # ~9.8x (1.1^24), close to Labelary's 10x cap
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setRenderHints(self.renderHints())
+
+    def reset_zoom_to_fit(self) -> None:
+        scene = self.scene()
+        if scene is None:
+            return
+        rect = scene.sceneRect()
+        if rect.isNull() or rect.width() <= 0 or rect.height() <= 0:
+            return
+        self.resetTransform()
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._zoom_steps = 0
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if delta == 0:
+            super().wheelEvent(event)
+            return
+
+        if delta > 0:
+            if self._zoom_steps >= self._zoom_max_steps:
+                event.accept()
+                return
+            factor = 1.1
+            self._zoom_steps += 1
+        else:
+            if self._zoom_steps <= self._zoom_min_steps:
+                event.accept()
+                return
+            factor = 0.9
+            self._zoom_steps -= 1
+
+        self.scale(factor, factor)
+        event.accept()

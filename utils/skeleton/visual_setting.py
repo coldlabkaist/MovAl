@@ -51,7 +51,8 @@ class NodeVisualSettingDialog(QDialog):
         layout.addWidget(self.filled_chk, 0, Qt.AlignmentFlag.AlignLeft)
 
         thick_row = QHBoxLayout()
-        thick_row.addWidget(QLabel("Line thickness:"))
+        self.thickness_label = QLabel("Line thickness:")
+        thick_row.addWidget(self.thickness_label)
         self.thickness_spin = QSpinBox()
         self.thickness_spin.setRange(1, 20)
         self.thickness_spin.setValue(node.thickness)
@@ -66,6 +67,8 @@ class NodeVisualSettingDialog(QDialog):
         layout.addWidget(btn_box)
 
         self.shape_combo.currentTextChanged.connect(self._on_shape_changed)
+        self.filled_chk.toggled.connect(self._on_filled_toggled)
+        self._update_thickness_label()
 
     def apply_changes(self) -> None:
         self.node.shape = self.shape_combo.currentText()
@@ -98,6 +101,12 @@ class NodeVisualSettingDialog(QDialog):
 
     def _on_shape_changed(self, shape: str):
         self.text_edit.setEnabled(shape == "text")
+
+    def _on_filled_toggled(self, _checked: bool) -> None:
+        self._update_thickness_label()
+
+    def _update_thickness_label(self) -> None:
+        self.thickness_label.setText("Size:" if self.filled_chk.isChecked() else "Line thickness:")
 
 
 def edit_node_visual(node_item, parent=None):

@@ -181,13 +181,24 @@ class ClickableImageLabel(QLabel):
                 cy = pts[node_name][1] * oh * act + translation.y()
                 vis = pts[node_name][2]
 
-                r = 5 * (act**0.5)
+                if node.filled and node.shape in ("circle", "square"):
+                    # Keep filled-node size semantics consistent with skeleton manager.
+                    base_r = 5 + max(0, node.thickness - 1) * 2.0
+                else:
+                    base_r = 5
+                r = base_r * (act**0.5)
                 base_color = node.color
-                selected = (self.mouse_controller.selected_node == (track, node_name))
-                pen_width = node.thickness * (3 if selected else 1)
-                pen = QPen(base_color, pen_width)
-                brush = QBrush(base_color if node.filled else Qt.BrushStyle.NoBrush)
-                painter.setPen(pen)
+                selected = self.mouse_controller is not None and (
+                    self.mouse_controller.selected_node == (track, node_name)
+                )
+                if node.filled:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    brush = QBrush(base_color)
+                else:
+                    pen_width = node.thickness * (3 if selected else 1)
+                    pen = QPen(base_color, pen_width)
+                    painter.setPen(pen)
+                    brush = QBrush(Qt.BrushStyle.NoBrush)
                 painter.setBrush(brush)
 
                 shape = node.shape.lower()

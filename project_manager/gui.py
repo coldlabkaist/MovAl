@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QBrush, QColor, QKeyEvent
 from PyQt6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QCheckBox,
     QComboBox,
@@ -36,6 +37,7 @@ from .skeleton import SkeletonManagerDialog
 from utils import __version__
 from utils.project import ProjectInformation
 from utils.skeleton import SkeletonModel
+from utils.ui_theme import get_theme_colors
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,14 +56,15 @@ def _make_separator(parent: QWidget) -> QFrame:
 class _FileListWidget(QListWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._theme_colors = get_theme_colors()
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         self.setStyleSheet(
-            """
-            QListWidget::item:hover { background: #eaf1ff; color: #111827; }
-            QListWidget::item:selected { background: #dbe8ff; color: #111827; }
-            QListWidget::item:selected:!active { background: #dbe8ff; color: #111827; }
+            f"""
+            QListWidget::item:hover {{ background: {self._theme_colors["list_item_hover"]}; color: {self._theme_colors["text_primary"]}; }}
+            QListWidget::item:selected {{ background: {self._theme_colors["list_item_selected"]}; color: {self._theme_colors["text_primary"]}; }}
+            QListWidget::item:selected:!active {{ background: {self._theme_colors["list_item_selected"]}; color: {self._theme_colors["text_primary"]}; }}
             """
         )
 
@@ -85,7 +88,23 @@ class _FileListWidget(QListWidget):
             font = item.font()
             font.setBold(True)
             item.setFont(font)
-            item.setBackground(QColor("#fff9c4"))
+            item.setBackground(QColor(self._theme_colors["video_item_highlight"]))
+
+
+class _NoArrowSpinBox(QSpinBox):
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Down,
+            Qt.Key.Key_PageUp,
+            Qt.Key.Key_PageDown,
+        ):
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
 
 
 class _CreateProjectTab(QWidget):
@@ -99,9 +118,11 @@ class _CreateProjectTab(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(16)
 
-        left_col = QVBoxLayout()
+        self.left_panel = QWidget(self)
+        self.left_panel.setFixedWidth(420)
+        left_col = QVBoxLayout(self.left_panel)
         left_col.setSpacing(10)
-        layout.addLayout(left_col, 3)
+        layout.addWidget(self.left_panel, 0)
 
         self.title_label = QLabel("<b>Project Title</b>")
         self.title_edit = QLineEdit()
@@ -113,7 +134,7 @@ class _CreateProjectTab(QWidget):
         _set_tooltip(self.title_edit, "Name of the project folder that will be created.")
 
         self.step1_label = QLabel("<b>Step 1.</b> Set number of animals")
-        self.step1_spin = QSpinBox()
+        self.step1_spin = _NoArrowSpinBox()
         self.step1_spin.setRange(1, 16)
         self.step1_spin.setValue(2)
         left_col.addWidget(self.step1_label)
@@ -179,6 +200,7 @@ class _CreateProjectTab(QWidget):
             self.step4_combo,
             "Preset skeleton that will be copied into the new project's project.json.",
         )
+        left_col.addStretch(1)
 
         note_label = QLabel(
             "<b>Note:</b> Put each CSV or TXT item immediately after its target video. "
@@ -188,13 +210,14 @@ class _CreateProjectTab(QWidget):
         left_col.addWidget(note_label)
 
         self.create_button = QPushButton("Create Project")
+        self.create_button.setProperty("primary", True)
         self.create_button.clicked.connect(self._create_project)
         left_col.addWidget(self.create_button)
-        left_col.addStretch(1)
 
-        right_col = QVBoxLayout()
+        self.right_panel = QWidget(self)
+        right_col = QVBoxLayout(self.right_panel)
         right_col.setSpacing(12)
-        layout.addLayout(right_col, 4)
+        layout.addWidget(self.right_panel, 1)
 
         self.file_list = _FileListWidget()
         self.file_list.setMinimumWidth(420)
@@ -212,6 +235,21 @@ class _CreateProjectTab(QWidget):
         list_buttons.addWidget(self.list_button_sort)
         list_buttons.addWidget(self.list_button_reset)
         right_col.addLayout(list_buttons)
+        self._configure_focus_behavior()
+
+    def _configure_focus_behavior(self) -> None:
+        no_focus_buttons = [
+            self.step2_button,
+            self.step3_button_csv,
+            self.step3_button_txt,
+            self.step4_button,
+            self.list_button_sort,
+            self.list_button_reset,
+            self.create_button,
+        ]
+        for button in no_focus_buttons:
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.step2_check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _generate_instance_fields(self, count: int) -> None:
         old_texts = [field.text().strip() for field in self._instance_fields]
@@ -248,6 +286,7 @@ class _CreateProjectTab(QWidget):
             self.file_list.style_item(item, file_type)
 
     def _on_select_videos(self) -> None:
+        previous_focus = QApplication.focusWidget()
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select Video Files",
@@ -255,8 +294,11 @@ class _CreateProjectTab(QWidget):
             "Videos (*.mp4 *.avi *.mov *.mkv)",
         )
         self._append_files(files, "vid")
+        if previous_focus is not None and previous_focus is not self:
+            previous_focus.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _on_select_csv_files(self) -> None:
+        previous_focus = QApplication.focusWidget()
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select CSV Files",
@@ -264,8 +306,11 @@ class _CreateProjectTab(QWidget):
             "CSV Files (*.csv)",
         )
         self._append_files(files, "csv")
+        if previous_focus is not None and previous_focus is not self:
+            previous_focus.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _on_select_txt_folders(self) -> None:
+        previous_focus = QApplication.focusWidget()
         while True:
             folder = QFileDialog.getExistingDirectory(self, "Select TXT Folder")
             if not folder:
@@ -280,6 +325,8 @@ class _CreateProjectTab(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 break
+        if previous_focus is not None and previous_focus is not self:
+            previous_focus.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _load_skeleton_items(self, selected: Optional[str] = None) -> None:
         self.step4_combo.clear()
@@ -629,7 +676,14 @@ class _ManageProjectTab(QWidget):
             self.remove_csv_button,
             self.csv_list,
         ]
+        self._configure_focus_behavior()
         self.set_project(project)
+
+    def _configure_focus_behavior(self) -> None:
+        for button in self.findChildren(QPushButton):
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        for check in self.findChildren(QCheckBox):
+            check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def set_project(self, project: Optional[ProjectInformation]) -> None:
         self.project = project

@@ -67,7 +67,9 @@ class SkeletonScene(QGraphicsScene):
 
         if event.button() == Qt.MouseButton.LeftButton and self.structure_edit_enabled:
             if self.mode == 'add_node':
-                if raw_item is None:
+                # Treat non-skeleton background items (e.g., loaded video frame pixmap)
+                # as empty canvas so node creation still works on top of media.
+                if item is None:
                     node = self.model.add_node()
                     pos    = event.scenePos()
                     
@@ -83,6 +85,12 @@ class SkeletonScene(QGraphicsScene):
                     return
                 if isinstance(item, NodeItem):
                     self._select_item(item, event.modifiers())
+                elif isinstance(item, (EdgeItem, SymItem)):
+                    if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        self.clearSelection()
+                    item.setSelected(True)
+                    event.accept()
+                    return
             elif self.mode == 'add_edge':
                 if isinstance(item, NodeItem):
                     self.temp_edge_start = item

@@ -24,6 +24,9 @@ class PoseExecutionState(QObject):
     def active_task(self) -> Optional[str]:
         return self._active_task
 
+    def active_owner(self) -> Any:
+        return self._owner
+
     def acquire(self, task_name: str, owner: Any = None) -> bool:
         if self._busy:
             return False

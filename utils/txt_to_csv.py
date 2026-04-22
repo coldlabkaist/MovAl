@@ -101,7 +101,6 @@ class TxtToCsvDialog(QDialog):
 
     def _set_kpt_names(self, names, *, source: str) -> None:
         self.kpt_names = list(names or [])
-        print("Loaded kpt_names:", self.kpt_names)
 
         kpt_text = f"Kpt Names (source: {source}):\n"
         for idx, name in enumerate(self.kpt_names):

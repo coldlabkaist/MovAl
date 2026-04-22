@@ -91,6 +91,7 @@ class YOLODialog(QDialog):
         main_layout.addLayout(middle_layout)
 
         self.run_btn = QPushButton("Run Training")
+        self.run_btn.setProperty("primary", True)
         self.run_btn.clicked.connect(self._on_run_button_clicked)
         self.run_btn.setFixedHeight(30)
         main_layout.addWidget(self.run_btn)
@@ -102,13 +103,19 @@ class YOLODialog(QDialog):
         )
 
     def _on_run_button_clicked(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task == "training":
+            self._stop_training()
+            return
         if self._is_training_running():
             self._stop_training()
             return
         self.run_train()
 
     def _is_training_running(self) -> bool:
-        return self._training_running or (self.train_thread is not None and self.train_thread.isRunning())
+        if self._training_running or (self.train_thread is not None and self.train_thread.isRunning()):
+            return True
+        return pose_execution_state.is_busy() and (pose_execution_state.active_task() or "").lower() == "training"
 
     def _set_training_parameter_controls_enabled(self, enabled: bool):
         widgets = [self.model_combo, self.size_combo]
@@ -119,13 +126,24 @@ class YOLODialog(QDialog):
                 widget.setEnabled(enabled)
 
     def _stop_training(self):
-        if not self._is_training_running():
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if not self._is_training_running() and active_task != "training":
             return
         print("[Training] Stop requested by user.", flush=True)
         self.run_btn.setEnabled(False)
         self.run_btn.setText("Stopping training...")
         if self.train_thread is not None:
             self.train_thread.stop()
+            return
+
+        owner = pose_execution_state.active_owner()
+        if owner is not None and owner is not self:
+            owner_thread = getattr(owner, "train_thread", None)
+            if owner_thread is not None and owner_thread.isRunning():
+                stop_fn = getattr(owner_thread, "stop", None)
+                if callable(stop_fn):
+                    stop_fn()
+                    return
 
     def create_group_box(self, title, params):
         group = QGroupBox(title)
@@ -320,13 +338,13 @@ class YOLODialog(QDialog):
         if not hasattr(self, "run_btn"):
             return
 
-        if self._is_training_running():
+        active = (task_name or "").lower()
+        if busy and active == "training":
             self._set_training_parameter_controls_enabled(False)
             self.run_btn.setEnabled(True)
             self.run_btn.setText("Stop Training")
             return
 
-        active = (task_name or "").lower()
         if busy:
             self._set_training_parameter_controls_enabled(False)
             self.run_btn.setEnabled(False)
@@ -395,10 +413,15 @@ class YoloInferenceDialog(QDialog):
 
         main_layout.addLayout(self.grid)
         self.run_btn = QPushButton("Run Inference", clicked=self._on_run_button_clicked)
+        self.run_btn.setProperty("primary", True)
         self.run_btn.setFixedHeight(30)
         main_layout.addWidget(self.run_btn)
 
     def _on_run_button_clicked(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task == "inference":
+            self._stop_inference()
+            return
         if self._inference_running:
             self._stop_inference()
             return
@@ -408,7 +431,8 @@ class YoloInferenceDialog(QDialog):
         row = QHBoxLayout()
         self.model_line_edit = BrowseOnlyLineEdit()
         self.model_line_edit.setPlaceholderText("Select Model")
-        self.model_browse_btn = QPushButton("Browse", clicked=self.select_model)
+        self.model_browse_btn = QPushButton("Browse Model", clicked=self.select_model)
+        self.model_browse_btn.setProperty("primary", True)
         row.addWidget(self.model_line_edit)
         row.addWidget(self.model_browse_btn)
         return row
@@ -903,7 +927,8 @@ class YoloInferenceDialog(QDialog):
                 widget.setEnabled(enabled)
 
     def _stop_inference(self):
-        if not self._inference_running:
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if not self._inference_running and active_task != "inference":
             return
         print("[Inference] Stop requested by user.", flush=True)
         self._stop_requested = True
@@ -917,8 +942,18 @@ class YoloInferenceDialog(QDialog):
         )
         if self.infer_thread is not None and self.infer_thread.isRunning():
             self.infer_thread.stop()
-        else:
-            self._finish_inference_run(success=False, cancelled=True)
+            return
+
+        owner = pose_execution_state.active_owner()
+        if owner is not None and owner is not self:
+            owner_thread = getattr(owner, "infer_thread", None)
+            if owner_thread is not None and owner_thread.isRunning():
+                stop_fn = getattr(owner_thread, "stop", None)
+                if callable(stop_fn):
+                    stop_fn()
+                    return
+
+        self._finish_inference_run(success=False, cancelled=True)
 
     def _finish_inference_run(self, success: bool = True, cancelled: bool = False):
         if not self._inference_running:
@@ -945,13 +980,13 @@ class YoloInferenceDialog(QDialog):
         if not hasattr(self, "run_btn"):
             return
 
-        if self._inference_running:
+        active = (task_name or "").lower()
+        if busy and active == "inference":
             self._set_inference_config_controls_enabled(False)
             self.run_btn.setEnabled(True)
             self.run_btn.setText("Stop Inference")
             return
 
-        active = (task_name or "").lower()
         if busy:
             self._set_inference_config_controls_enabled(False)
             self.run_btn.setEnabled(False)

@@ -274,6 +274,7 @@ class DataSplitDialog(QDialog):
         self.current_project = current_project
         self.files = current_project.files
         self.split_worker = None
+        self._ratio_guard = False
 
         layout = QVBoxLayout(self)
         scroll = QScrollArea()
@@ -309,33 +310,35 @@ class DataSplitDialog(QDialog):
         ratio_layout = QFormLayout()
 
         self.train_slider = QSlider(Qt.Orientation.Horizontal)
-        self.train_slider.setRange(0, 100)
+        self.train_slider.setRange(40, 90)
         self.train_slider.setValue(70)
         self.train_spin = QSpinBox()
-        self.train_spin.setRange(0, 100)
+        self.train_spin.setRange(40, 90)
         self.train_spin.setValue(70)
         self.train_slider.valueChanged.connect(self.train_spin.setValue)
         self.train_spin.valueChanged.connect(self.train_slider.setValue)
         ratio_layout.addRow("Train %", self.create_slider_spinbox_layout(self.train_slider, self.train_spin))
 
         self.valid_slider = QSlider(Qt.Orientation.Horizontal)
-        self.valid_slider.setRange(0, 100)
+        self.valid_slider.setRange(5, 55)
         self.valid_slider.setValue(20)
         self.valid_spin = QSpinBox()
-        self.valid_spin.setRange(0, 100)
+        self.valid_spin.setRange(5, 55)
         self.valid_spin.setValue(20)
         self.valid_slider.valueChanged.connect(self.valid_spin.setValue)
         self.valid_spin.valueChanged.connect(self.valid_slider.setValue)
         ratio_layout.addRow("Valid %", self.create_slider_spinbox_layout(self.valid_slider, self.valid_spin))
 
         self.test_slider = QSlider(Qt.Orientation.Horizontal)
-        self.test_slider.setRange(0, 100)
+        self.test_slider.setRange(5, 55)
         self.test_slider.setValue(10)
         self.test_spin = QSpinBox()
-        self.test_spin.setRange(0, 100)
+        self.test_spin.setRange(5, 55)
         self.test_spin.setValue(10)
         self.test_slider.valueChanged.connect(self.test_spin.setValue)
         self.test_spin.valueChanged.connect(self.test_slider.setValue)
+        self.test_slider.setEnabled(False)
+        self.test_spin.setEnabled(False)
         ratio_layout.addRow("Test %", self.create_slider_spinbox_layout(self.test_slider, self.test_spin))
 
         layout.addLayout(ratio_layout)
@@ -354,6 +357,7 @@ class DataSplitDialog(QDialog):
         layout.addWidget(self.frame_type_combo)
 
         self.run_btn = QPushButton("Run")
+        self.run_btn.setProperty("primary", True)
         layout.addWidget(self.run_btn)
         self.run_btn.clicked.connect(self.run_split)
 
@@ -363,15 +367,20 @@ class DataSplitDialog(QDialog):
         self._populate_file_items()
         self.frame_type_combo.currentTextChanged.connect(self._frame_type_changed)
         self.frame_type_combo.currentTextChanged.connect(self._save_frame_type)
+        self.train_spin.valueChanged.connect(lambda v: self._on_ratio_input_changed("train", v))
+        self.valid_spin.valueChanged.connect(lambda v: self._on_ratio_input_changed("val", v))
+        self._apply_ratio_constraints(self.train_spin.value(), self.valid_spin.value(), source="train")
 
     def _frame_type_changed(self):
-        self._populate_file_items()
+        selected_stems = self._selected_video_stems()
+        self._populate_file_items(selected_stems=selected_stems)
         self._update_selection_count()
 
     def _save_frame_type(self, frame_type: str) -> None:
         self.current_project.set_preferred_frame_mode(frame_type)
 
-    def _populate_file_items(self) -> None:
+    def _populate_file_items(self, selected_stems: set[str] | None = None) -> None:
+        selected_stems = selected_stems or set()
         self._clear_file_items()
         for fe in self.files:
             current_project = self.current_project
@@ -387,6 +396,7 @@ class DataSplitDialog(QDialog):
 
             row_lay = QHBoxLayout()
             chk = QCheckBox()
+            chk.setChecked(video_stem in selected_stems)
             chk.stateChanged.connect(self._update_selection_count)
             chk._frame_cnt = frame_cnt
             chk._label_cnt = label_cnt
@@ -403,6 +413,75 @@ class DataSplitDialog(QDialog):
             self.files_lay.addLayout(row_lay)
 
         self.files_lay.addStretch(1)
+
+    def _selected_video_stems(self) -> set[str]:
+        selected: set[str] = set()
+        for i in range(self.files_lay.count() - 1):
+            lay = self.files_lay.itemAt(i)
+            if not isinstance(lay, QHBoxLayout):
+                continue
+            chk = lay.itemAt(0).widget()
+            if isinstance(chk, QCheckBox) and chk.isChecked():
+                fe = getattr(chk, "_file_entry", None)
+                if fe is not None:
+                    selected.add(Path(fe.video).stem)
+        return selected
+
+    def _on_ratio_input_changed(self, source: str, value: int) -> None:
+        if self._ratio_guard:
+            return
+        train = self.train_spin.value()
+        valid = self.valid_spin.value()
+        if source == "train":
+            train = int(value)
+        else:
+            valid = int(value)
+        self._apply_ratio_constraints(train, valid, source=source)
+
+    def _apply_ratio_constraints(self, train: int, valid: int, *, source: str) -> None:
+        self._ratio_guard = True
+        try:
+            current_train = int(self.train_spin.value())
+            current_valid = int(self.valid_spin.value())
+
+            if source == "train":
+                # Train changes should not force-adjust Valid.
+                valid = max(5, min(current_valid, 55))
+                train = max(40, min(int(train), 90))
+                train = min(train, 95 - valid)
+            elif source == "val":
+                # Valid changes should not force-adjust Train.
+                train = max(40, min(current_train, 90))
+                valid = max(5, min(int(valid), 55))
+                valid = min(valid, 95 - train)
+            else:
+                # Defensive fallback for non-standard callers.
+                train = max(40, min(int(train), 90))
+                valid = max(5, min(int(valid), 55))
+                if train + valid > 95:
+                    valid = max(5, 95 - train)
+                    if train + valid > 95:
+                        train = max(40, 95 - valid)
+
+            test = 100 - train - valid
+
+            # Update only the source side to avoid any opposite-side slider motion.
+            if source == "train":
+                if self.train_spin.value() != train:
+                    self.train_spin.setValue(train)
+            elif source == "val":
+                if self.valid_spin.value() != valid:
+                    self.valid_spin.setValue(valid)
+            else:
+                if self.train_spin.value() != train:
+                    self.train_spin.setValue(train)
+                if self.valid_spin.value() != valid:
+                    self.valid_spin.setValue(valid)
+
+            if self.test_spin.value() != test:
+                self.test_spin.setValue(test)
+        finally:
+            self._ratio_guard = False
 
     def _clear_file_items(self) -> None:
         while self.files_lay.count():

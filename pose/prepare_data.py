@@ -278,13 +278,26 @@ class DataSplitDialog(QDialog):
         layout = QVBoxLayout(self)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            """
+            QScrollArea {
+                background: #ffffff;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: #ffffff;
+            }
+            """
+        )
         inner_widget = QWidget()
         self.files_lay = QVBoxLayout(inner_widget)
+        self.files_lay.setContentsMargins(8, 8, 8, 8)
         scroll.setWidget(inner_widget)
         layout.addWidget(scroll)
 
         layout.addSpacing(40)
-        self.count_label = QLabel("Label number: 0 / Image number: 0")
+        self.count_label = QLabel("0 files selected / 0 frames / 0 labels")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         count_font = QFont()
         count_font.setPointSize(11)

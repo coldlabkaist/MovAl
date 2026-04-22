@@ -59,9 +59,9 @@ class _FileListWidget(QListWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         self.setStyleSheet(
             """
-            QListWidget::item:hover { background: lightgray; color: black; }
-            QListWidget::item:selected { background: lightgray; color: black; }
-            QListWidget::item:selected:!active { background: lightgray; color: black; }
+            QListWidget::item:hover { background: #eaf1ff; color: #111827; }
+            QListWidget::item:selected { background: #dbe8ff; color: #111827; }
+            QListWidget::item:selected:!active { background: #dbe8ff; color: #111827; }
             """
         )
 

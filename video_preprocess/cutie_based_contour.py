@@ -24,7 +24,20 @@ class VideoMultiSelectDialog(QDialog):
         base = Path(current_project.project_dir) / "frames"
         names = sorted([p.name for p in base.iterdir() if p.is_dir()]) if base.exists() else []
 
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            """
+            QScrollArea {
+                background: #ffffff;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: #ffffff;
+            }
+            """
+        )
         box = QWidget(); v = QVBoxLayout(box); v.setContentsMargins(6,6,6,6); v.setSpacing(4)
         for name in names:
             cb = QCheckBox(name); cb.setChecked(True)

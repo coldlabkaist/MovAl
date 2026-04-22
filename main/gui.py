@@ -9,6 +9,7 @@ from typing import Optional, Union
 from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -23,8 +24,35 @@ from PyQt6.QtWidgets import (
 )
 
 from utils import __version__
+from utils.ui_theme import get_theme_colors
 from utils.project import ProjectInformation
 from pose.task_state import pose_execution_state
+
+
+class AdditionalToolsDialog(QDialog):
+    def __init__(self, controller, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Additional Tools")
+        self.setFixedSize(350, 160)
+        self.controller = controller
+
+        layout = QVBoxLayout(self)
+        step1_label = QLabel("Step 1")
+        step1_label.setProperty("stepLabel", True)
+        layout.addWidget(step1_label)
+        self.convert_btn = QPushButton("Data Convert")
+        self.convert_btn.setFixedHeight(40)
+        self.convert_btn.clicked.connect(self.controller.data_convert)
+        layout.addWidget(self.convert_btn)
+
+        layout.addSpacing(10)
+        step2_label = QLabel("Step 2")
+        step2_label.setProperty("stepLabel", True)
+        layout.addWidget(step2_label)
+        self.extract_btn = QPushButton("Data Extract")
+        self.extract_btn.setFixedHeight(40)
+        self.extract_btn.clicked.connect(self.controller.data_extract)
+        layout.addWidget(self.extract_btn)
 
 
 class MainWindow(QMainWindow):
@@ -36,6 +64,7 @@ class MainWindow(QMainWindow):
 
         self.controller = controller
         self.controller.parent = self
+        self._additional_tools_dialog = None
         self.current_project: Optional[ProjectInformation] = None
         self.last_searched_dir: Optional[str] = None
         self.desktop_dir = QStandardPaths.writableLocation(
@@ -52,43 +81,56 @@ class MainWindow(QMainWindow):
         self.last_project_log_path = self.appdata_dir / "last_project.json"
 
         central_widget = QWidget()
+        central_widget.setObjectName("MainRoot")
         self.setCentralWidget(central_widget)
 
         outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(14, 14, 14, 14)
+        outer_layout.setSpacing(12)
         central_widget.setLayout(outer_layout)
 
+        header_card = QFrame(self)
+        header_card.setObjectName("Card")
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+        header_layout.setSpacing(10)
+
         title_label = QLabel("Welcome to MovAl")
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer_layout.addWidget(title_label)
+        title_label.setObjectName("PageTitle")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(title_label)
 
         proj_bar = QHBoxLayout()
-        proj_bar.addWidget(QLabel("Current project:", self))
+        proj_bar.setSpacing(8)
+        proj_label = QLabel("Current project:", self)
+        proj_label.setObjectName("FormLabel")
+        proj_bar.addWidget(proj_label)
         self.proj_name = QLineEdit(self)
         self.proj_name.setReadOnly(True)
         self.proj_name.setPlaceholderText("No project loaded")
         proj_bar.addWidget(self.proj_name, 1)
 
         self.btn_load_project = QPushButton("Load Project", self)
+        self.btn_load_project.setProperty("primary", True)
         self.btn_load_project.clicked.connect(self.on_load_project_clicked)
         proj_bar.addWidget(self.btn_load_project)
-        outer_layout.addLayout(proj_bar)
+        header_layout.addLayout(proj_bar)
 
-        self.pose_progress_widget = QFrame(self)
+        self.pose_progress_widget = QFrame(header_card)
         self.pose_progress_widget.setFrameShape(QFrame.Shape.NoFrame)
+        self.pose_progress_widget.setObjectName("StatusStrip")
         self.pose_progress_widget.setMinimumHeight(44)
         self.pose_progress_widget.setMaximumHeight(44)
         pose_progress_layout = QHBoxLayout(self.pose_progress_widget)
-        pose_progress_layout.setContentsMargins(0, 6, 0, 6)
+        pose_progress_layout.setContentsMargins(0, 6, 0, 4)
         pose_progress_layout.setSpacing(8)
         self.pose_progress_label = QLabel("Pose task running...", self.pose_progress_widget)
-        self.pose_progress_label.setStyleSheet("font-size: 11px;")
+        self.pose_progress_label.setObjectName("SubtleText")
         self.pose_progress_label.setMinimumHeight(18)
         self.pose_progress_bar = QFrame(self.pose_progress_widget)
         self.pose_progress_bar_layout = QVBoxLayout(self.pose_progress_bar)
         self.pose_progress_bar_layout.setContentsMargins(0, 0, 0, 0)
         self.pose_progress = QProgressBar(self.pose_progress_bar)
-        self.pose_progress.setStyleSheet("font-size: 11px;")
         self.pose_progress.setMinimumHeight(18)
         self.pose_progress.setMaximumHeight(18)
         self.pose_progress.setRange(0, 1)
@@ -100,45 +142,56 @@ class MainWindow(QMainWindow):
         pose_progress_layout.addWidget(self.pose_progress_bar, 1)
         self.pose_progress_label.setVisible(False)
         self.pose_progress_bar.setVisible(False)
+        header_layout.addWidget(self.pose_progress_widget)
+        outer_layout.addWidget(header_card)
 
         self.controller.main_window_load_project = self.on_load_project_clicked
         pose_execution_state.busy_changed.connect(self._on_pose_busy_changed)
         pose_execution_state.progress_changed.connect(self._on_pose_progress_changed)
 
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setFixedHeight(2)
-        outer_layout.addSpacing(5)
-        outer_layout.addWidget(line)
-        outer_layout.addSpacing(5)
-
         main_layout = QHBoxLayout()
+        main_layout.setSpacing(12)
         outer_layout.addLayout(main_layout)
 
+        left_card = QFrame(self)
+        left_card.setObjectName("Card")
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setContentsMargins(14, 12, 14, 12)
+        left_layout.setSpacing(8)
         self.button_layout = QVBoxLayout()
         self.button_layout.setSpacing(5)
-        self.button_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.addLayout(self.button_layout)
-        main_layout.insertStretch(0, 1)
-        main_layout.addStretch(1)
+        self.button_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.addLayout(self.button_layout)
+        left_layout.addStretch(1)
+        main_layout.addWidget(left_card, 1)
 
+        right_card = QFrame(self)
+        right_card.setObjectName("Card")
         right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(14, 12, 14, 12)
+        right_layout.setSpacing(0)
+        right_card.setLayout(right_layout)
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         image_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "background_image.png")
         )
-        pixmap = QPixmap(image_path)
-        self.image_label.setPixmap(
-            pixmap.scaledToWidth(450, Qt.TransformationMode.SmoothTransformation)
-        )
-        right_layout.addWidget(self.image_label)
-        main_layout.addLayout(right_layout, 2)
-        outer_layout.addWidget(self.pose_progress_widget)
+        self._hero_pixmap = QPixmap(image_path)
+        if not self._hero_pixmap.isNull():
+            self.image_label.setPixmap(
+                self._hero_pixmap.scaled(
+                    320,
+                    260,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        right_layout.addWidget(self.image_label, 1)
+        main_layout.addWidget(right_card, 2)
 
         self.setup_buttons()
+        self._apply_ui_theme()
         self._restore_last_project()
 
     def _on_pose_busy_changed(self, busy: bool, task_name: str) -> None:
@@ -230,85 +283,121 @@ class MainWindow(QMainWindow):
 
     def setup_buttons(self) -> None:
         installation_label = QLabel("Installation (Cutie / YOLO)")
-        installation_label.setStyleSheet("margin-top: 10px;")
+        installation_label.setObjectName("SectionTitle")
         self.button_layout.addWidget(installation_label)
         self.installation_btn = QPushButton("Installation")
-        self.installation_btn.setFixedHeight(25)
+        self.installation_btn.setFixedHeight(22)
         self.installation_btn.setMinimumWidth(180)
         self.installation_btn.clicked.connect(self.controller.run_installation)
         self.button_layout.addWidget(self.installation_btn)
 
         step1_label = QLabel("Step 1")
-        step1_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        step1_label.setObjectName("SectionTitle")
         self.button_layout.addWidget(step1_label)
         self.create_project_btn = QPushButton("Create / Manage Project")
-        self.create_project_btn.setFixedHeight(25)
+        self.create_project_btn.setFixedHeight(22)
         self.create_project_btn.setMinimumWidth(180)
         self.create_project_btn.clicked.connect(self.controller.run_project_manager)
         self.button_layout.addWidget(self.create_project_btn)
 
         step2_label = QLabel("Step 2")
-        step2_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        step2_label.setObjectName("SectionTitle")
         self.button_layout.addWidget(step2_label)
         self.preprocess_btn = QPushButton("Preprocess")
-        self.preprocess_btn.setFixedHeight(25)
+        self.preprocess_btn.setFixedHeight(22)
         self.preprocess_btn.setMinimumWidth(180)
         self.preprocess_btn.clicked.connect(self.controller.run_video_preprocess)
         self.button_layout.addWidget(self.preprocess_btn)
 
         step3_label = QLabel("Step 3")
-        step3_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        step3_label.setObjectName("SectionTitle")
         self.button_layout.addWidget(step3_label)
         self.label_btn = QPushButton("Labelary")
-        self.label_btn.setFixedHeight(25)
+        self.label_btn.setFixedHeight(22)
         self.label_btn.setMinimumWidth(180)
         self.label_btn.clicked.connect(self.controller.run_labelary)
         self.button_layout.addWidget(self.label_btn)
 
         step4_label = QLabel("Step 4")
-        step4_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        step4_label.setObjectName("SectionTitle")
         self.button_layout.addWidget(step4_label)
         self.pose_btn = QPushButton("Pose Estimation")
-        self.pose_btn.setFixedHeight(25)
+        self.pose_btn.setFixedHeight(22)
         self.pose_btn.setMinimumWidth(180)
         self.pose_btn.clicked.connect(self.controller.run_pose_estimation)
         self.button_layout.addWidget(self.pose_btn)
 
         optional_label = QLabel("Additional Tools")
-        optional_label.setStyleSheet("margin-top: 10px;")
+        optional_label.setObjectName("SectionTitle")
         self.button_layout.addWidget(optional_label)
         self.additional_tools_btn = QPushButton("Additional Tools")
-        self.additional_tools_btn.setFixedHeight(30)
+        self.additional_tools_btn.setFixedHeight(22)
         self.additional_tools_btn.setMinimumWidth(180)
         self.additional_tools_btn.clicked.connect(self._on_additional_tools_clicked)
         self.button_layout.addWidget(self.additional_tools_btn)
 
-    def _on_additional_tools_clicked(self) -> None:
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Question)
-        msg_box.setWindowTitle("Select Additional Tool")
-        msg_box.setText("Choose the tool you want to run.")
-        convert_btn = msg_box.addButton(
-            "Data Convert (DLC/SLEAP to TXT)",
-            QMessageBox.ButtonRole.AcceptRole,
-        )
-        extract_btn = msg_box.addButton(
-            "Data Extract (TXT to CSV)",
-            QMessageBox.ButtonRole.ActionRole,
-        )
-        cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
-        msg_box.setDefaultButton(convert_btn)
-        msg_box.exec()
-        clicked = msg_box.clickedButton()
+    def _apply_ui_theme(self) -> None:
+        c = get_theme_colors()
+        stylesheet = """
+            QWidget#MainRoot {
+                background: @APP_BG@;
+                color: @TEXT_DEFAULT@;
+                font-size: 12px;
+            }
+            QFrame#Card {
+                background: @SURFACE@;
+                border: 1px solid @BORDER_SOFT@;
+                border-radius: 12px;
+            }
+            QLabel#PageTitle {
+                color: @TEXT_PRIMARY@;
+                font-size: 20px;
+                font-weight: 700;
+            }
+            QLabel#SectionTitle {
+                color: @TEXT_PRIMARY@;
+                font-size: 13px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+            QLabel#FormLabel {
+                color: @TEXT_DEFAULT@;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QLabel#SubtleText {
+                color: @TEXT_MUTED@;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            """
+        tokens = {
+            "APP_BG": c["app_bg"],
+            "TEXT_DEFAULT": c["text_default"],
+            "SURFACE": c["surface"],
+            "BORDER_SOFT": c["border_soft"],
+            "TEXT_PRIMARY": c["text_primary"],
+            "TEXT_MUTED": c["text_muted"],
+        }
+        for key, value in tokens.items():
+            stylesheet = stylesheet.replace(f"@{key}@", value)
+        self.setStyleSheet(stylesheet)
 
-        if clicked == convert_btn:
-            self.controller.data_convert()
+    def _on_additional_tools_clicked(self) -> None:
+        if self._additional_tools_dialog is not None and self._additional_tools_dialog.isVisible():
+            self._additional_tools_dialog.raise_()
+            self._additional_tools_dialog.activateWindow()
             return
-        if clicked == extract_btn:
-            self.controller.data_extract()
-            return
-        if clicked == cancel_btn:
-            return
+        dialog = AdditionalToolsDialog(self.controller, self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.destroyed.connect(self._on_additional_tools_dialog_destroyed)
+        self._additional_tools_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_additional_tools_dialog_destroyed(self, *args):
+        self._additional_tools_dialog = None
 
     def on_load_project_clicked(
         self,

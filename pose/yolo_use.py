@@ -516,10 +516,11 @@ class YoloInferenceDialog(QDialog):
         group = QGroupBox("Inference Target")
         form = QFormLayout(group)
         form.setSpacing(4)
+        form.setContentsMargins(6, 6, 6, 6)
 
         container = QWidget()
         vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0,0,0,0)
+        vbox.setContentsMargins(6, 6, 6, 6)
         vbox.setSpacing(2) 
         self.target_checks = []
         for name in self.animals_name:
@@ -529,6 +530,7 @@ class YoloInferenceDialog(QDialog):
         vbox.addStretch()  
 
         scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
+        scroll.setObjectName("inferenceTargetScroll")
         scroll.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         scroll.setWidget(container)
         form.addRow(scroll)

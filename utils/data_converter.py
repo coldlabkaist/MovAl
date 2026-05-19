@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 import subprocess
 import os
+import sys
 import json
 import random
 import shutil
@@ -15,6 +16,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from typing import List, Optional
 
 
 class DataConverterDialog(QDialog):
@@ -50,18 +52,73 @@ class DataConverterDialog(QDialog):
         self.setLayout(main_layout)
         
     def run_slp_to_coco(self):
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        bat_path = os.path.join(project_root, "utils", "sleap_converter", "slp_to_coco.bat")
+        project_root = Path(__file__).resolve().parents[1]
+        script_path = project_root / "utils" / "sleap_converter" / "slp_to_coco.py"
+        if not script_path.exists():
+            QMessageBox.warning(self, "Error", f"{script_path} not found")
+            return
 
-        if not os.path.exists(bat_path):
-            QMessageBox.warning(self, "Error", f"{bat_path} not found")
+        launch_cmd = self._resolve_slp_launch_command(script_path)
+        if launch_cmd is None:
+            QMessageBox.warning(
+                self,
+                "SLEAP not detected",
+                "SLP environment could not be loaded and SLP to COCO was not started.\n\n"
+                "SLEAP was not detected in either:\n"
+                "1) conda environment 'sleap'\n"
+                "2) current Python environment\n\n"
+                "Please install SLEAP and try again.",
+            )
             return
 
         try:
-            subprocess.Popen(bat_path, shell=True)
-        except Exception:
-            subprocess.Popen(["cmd", "/c", bat_path], shell=False)
+            subprocess.Popen(launch_cmd, shell=False)
+        except Exception as err:
+            QMessageBox.warning(
+                self,
+                "SLEAP not detected",
+                "Failed to launch SLP to COCO after loading SLP environment.\n"
+                "SLEAP may not be detected correctly.\n\n"
+                f"Details: {err}",
+            )
+            return
+
         QMessageBox.information(self, "Launching", "Launching SLP to COCO GUI...")
+
+    def _resolve_slp_launch_command(self, script_path: Path) -> Optional[List[str]]:
+        conda_python = self._conda_python_prefix()
+        if conda_python is not None:
+            if self._probe_sleap(conda_python):
+                return [*conda_python, str(script_path)]
+
+        current_python = [sys.executable]
+        if self._probe_sleap(current_python):
+            return [sys.executable, str(script_path)]
+
+        return None
+
+    @staticmethod
+    def _conda_python_prefix() -> Optional[List[str]]:
+        conda_exe = shutil.which("conda") or os.environ.get("CONDA_EXE")
+        if not conda_exe:
+            return None
+        conda_exe = str(conda_exe)
+        if os.name == "nt" and conda_exe.lower().endswith(".bat"):
+            return ["cmd", "/c", conda_exe, "run", "-n", "sleap", "python"]
+        return [conda_exe, "run", "-n", "sleap", "python"]
+
+    @staticmethod
+    def _probe_sleap(python_cmd: list[str]) -> bool:
+        try:
+            result = subprocess.run(
+                [*python_cmd, "-c", "import sleap"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
         
     def open_dlc_to_coco(self):
         dialog= DlcToCocoDialog(self)

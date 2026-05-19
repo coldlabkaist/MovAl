@@ -1,5 +1,15 @@
 from PyQt6.QtGui import QColor
 
+DEFAULT_NODE_PALETTE = [
+    "#ff595e",
+    "#ff924c",
+    "#ffca3a",
+    "#8ac926",
+    "#52b788",
+    "#1982c4",
+    "#6a4c93",
+]
+
 class Node:
     def __init__(self, name, shape='circle', color='#ffffff', thickness=1, filled=False, x=0, y=0, text=None):
         self.name = name
@@ -18,12 +28,14 @@ class SkeletonModel:
         self.syms = set() 
         self.node_counter = 0
 
-    def add_node(self, shape='circle', color='#666666', thickness=1, filled=False, x=0, y=0, text=None):
+    def add_node(self, shape='circle', color=None, thickness=1, filled=True, x=0, y=0, text=None):
         self.node_counter += 1
         name = f"Node{self.node_counter}"
         while name in self.nodes:
             self.node_counter += 1
             name = f"Node{self.node_counter}"
+        if color is None:
+            color = DEFAULT_NODE_PALETTE[(self.node_counter - 1) % len(DEFAULT_NODE_PALETTE)]
         node = Node(name, shape, color, thickness, filled, x, y, text)
         self.nodes[name] = node
         return node
@@ -90,8 +102,7 @@ class SkeletonModel:
         if key in self.syms:
             self.syms.remove(key)
 
-    def save_to_yaml(self, filepath):
-        import yaml
+    def to_dict(self):
         data = {"nodes": [], "connections": [], "symmetry": []}
         node_names = []
         for name, node in self.nodes.items():
@@ -117,13 +128,15 @@ class SkeletonModel:
             if len(sym) == 2:
                 n1, n2 = list(sym)
                 data["symmetry"].append([n1, n2])
+        return data
+
+    def save_to_yaml(self, filepath):
+        import yaml
+        data = self.to_dict()
         with open(filepath, 'w') as f:
             yaml.safe_dump(data, f)
 
-    def load_from_yaml(self, filepath):
-        import yaml
-        with open(filepath, 'r') as f:
-            data = yaml.safe_load(f)
+    def load_from_dict(self, data):
         self.nodes.clear()
         self.edges.clear()
         self.syms.clear()
@@ -156,6 +169,12 @@ class SkeletonModel:
                 n1, n2 = conn[0], conn[1]
                 if n1 in self.nodes and n2 in self.nodes:
                     self.syms.add(frozenset({n1, n2}))
+
+    def load_from_yaml(self, filepath):
+        import yaml
+        with open(filepath, 'r') as f:
+            data = yaml.safe_load(f)
+        self.load_from_dict(data or {})
 
     def create_training_config(self):
         kpt_names    = list(self.nodes.keys())

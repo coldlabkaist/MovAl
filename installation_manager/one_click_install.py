@@ -113,11 +113,11 @@ class OneClickWorker(QThread):
             for i, (msg, fn) in enumerate(steps_cutie, 1):
                 self.log.emit(msg)
                 fn()
-                self.progress.emit(int(i/n*100))
+                self.progress.emit(int((i / n) * 100))
             for i, (msg, fn) in enumerate(steps_yolo, 1):
                 self.log.emit(msg)
                 fn()
-                self.progress.emit(int(i+len(steps_cutie)/n*100))
+                self.progress.emit(int(((len(steps_cutie) + i) / n) * 100))
             self.done.emit(True)
 
         except Exception as e:

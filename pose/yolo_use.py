@@ -1,16 +1,18 @@
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QSizePolicy, QGridLayout,
-    QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
-    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QListWidgetItem, QFrame, QButtonGroup, QRadioButton
+    QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QGridLayout,
+    QDialog, QLineEdit, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
+    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QFrame
 )
 from PyQt6.QtCore import Qt
-import subprocess
 import os
 from .thread import TrainThread, InferenceThread
-import sys
+from .task_state import pose_execution_state
+from utils.runtime_locks import is_project_compression_running
 from datetime import datetime
-import yaml
 from pathlib import Path
+import re
+import pandas as pd
+from utils.skeleton.skeleton_model import SkeletonModel
 
 class BrowseOnlyLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -43,7 +45,8 @@ class YOLODialog(QDialog):
         self.setFixedSize(1000, 800)
 
         self.current_project = current_project
-        self.yaml_path = os.path.join(current_project.project_dir, "runs", "training_config.yaml")
+        self.train_thread = None
+        self._training_running = False
 
         main_layout = QVBoxLayout(self)
 
@@ -88,10 +91,60 @@ class YOLODialog(QDialog):
         middle_layout.addLayout(right_layout, 1)
         main_layout.addLayout(middle_layout)
 
-        run_btn = QPushButton("Run Train")
-        run_btn.clicked.connect(self.run_train)
-        run_btn.setFixedHeight(30)
-        main_layout.addWidget(run_btn)
+        self.run_btn = QPushButton("Run Training")
+        self.run_btn.setProperty("primary", True)
+        self.run_btn.clicked.connect(self._on_run_button_clicked)
+        self.run_btn.setFixedHeight(30)
+        main_layout.addWidget(self.run_btn)
+
+        pose_execution_state.busy_changed.connect(self._on_pose_task_busy_changed)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
+
+    def _on_run_button_clicked(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task == "training":
+            self._stop_training()
+            return
+        if self._is_training_running():
+            self._stop_training()
+            return
+        self.run_train()
+
+    def _is_training_running(self) -> bool:
+        if self._training_running or (self.train_thread is not None and self.train_thread.isRunning()):
+            return True
+        return pose_execution_state.is_busy() and (pose_execution_state.active_task() or "").lower() == "training"
+
+    def _set_training_parameter_controls_enabled(self, enabled: bool):
+        widgets = [self.model_combo, self.size_combo]
+        for box in self.findChildren(QGroupBox):
+            widgets.append(box)
+        for widget in widgets:
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _stop_training(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if not self._is_training_running() and active_task != "training":
+            return
+        print("[Training] Stop requested by user.", flush=True)
+        self.run_btn.setEnabled(False)
+        self.run_btn.setText("Stopping training...")
+        if self.train_thread is not None:
+            self.train_thread.stop()
+            return
+
+        owner = pose_execution_state.active_owner()
+        if owner is not None and owner is not self:
+            owner_thread = getattr(owner, "train_thread", None)
+            if owner_thread is not None and owner_thread.isRunning():
+                stop_fn = getattr(owner_thread, "stop", None)
+                if callable(stop_fn):
+                    stop_fn()
+                    return
 
     def create_group_box(self, title, params):
         group = QGroupBox(title)
@@ -139,6 +192,27 @@ class YOLODialog(QDialog):
     def run_train(self):
         import os
 
+        if is_project_compression_running():
+            QMessageBox.information(
+                self,
+                "Compression in progress",
+                "Project compression is running. Please wait until it finishes.",
+            )
+            return
+
+        if pose_execution_state.is_busy():
+            running = (pose_execution_state.active_task() or "pose task").lower()
+            if running == "training":
+                QMessageBox.information(self, "Training in progress", "Training is already running.")
+            else:
+                QMessageBox.information(
+                    self,
+                    "Pose task already running",
+                    f"Another pose task is running ({running}).\n"
+                    "Please wait until it finishes.",
+                )
+            return
+
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         models_dir = os.path.join(project_root, "models")
 
@@ -179,7 +253,12 @@ class YOLODialog(QDialog):
             )
             return
 
-        yaml_path = self.yaml_path
+        try:
+            yaml_path = self.current_project.write_training_config_yaml().as_posix()
+        except Exception as err:
+            QMessageBox.critical(self, "Training config error", f"Failed to generate training config:\n{err}")
+            return
+
         params = {
             "model": model_path,
             "data": yaml_path,
@@ -219,30 +298,99 @@ class YOLODialog(QDialog):
         params["project"] = os.path.join(self.current_project.project_dir, "runs")
         params["name"]    = f"train_{ts_date}_{ts_time}"
 
-        command = "yolo pose train"
+        command = ["yolo", "pose", "train"]
         for key, value in params.items():
             if value in ["", "None"]:
                 continue
             if isinstance(value, bool):
                 if value:
-                    command += f" {key}=True"
+                    command.append(f"{key}=True")
             else:
-                command += f" {key}={value}"
+                command.append(f"{key}={value}")
 
         print("Execute Command:", command)
 
+        if not pose_execution_state.acquire("training", owner=self):
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                "Another pose task is running. Please try again later.",
+            )
+            return
+
+        pose_execution_state.update_progress(0, 0, "Training running...")
+        self._training_running = True
         self.train_thread = TrainThread(command)
-        self.train_thread.finished_signal.connect(
-            lambda: QMessageBox.information(self, "Done", "Training Completed")
-        )
+        self.train_thread.finished_signal.connect(self._on_train_finished)
+        self._set_training_parameter_controls_enabled(False)
         self.train_thread.start()
+        self._on_pose_task_busy_changed(True, "training")
+
+    def _on_train_finished(self):
+        was_stopped = self.train_thread.was_stopped if self.train_thread is not None else False
+        pose_execution_state.release(owner=self)
+        self.train_thread = None
+        self._training_running = False
+        self._set_training_parameter_controls_enabled(True)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
+        if was_stopped:
+            print("[Training] Stopped.", flush=True)
+            QMessageBox.information(self, "Stopped", "Training stopped.")
+        else:
+            print("[Training] Completed.", flush=True)
+            QMessageBox.information(self, "Done", "Training Completed")
+
+    def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
+        if not hasattr(self, "run_btn"):
+            return
+
+        active = (task_name or "").lower()
+        if busy and active == "training":
+            self._set_training_parameter_controls_enabled(False)
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Stop Training")
+            return
+
+        if busy:
+            self._set_training_parameter_controls_enabled(False)
+            self.run_btn.setEnabled(False)
+            if active == "inference":
+                self.run_btn.setText("Run Training (Disabled during inference)")
+            else:
+                self.run_btn.setText("Run Training")
+        else:
+            self._set_training_parameter_controls_enabled(True)
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Run Training")
+
+    def closeEvent(self, event):
+        if self._is_training_running():
+            self.hide()
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 class YoloInferenceDialog(QDialog):
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.current_project = current_project
         self.animals_name = current_project.animals_name
+        self.command_queue = []
+        self.current_run_item = None
+        self.infer_thread = None
+        self._inference_running = False
+        self._stop_requested = False
+        self._completed_commands = 0
+        self._total_commands = 0
         self.build_ui()
+        pose_execution_state.busy_changed.connect(self._on_pose_task_busy_changed)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
 
     def build_ui(self):
         self.setWindowTitle("YOLO Pose Inference")
@@ -260,10 +408,7 @@ class YoloInferenceDialog(QDialog):
             {"imgsz": 640, "conf": 0.5, "iou": 0.7,
              "augment": False, "half": False, "device": "None"}
         )
-        self.visualization_group = self.create_params_group(
-            "Visualization",
-            {"show": False, "save": False, "save_txt": True}
-        )
+        self.visualization_group = self.build_visualization_group()
 
         self.grid.addWidget(self.video_group, 0, 0)
         self.grid.addWidget(self.target_group, 0, 1)
@@ -276,17 +421,29 @@ class YoloInferenceDialog(QDialog):
         self.grid.setColumnStretch(1, 1)
 
         main_layout.addLayout(self.grid)
-        run_btn = QPushButton("Run", clicked=self.run_inference)
-        run_btn.setFixedHeight(30)
-        main_layout.addWidget(run_btn)
+        self.run_btn = QPushButton("Run Inference", clicked=self._on_run_button_clicked)
+        self.run_btn.setProperty("primary", True)
+        self.run_btn.setFixedHeight(30)
+        main_layout.addWidget(self.run_btn)
+
+    def _on_run_button_clicked(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task == "inference":
+            self._stop_inference()
+            return
+        if self._inference_running:
+            self._stop_inference()
+            return
+        self.run_inference()
 
     def build_model_row(self):
         row = QHBoxLayout()
         self.model_line_edit = BrowseOnlyLineEdit()
         self.model_line_edit.setPlaceholderText("Select Model")
-        browse_btn = QPushButton("Browse", clicked=self.select_model)
+        self.model_browse_btn = QPushButton("Browse Model", clicked=self.select_model)
+        self.model_browse_btn.setProperty("primary", True)
         row.addWidget(self.model_line_edit)
-        row.addWidget(browse_btn)
+        row.addWidget(self.model_browse_btn)
         return row
 
     def build_track_row(self):
@@ -309,8 +466,9 @@ class YoloInferenceDialog(QDialog):
         mode_box = QWidget()
         mode_lay = QHBoxLayout(mode_box)
         mode_lay.setContentsMargins(0,0,0,0)
-        self.image_radio = QRadioButton("image frames", checked=True)
-        self.video_radio = QRadioButton("video")
+        self.image_radio = QRadioButton("image frames")
+        self.video_radio = QRadioButton("video", checked=True)
+        self._source_mode_ready = False
         for w in (self.image_radio, self.video_radio):
             mode_lay.addWidget(w)
             w.toggled.connect(self.update_source_mode_ui)
@@ -321,6 +479,7 @@ class YoloInferenceDialog(QDialog):
         self.video_section = self.build_video_section()
         form.addRow(self.video_section)
         self.update_source_mode_ui()
+        self._source_mode_ready = True
         return group
 
     def build_image_section(self):
@@ -329,6 +488,11 @@ class YoloInferenceDialog(QDialog):
         lay.setContentsMargins(0,0,0,0)
         self.image_mode_combo = QComboBox()
         self.image_mode_combo.addItems(["images", "davis", "contour"])
+        preferred_mode = self.current_project.get_preferred_frame_mode()
+        preferred_index = self.image_mode_combo.findText(preferred_mode, Qt.MatchFlag.MatchExactly)
+        if preferred_index >= 0:
+            self.image_mode_combo.setCurrentIndex(preferred_index)
+        self.image_mode_combo.currentTextChanged.connect(self._save_image_mode)
         lay.addWidget(self.image_mode_combo)
 
         container = QWidget()
@@ -354,6 +518,10 @@ class YoloInferenceDialog(QDialog):
         lay.addLayout(button_row)
         return sect
 
+    def _save_image_mode(self, image_mode: str) -> None:
+        if self.image_radio.isChecked():
+            self.current_project.set_preferred_frame_mode(image_mode)
+
     def build_video_section(self):
         sect = QWidget()
         sect.hide()
@@ -361,6 +529,16 @@ class YoloInferenceDialog(QDialog):
         lay.setContentsMargins(0,0,0,0)
         self.load_video_btn = QPushButton("Load Video...", clicked=self.load_videos)
         self.loaded_list = QListWidget()
+        seen = set()
+        for fe in self.current_project.files:
+            path_obj = Path(fe.video)
+            if not path_obj.exists():
+                continue
+            path = str(path_obj)
+            if path in seen:
+                continue
+            seen.add(path)
+            self.loaded_list.addItem(path)
         self.clear_video_btn = QPushButton("Clear List", clicked=self.clear_videos)
         lay.addWidget(self.load_video_btn)
         lay.addWidget(self.loaded_list)
@@ -371,10 +549,11 @@ class YoloInferenceDialog(QDialog):
         group = QGroupBox("Inference Target")
         form = QFormLayout(group)
         form.setSpacing(4)
+        form.setContentsMargins(6, 6, 6, 6)
 
         container = QWidget()
         vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0,0,0,0)
+        vbox.setContentsMargins(6, 6, 6, 6)
         vbox.setSpacing(2) 
         self.target_checks = []
         for name in self.animals_name:
@@ -384,9 +563,28 @@ class YoloInferenceDialog(QDialog):
         vbox.addStretch()  
 
         scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
+        scroll.setObjectName("inferenceTargetScroll")
         scroll.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         scroll.setWidget(container)
         form.addRow(scroll)
+        return group
+
+    def build_visualization_group(self):
+        group = QGroupBox("Visualization")
+        form = QFormLayout(group)
+
+        self.show_tracking_checkbox = QCheckBox(checked=False)
+        self.save_media_checkbox = QCheckBox(checked=False)
+        self.save_txt_checkbox = QCheckBox(checked=True)
+        self.convert_txt_to_csv_checkbox = QCheckBox(checked=True)
+
+        form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
+        form.addRow(QLabel("save image/video"), self.save_media_checkbox)
+        form.addRow(QLabel("save txt"), self.save_txt_checkbox)
+        form.addRow(QLabel("convert txt to csv"), self.convert_txt_to_csv_checkbox)
+
+        self.save_txt_checkbox.toggled.connect(self._update_visualization_option_states)
+        self._update_visualization_option_states()
         return group
 
     def create_params_group(self, title, params: dict):
@@ -437,6 +635,14 @@ class YoloInferenceDialog(QDialog):
         else:
             self.image_section.hide()
             self.video_section.show()
+
+        self._update_visualization_option_states()
+
+        if getattr(self, "_source_mode_ready", False):
+            if self.video_radio.isChecked():
+                self.current_project.set_preferred_frame_mode("video")
+            else:
+                self.current_project.set_preferred_frame_mode(self.image_mode_combo.currentText())
 
     def clear_videos(self):
         self.loaded_list.clear()
@@ -511,10 +717,45 @@ class YoloInferenceDialog(QDialog):
         max_det = len(classes)
         return classes, max_det
 
+    def _update_visualization_option_states(self):
+        if hasattr(self, "show_tracking_checkbox"):
+            if self.image_radio.isChecked():
+                self.show_tracking_checkbox.setChecked(False)
+                self.show_tracking_checkbox.setEnabled(False)
+            else:
+                self.show_tracking_checkbox.setEnabled(True)
+
+        if hasattr(self, "save_txt_checkbox") and hasattr(self, "convert_txt_to_csv_checkbox"):
+            if self.save_txt_checkbox.isChecked():
+                self.convert_txt_to_csv_checkbox.setEnabled(True)
+            else:
+                self.convert_txt_to_csv_checkbox.setChecked(False)
+                self.convert_txt_to_csv_checkbox.setEnabled(False)
+
     def run_inference(self):
+        if is_project_compression_running():
+            QMessageBox.information(
+                self,
+                "Compression in progress",
+                "Project compression is running. Please wait until it finishes.",
+            )
+            return
+
+        if pose_execution_state.is_busy():
+            running = (pose_execution_state.active_task() or "pose task").lower()
+            if running != "inference":
+                QMessageBox.information(
+                    self,
+                    "Pose task already running",
+                    f"Another pose task is running ({running}).\n"
+                    "Please wait until it finishes.",
+                )
+            else:
+                QMessageBox.information(self, "Inference in progress", "Inference is already running.")
+            return
+
         model_path = self.model_line_edit.text()
         infer_params = self.get_params_from_group(self.inference_group)
-        vis_params = self.get_params_from_group(self.visualization_group)
         sources = self.get_video_list()
         classes, max_det = self.get_inference_target()
         if not model_path:
@@ -530,7 +771,8 @@ class YoloInferenceDialog(QDialog):
         infer_params["classes"] = classes
         infer_params["max_det"] = max_det
 
-        self.command_queue = [] 
+        self.command_queue = []
+        self.current_run_item = None
 
         ts = datetime.now()
         ts_date = ts.strftime("%y%m%d")
@@ -576,23 +818,320 @@ class YoloInferenceDialog(QDialog):
                 else:
                     cmd.append(f"{k}={v}")
 
-            for k in ["show", "save", "save_txt"]:
-                if vis_params.get(k, False):
-                    cmd.append(f"{k}=True")
+            if self.show_tracking_checkbox.isChecked():
+                cmd.append("show=True")
+            if self.save_media_checkbox.isChecked():
+                cmd.append("save=True")
+            if self.save_txt_checkbox.isChecked():
+                cmd.append("save_txt=True")
 
-            self.command_queue.append(cmd)
+            self.command_queue.append(
+                {
+                    "command": cmd,
+                    "run_name": run_name,
+                    "source_name": name,
+                }
+            )
 
-        self.run_next_command()
-
-    
-    def run_next_command(self):
         if not self.command_queue:
-            print("All inference tasks completed.")
+            QMessageBox.warning(self, "Warning", "No valid inference command was generated.")
             return
 
-        command = self.command_queue.pop(0)
-        print("▶Executing:", command)
+        if not pose_execution_state.acquire("inference", owner=self):
+            QMessageBox.information(
+                self,
+                "Pose task already running",
+                "Another pose task is running. Please try again later.",
+            )
+            return
+
+        self._inference_running = True
+        self._stop_requested = False
+        self._completed_commands = 0
+        self._total_commands = len(self.command_queue)
+        self._set_inference_config_controls_enabled(False)
+        self._on_pose_task_busy_changed(True, "inference")
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            f"Inference queued ({self._completed_commands}/{self._total_commands})",
+        )
+
+        try:
+            self.run_next_command()
+        except Exception as err:
+            self._finish_inference_run(success=False)
+            QMessageBox.critical(
+                self,
+                "Inference start failed",
+                f"Failed to start inference:\n{err}",
+            )
+
+    def run_next_command(self):
+        if self._stop_requested:
+            self.command_queue.clear()
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+
+        if not self.command_queue:
+            print("All inference tasks completed.")
+            self._finish_inference_run()
+            return
+
+        self.current_run_item = self.command_queue.pop(0)
+        command = self.current_run_item["command"]
+        source_name = self.current_run_item.get("source_name", "")
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            f"Inference running: {source_name} ({self._completed_commands + 1}/{self._total_commands})",
+        )
+        print("Executing:", command)
 
         self.infer_thread = InferenceThread(command)
-        self.infer_thread.finished.connect(self.run_next_command) 
+        self.infer_thread.finished_signal.connect(self._on_inference_command_finished)
         self.infer_thread.start()
+
+    def _on_inference_command_finished(self):
+        thread = self.infer_thread
+        self.infer_thread = None
+
+        if self._stop_requested or (thread is not None and thread.was_stopped):
+            print("[Inference] Stop confirmed. Cleaning up queued tasks.", flush=True)
+            self.command_queue.clear()
+            self.current_run_item = None
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+
+        run_item = self.current_run_item or {}
+        run_name = run_item.get("run_name")
+        if (
+            run_name
+            and self.save_txt_checkbox.isChecked()
+            and self.convert_txt_to_csv_checkbox.isChecked()
+        ):
+            try:
+                self._convert_txt_result_to_csv(run_name)
+            except Exception as err:
+                QMessageBox.warning(
+                    self,
+                    "TXT to CSV conversion failed",
+                    f"Run: {run_name}\n{err}",
+                )
+        self._completed_commands += 1
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            f"Inference completed {self._completed_commands}/{self._total_commands}",
+        )
+        self.current_run_item = None
+        self.run_next_command()
+
+    def _set_inference_config_controls_enabled(self, enabled: bool):
+        widgets = [
+            getattr(self, "model_line_edit", None),
+            getattr(self, "model_browse_btn", None),
+            getattr(self, "inference_radio", None),
+            getattr(self, "tracking_radio", None),
+            getattr(self, "track_method_combo", None),
+            getattr(self, "video_group", None),
+            getattr(self, "target_group", None),
+            getattr(self, "inference_group", None),
+            getattr(self, "visualization_group", None),
+        ]
+        for widget in widgets:
+            if widget is not None:
+                widget.setEnabled(enabled)
+
+    def _stop_inference(self):
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if not self._inference_running and active_task != "inference":
+            return
+        print("[Inference] Stop requested by user.", flush=True)
+        self._stop_requested = True
+        self.command_queue.clear()
+        self.run_btn.setEnabled(False)
+        self.run_btn.setText("Stopping inference...")
+        pose_execution_state.update_progress(
+            self._completed_commands,
+            self._total_commands,
+            "Stopping inference...",
+        )
+        if self.infer_thread is not None and self.infer_thread.isRunning():
+            self.infer_thread.stop()
+            return
+
+        owner = pose_execution_state.active_owner()
+        if owner is not None and owner is not self:
+            owner_thread = getattr(owner, "infer_thread", None)
+            if owner_thread is not None and owner_thread.isRunning():
+                stop_fn = getattr(owner_thread, "stop", None)
+                if callable(stop_fn):
+                    stop_fn()
+                    return
+
+        self._finish_inference_run(success=False, cancelled=True)
+
+    def _finish_inference_run(self, success: bool = True, cancelled: bool = False):
+        if not self._inference_running:
+            return
+
+        self._inference_running = False
+        self._completed_commands = self._total_commands
+        self._stop_requested = False
+
+        pose_execution_state.release(owner=self)
+        self._set_inference_config_controls_enabled(True)
+        self._on_pose_task_busy_changed(
+            pose_execution_state.is_busy(),
+            pose_execution_state.active_task() or "",
+        )
+        if cancelled:
+            print("[Inference] Stopped.", flush=True)
+            QMessageBox.information(self, "Stopped", "Inference stopped.")
+        elif success:
+            print("[Inference] Completed.", flush=True)
+            QMessageBox.information(self, "Done", "Inference Completed")
+
+    def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
+        if not hasattr(self, "run_btn"):
+            return
+
+        active = (task_name or "").lower()
+        if busy and active == "inference":
+            self._set_inference_config_controls_enabled(False)
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Stop Inference")
+            return
+
+        if busy:
+            self._set_inference_config_controls_enabled(False)
+            self.run_btn.setEnabled(False)
+            if active == "training":
+                self.run_btn.setText("Run Inference (Disabled during training)")
+            else:
+                self.run_btn.setText("Run Inference")
+        else:
+            self._set_inference_config_controls_enabled(True)
+            self.run_btn.setEnabled(True)
+            self.run_btn.setText("Run Inference")
+
+    def closeEvent(self, event):
+        if self._inference_running:
+            self.hide()
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    @staticmethod
+    def _extract_frame_number(filename: str) -> int:
+        match = re.search(r"_(\d+)\.txt$", filename)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"(\d+)\.txt$", filename)
+        return int(match.group(1)) if match else -1
+
+    def _project_kpt_names(self) -> list[str]:
+        skeleton_model = SkeletonModel()
+        skeleton_model.load_from_dict(self.current_project.skeleton_data)
+        _, _, kpt_names = skeleton_model.create_training_config()
+        return list(kpt_names)
+
+    def _convert_txt_result_to_csv(self, run_name: str):
+        run_dir = Path(self.current_project.project_dir) / "predicts" / run_name
+        txt_dir = run_dir / "labels"
+        if not txt_dir.is_dir():
+            return
+
+        txt_files = sorted(
+            txt_dir.glob("*.txt"),
+            key=lambda p: self._extract_frame_number(p.name),
+        )
+        if not txt_files:
+            return
+
+        kpt_names = self._project_kpt_names()
+        if not kpt_names:
+            return
+
+        rows = []
+        has_instance_id = False
+
+        for idx, txt_path in enumerate(txt_files):
+            with txt_path.open("r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            detections = []
+            for line in lines:
+                items = line.strip().split()
+                if len(items) < 6:
+                    continue
+                try:
+                    track_id = int(float(items[0]))
+                except Exception:
+                    continue
+                raw = items[5:]
+
+                if len(raw) % 3 == 1:
+                    try:
+                        instance_id = int(float(raw[-1]))
+                        kpt_data = list(map(float, raw[:-1]))
+                        has_instance_id = True
+                    except Exception:
+                        continue
+                else:
+                    instance_id = None
+                    try:
+                        kpt_data = list(map(float, raw))
+                    except Exception:
+                        continue
+
+                remapped_id = instance_id if instance_id is not None else ""
+                detections.append((track_id, remapped_id, kpt_data))
+
+            frame_num = self._extract_frame_number(txt_path.name)
+            if frame_num < 0:
+                frame_num = idx + 1
+
+            track_data = {}
+            for track_id, remapped_id, kpt_data in detections:
+                key = (track_id, remapped_id if remapped_id != "" else None)
+                if key not in track_data:
+                    track_data[key] = (kpt_data, remapped_id)
+                    continue
+                prev, rid = track_data[key]
+                for kp in range(min(len(kpt_names), len(prev) // 3, len(kpt_data) // 3)):
+                    if kpt_data[kp * 3 + 2] > prev[kp * 3 + 2]:
+                        prev[kp * 3:kp * 3 + 3] = kpt_data[kp * 3:kp * 3 + 3]
+                track_data[key] = (prev, rid)
+
+            for (track_id, _), (kpt_data, remapped_id) in track_data.items():
+                track_name = (
+                    self.animals_name[track_id]
+                    if 0 <= track_id < len(self.animals_name)
+                    else f"track_{track_id}"
+                )
+                row = [track_name, frame_num, 0.9]
+                for kp in range(len(kpt_names)):
+                    base = kp * 3
+                    if base + 2 < len(kpt_data):
+                        x, y, conf = kpt_data[base:base + 3]
+                    else:
+                        x, y, conf = 0.0, 0.0, 0.0
+                    row.extend([x, y, conf])
+                if has_instance_id:
+                    row.append(remapped_id)
+                rows.append(row)
+
+        if not rows:
+            return
+
+        columns = ["track", "frame_idx", "instance.score"]
+        for name in kpt_names:
+            columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
+        if has_instance_id:
+            columns.append("instance.id")
+
+        df = pd.DataFrame(rows, columns=columns)
+        csv_path = run_dir / "inference_result.csv"
+        df.to_csv(csv_path, index=False)

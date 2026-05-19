@@ -17,7 +17,7 @@ class VideoLoader:
                 frame_slider, 
                 frame_number_label, 
                 frame_jump_spin=None,
-                frame_display_mode = "davis"):
+                frame_display_mode = "video"):
 
         self.parent = parent
         self.project_path = parent.project.project_dir
@@ -30,6 +30,10 @@ class VideoLoader:
 
         self.frame_dir = None
         self.frame_files = []
+        self.video_capture = None
+        self.video_source_path: Optional[str] = None
+        self._video_next_frame_idx = 0
+        self.current_frame_bgr = None
         self.current_frame = 0
         self.total_frames = 0
         self.timer = QTimer()
@@ -39,6 +43,8 @@ class VideoLoader:
         self.play_rate = 1.0
 
     def load_video(self, path, frame_display_mode):
+        self.timer.stop()
+        self._release_video_capture()
         try:
             cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG)
             self.fps = cap.get(cv2.CAP_PROP_FPS)
@@ -47,14 +53,22 @@ class VideoLoader:
             warnings.warn(f"Unable to load video from project: {path}. Video playback fps is fixed to 30.", UserWarning)
             self.fps = 30
         if self.fps == 0:
-            warnings.warn(f"Unable to load video from project: {path}. It's possible that the video directory specified in the project's config file wasn't read."
-                        "Check the project's config.py file and make sure the directory is set properly. Video playback fps is fixed to 30.", UserWarning)
+            warnings.warn(
+                f"Unable to load video from project: {path}. "
+                "The project may be pointing to a missing external source video. "
+                "Video playback fps is fixed to 30.",
+                UserWarning,
+            )
             self.fps = 30
+
+        if frame_display_mode == "video":
+            return self._load_video_from_source(path)
 
         frame_base_path = os.path.join(self.project_path, "frames")
         self.frame_display_mode = frame_display_mode
         path = os.path.join(frame_base_path, path.stem, self._ensure_display_mode(frame_display_mode))
         self.frame_dir = path
+        self.video_source_path = None
         try:
             self.frame_files = sorted(f for f in os.listdir(path) if f.endswith(".jpg"))
             if not self.frame_files:
@@ -89,6 +103,65 @@ class VideoLoader:
             return False
         return True
 
+    def _load_video_from_source(self, path: Path) -> bool:
+        cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            cap.release()
+            cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            QMessageBox.warning(
+                self.parent,
+                "Video load failed",
+                f"Unable to open video file:\n{path}",
+            )
+            return False
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if self.fps <= 0:
+            self.fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        if self.fps <= 0:
+            self.fps = 30
+
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            cap.release()
+            QMessageBox.warning(
+                self.parent,
+                "Video load failed",
+                f"Unable to read the first frame:\n{path}",
+            )
+            return False
+
+        self.frame_display_mode = "video"
+        self.frame_dir = None
+        self.frame_files = []
+        self.video_capture = cap
+        self.video_source_path = str(path)
+        self._video_next_frame_idx = 1
+        self.display_video(frame, max(1, total_frames))
+        return True
+
+    def _release_video_capture(self) -> None:
+        if self.video_capture is None:
+            return
+        try:
+            self.video_capture.release()
+        except Exception:
+            pass
+        self.video_capture = None
+        self._video_next_frame_idx = 0
+
+    def _read_video_frame(self, frame_idx: int):
+        if self.video_capture is None:
+            return None
+        if int(frame_idx) != int(self._video_next_frame_idx):
+            self.video_capture.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
+        ok, frame = self.video_capture.read()
+        if not ok:
+            return None
+        self._video_next_frame_idx = int(frame_idx) + 1
+        return frame
+
     def _ensure_display_mode(self, display_mode):
         if display_mode not in ["images", "davis", "contour"]:
             raise RuntimeError("wrong display mode")
@@ -111,6 +184,7 @@ class VideoLoader:
             self.frame_jump_spin.setValue(0)
 
     def display_video_on_viewer(self, frame, reset = False):
+        self.current_frame_bgr = frame.copy()
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame.shape
         qimg = QImage(frame.data, w, h, ch * w, QImage.Format.Format_RGB888)
@@ -141,12 +215,19 @@ class VideoLoader:
 
     def play_next_frame(self):
         if self.current_frame + 1 < self.total_frames:
-            self.current_frame += 1
-            frame_path = self.get_frame_path(self.current_frame)
-            if frame_path is None:
+            next_idx = self.current_frame + 1
+            if self.frame_display_mode == "video":
+                frame = self._read_video_frame(next_idx)
+            else:
+                frame_path = self.get_frame_path(next_idx)
+                if frame_path is None:
+                    self.timer.stop()
+                    return
+                frame = cv2.imread(frame_path)
+            if frame is None:
                 self.timer.stop()
                 return
-            frame = cv2.imread(frame_path)
+            self.current_frame = next_idx
             self.display_video_on_viewer(frame)
         else:
             self.timer.stop()
@@ -155,12 +236,18 @@ class VideoLoader:
         if self.timer.isActive() and not force:
             return
         if 0 <= frame_idx < self.total_frames:
-            self.current_frame = frame_idx
-            frame_path = self.get_frame_path(frame_idx)
-            if frame_path is None:
+            if self.frame_display_mode == "video":
+                frame = self._read_video_frame(frame_idx)
+            else:
+                frame_path = self.get_frame_path(frame_idx)
+                if frame_path is None:
+                    self.timer.stop()
+                    return
+                frame = cv2.imread(frame_path)
+            if frame is None:
                 self.timer.stop()
                 return
-            frame = cv2.imread(frame_path)
+            self.current_frame = frame_idx
             self.display_video_on_viewer(frame)
         else:
             self.timer.stop()
@@ -176,6 +263,13 @@ class VideoLoader:
 
     def get_current_frame_path(self) -> Optional[str]:
         return self.get_frame_path(self.current_frame)
+
+    def get_current_frame_source(self):
+        if self.frame_display_mode == "video":
+            if self.current_frame_bgr is None:
+                return None
+            return self.current_frame_bgr.copy()
+        return self.get_current_frame_path()
 
     def _labeled_frames_sorted(self):
         return DataLoader.get_labeled_frames()

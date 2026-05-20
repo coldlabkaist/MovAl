@@ -185,6 +185,17 @@ class _CreateProjectTab(QWidget):
         self.step1_spin.valueChanged.connect(self._generate_instance_fields)
         self._generate_instance_fields(self.step1_spin.value())
 
+        self.instance_limit_label = QLabel("<b>Maximum Skeletons Per ID</b>")
+        self.instance_limit_spin = _NoArrowSpinBox()
+        self.instance_limit_spin.setRange(1, 32)
+        self.instance_limit_spin.setValue(1)
+        left_col.addWidget(self.instance_limit_label)
+        left_col.addWidget(self.instance_limit_spin)
+        _set_tooltip(
+            self.instance_limit_spin,
+            "How many skeleton instances can be assigned to the same animal ID within one frame.",
+        )
+
         self.step2_label = QLabel("<b>Step 2.</b> Load videos")
         self.step2_button = QPushButton("Select Videos")
         self.step2_button.clicked.connect(self._on_select_videos)
@@ -387,7 +398,7 @@ class _CreateProjectTab(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, file_type)
             self.file_list.style_item(item, file_type)
 
-    def _validate_inputs(self) -> tuple[str, list[str], str] | None:
+    def _validate_inputs(self) -> tuple[str, list[str], int, str] | None:
         title = self.title_edit.text().strip()
         if not title:
             QMessageBox.warning(self, "No title", "Please enter a project title.")
@@ -410,14 +421,14 @@ class _CreateProjectTab(QWidget):
             QMessageBox.warning(self, "No files", "Please add at least one video file.")
             return None
 
-        return title, instance_names, skeleton_name
+        return title, instance_names, int(self.instance_limit_spin.value()), skeleton_name
 
     def _create_project(self) -> None:
         validated = self._validate_inputs()
         if validated is None:
             return
 
-        title, instance_names, skeleton_name = validated
+        title, instance_names, max_instances_per_id, skeleton_name = validated
         root_dir = QFileDialog.getExistingDirectory(self, "Select project root folder")
         if not root_dir:
             return
@@ -436,6 +447,7 @@ class _CreateProjectTab(QWidget):
             title=title,
             num_animals=int(self.step1_spin.value()),
             animals_name=instance_names,
+            max_instances_per_id=max_instances_per_id,
             skeleton_name=skeleton_name,
             moval_version=__version__,
         )
@@ -524,6 +536,34 @@ class _ManageProjectTab(QWidget):
         _set_tooltip(
             self.info_label,
             "Shows the currently opened project name, the project.json file name and path, and the project folder.",
+        )
+
+        settings_row = QHBoxLayout()
+        self.project_options_label = QLabel("<b>Project Options</b>")
+        settings_row.addWidget(self.project_options_label)
+        settings_row.addSpacing(8)
+        settings_row.addWidget(QLabel("Maximum skeletons per ID:"))
+        self.max_instances_per_id_spin = _NoArrowSpinBox()
+        self.max_instances_per_id_spin.setRange(1, 32)
+        self.max_instances_per_id_spin.setValue(1)
+        settings_row.addWidget(self.max_instances_per_id_spin)
+        self.save_project_options_button = QPushButton("Save Project Options")
+        self.save_project_options_button.clicked.connect(self._save_project_options)
+        settings_row.addWidget(self.save_project_options_button)
+        settings_row.addStretch(1)
+        layout.addLayout(settings_row)
+        self.project_options_note = QLabel(
+            "Changing this value updates project.json only. Existing CSV/TXT label data is not rewritten."
+        )
+        self.project_options_note.setWordWrap(True)
+        layout.addWidget(self.project_options_note)
+        _set_tooltip(
+            self.max_instances_per_id_spin,
+            "Controls how many skeletons can share the same animal ID in one frame.",
+        )
+        _set_tooltip(
+            self.save_project_options_button,
+            "Save project-level options without modifying existing label files.",
         )
 
         layout.addWidget(_make_separator(self))
@@ -712,6 +752,8 @@ class _ManageProjectTab(QWidget):
             self.copy_existing_video_button,
             self.remove_video_button,
             self.video_tree,
+            self.max_instances_per_id_spin,
+            self.save_project_options_button,
             self.edit_skeleton_button,
             self.delete_frames_images_check,
             self.delete_frames_davis_check,
@@ -779,6 +821,7 @@ class _ManageProjectTab(QWidget):
                 "No project is connected yet.<br>"
                 "Use <b>Open Project</b> to choose an existing project."
             )
+            self.max_instances_per_id_spin.setValue(1)
             self.txt_label.setText("No project selected.")
             self.skeleton_info_label.setText("No project skeleton loaded.")
             return
@@ -791,6 +834,7 @@ class _ManageProjectTab(QWidget):
             f"Project file path: {self.project.project_file}<br>"
             f"Project folder: {project_dir}"
         )
+        self.max_instances_per_id_spin.setValue(self.project.get_max_instances_per_id())
 
         self.video_tree.clear()
         self.csv_video_combo.clear()
@@ -1121,6 +1165,20 @@ class _ManageProjectTab(QWidget):
             save_callback=save_callback,
         )
         dialog.exec()
+
+    def _save_project_options(self) -> None:
+        if self.project is None:
+            QMessageBox.warning(self, "No project selected", "Load a project first.")
+            return
+
+        self.project.max_instances_per_id = max(1, int(self.max_instances_per_id_spin.value()))
+        self.project.save()
+        self.refresh_views()
+        QMessageBox.information(
+            self,
+            "Project options saved",
+            "Saved project options without modifying existing label files.",
+        )
 
     def _compress_project(self) -> None:
         if self.project is None:

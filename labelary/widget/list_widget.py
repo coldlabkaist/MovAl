@@ -3,6 +3,8 @@ from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QStyledItemDelegate
 from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFontMetrics, QFont
 from PyQt6.QtCore import Qt, QSize
 
+from ..IO.data_loader import DataLoader
+
 CUTIE_COLOR_BASE = ["#ab1f24", "#36ae37", "#b9b917", "#063391", "#983a91",
                     "#20b6b5", "#c1c0bf", "#5c0d11", "#e71f19", "#60b630",
                     "#f4ba19", "#503390", "#ca4392", "#5eb7b7", "#f6bcbc"]
@@ -105,7 +107,8 @@ class KeypointListWidget(QListWidget):
         self._kp_order    = list(kp_order)
 
         for idx, track in enumerate(tracks):
-            hdr = QListWidgetItem(track)
+            track_key = str(track)
+            hdr = QListWidgetItem(DataLoader.display_label_for_key(track_key))
             base_font = self.font()
             bold_font = QFont(base_font.family(),
                     base_font.pointSize(),
@@ -113,7 +116,7 @@ class KeypointListWidget(QListWidget):
             hdr.setFont(bold_font)
             hdr.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.addItem(hdr)
-            self._header_map[str(track)] = hdr
+            self._header_map[track_key] = hdr
 
             for kp in kp_order:
                 node = skeleton_model.nodes[kp]
@@ -124,7 +127,7 @@ class KeypointListWidget(QListWidget):
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 self.addItem(it)
 
-                self._item_map[(str(track), kp)] = it
+                self._item_map[(track_key, kp)] = it
 
     def highlight(self, track: str | None, kp: str | None):
         if not self._track_order or not self._kp_order:
@@ -137,8 +140,8 @@ class KeypointListWidget(QListWidget):
 
         if track:
             track = str(track)
-            track_idx = self._track_order.index(track)
             try:
+                track_idx = self._track_order.index(track)
                 base_idx = track_idx * (len(self._kp_order) + 1)
             except ValueError:
                 return 

@@ -159,6 +159,7 @@ def export_loaded_data_to_txt_dir(
         if DataLoader.loaded_data is None:
             raise ValueError("Load CSV/TXT first")
         df = _sanitize_index(DataLoader.loaded_data.copy())
+    df = DataLoader.visible_dataframe(df)
 
     target_dir = Path(target_dir)
     if clear_existing and target_dir.exists():

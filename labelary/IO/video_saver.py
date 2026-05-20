@@ -36,8 +36,9 @@ def _qimage_to_rgb_array(image: QImage) -> np.ndarray:
 
 
 def _mixed_track_color(track: str, animals_name: list[str], color_mode: str) -> QColor:
+    base_track = DataLoader.get_base_track_name(track)
     try:
-        idx = animals_name.index(track)
+        idx = animals_name.index(base_track)
     except ValueError:
         idx = 0
     base = QColor(CUTIE_COLOR_BASE[idx % len(CUTIE_COLOR_BASE)])
@@ -68,8 +69,7 @@ def _render_overlay_on_rgb_frame(
     painter = QPainter(qimg)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-    for track in animals_name:
-        pts = csv_points.get(track, {})
+    for track, pts in csv_points.items():
         if not pts:
             continue
 
@@ -190,7 +190,7 @@ class _VideoExportThread(QThread):
                 if frame_df is not None:
                     frame_coords: dict[str, dict[str, tuple[float, float, int]]] = {}
                     for _, row in frame_df.iterrows():
-                        track = str(row.get("track"))
+                        track = DataLoader.row_instance_key(row)
                         kp_map: dict[str, tuple[float, float, int]] = {}
                         for node_name in skeleton_model.nodes:
                             x = row.get(f"{node_name}.x")
@@ -239,7 +239,7 @@ def _export_video_stub(parent: QWidget) -> None:
         QMessageBox.warning(parent, "Warning", "Load CSV/TXT first")
         return
 
-    df = _sanitize_index(DataLoader.loaded_data.copy())
+    df = DataLoader.visible_dataframe(_sanitize_index(DataLoader.loaded_data.copy()))
 
     project = _find_project(parent)
     if project is None or not hasattr(project, "project_dir"):

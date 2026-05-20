@@ -714,7 +714,7 @@ class YoloInferenceDialog(QDialog):
         
     def get_inference_target(self):
         classes = [idx for idx, cb in enumerate(self.target_checks) if cb.isChecked()]
-        max_det = len(classes)
+        max_det = len(classes) * self.current_project.get_max_instances_per_id()
         return classes, max_det
 
     def _update_visualization_option_states(self):
@@ -1056,6 +1056,7 @@ class YoloInferenceDialog(QDialog):
 
         rows = []
         has_instance_id = False
+        per_id_limit = self.current_project.get_max_instances_per_id()
 
         for idx, txt_path in enumerate(txt_files):
             with txt_path.open("r", encoding="utf-8") as f:
@@ -1093,19 +1094,41 @@ class YoloInferenceDialog(QDialog):
             if frame_num < 0:
                 frame_num = idx + 1
 
-            track_data = {}
-            for track_id, remapped_id, kpt_data in detections:
-                key = (track_id, remapped_id if remapped_id != "" else None)
-                if key not in track_data:
-                    track_data[key] = (kpt_data, remapped_id)
-                    continue
-                prev, rid = track_data[key]
-                for kp in range(min(len(kpt_names), len(prev) // 3, len(kpt_data) // 3)):
-                    if kpt_data[kp * 3 + 2] > prev[kp * 3 + 2]:
-                        prev[kp * 3:kp * 3 + 3] = kpt_data[kp * 3:kp * 3 + 3]
-                track_data[key] = (prev, rid)
+            track_data = []
+            if has_instance_id:
+                merged_by_key = {}
+                for track_id, remapped_id, kpt_data in detections:
+                    key = (track_id, remapped_id if remapped_id != "" else None)
+                    if key not in merged_by_key:
+                        merged_by_key[key] = (kpt_data, remapped_id)
+                        continue
+                    prev, rid = merged_by_key[key]
+                    for kp in range(min(len(kpt_names), len(prev) // 3, len(kpt_data) // 3)):
+                        if kpt_data[kp * 3 + 2] > prev[kp * 3 + 2]:
+                            prev[kp * 3:kp * 3 + 3] = kpt_data[kp * 3:kp * 3 + 3]
+                    merged_by_key[key] = (prev, rid)
+                track_data = [
+                    (track_id, kpt_data, remapped_id)
+                    for (track_id, _), (kpt_data, remapped_id) in merged_by_key.items()
+                ]
+            elif per_id_limit > 1:
+                counts_by_track: dict[int, int] = {}
+                for track_id, _remapped_id, kpt_data in detections:
+                    next_slot = counts_by_track.get(track_id, 0) + 1
+                    if next_slot > per_id_limit:
+                        continue
+                    counts_by_track[track_id] = next_slot
+                    track_data.append((track_id, kpt_data, next_slot))
+                has_instance_id = has_instance_id or bool(track_data)
+            else:
+                seen_tracks: set[int] = set()
+                for track_id, _remapped_id, kpt_data in detections:
+                    if track_id in seen_tracks:
+                        continue
+                    seen_tracks.add(track_id)
+                    track_data.append((track_id, kpt_data, ""))
 
-            for (track_id, _), (kpt_data, remapped_id) in track_data.items():
+            for track_id, kpt_data, remapped_id in track_data:
                 track_name = (
                     self.animals_name[track_id]
                     if 0 <= track_id < len(self.animals_name)

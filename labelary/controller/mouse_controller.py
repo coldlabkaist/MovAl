@@ -309,10 +309,15 @@ class MouseController(QObject):
         act_delete.setShortcutVisibleInContextMenu(True)
 
         act_change_num = menu.addMenu("Change Instance Number")
+        selected_base_track = (
+            DataLoader.get_base_track_name(self.selected_instance)
+            if self.selected_instance is not None
+            else None
+        )
         for nm in range(self.max_animals):
             track_name = self.track_list[nm]
             act_nm = act_change_num.addAction(track_name)
-            act_nm.setEnabled(track_name != self.selected_instance)
+            act_nm.setEnabled(track_name != selected_base_track)
             act_nm.triggered.connect(
                 lambda _=False, t=track_name: self._change_instance_number(t)
             )
@@ -334,7 +339,7 @@ class MouseController(QObject):
             act_next_lbl.setShortcut(QKeySequence("Ctrl+Right"))
 
         current_frame = getattr(self.video_viewer, "current_frame", 0)
-        act_add.setEnabled(len(self._tracks_in_frame(current_frame)) < self.max_animals)
+        act_add.setEnabled(DataLoader.frame_has_capacity_for_new_instance(current_frame))
         act_replace.setEnabled(self.selected_instance is not None)
         act_delete.setEnabled(self.selected_instance is not None)
         act_change_num.setEnabled(self.selected_instance is not None)
@@ -626,14 +631,13 @@ class MouseController(QObject):
         if not hasattr(self.video_viewer, "current_frame"):
             return
         frame_idx = self.video_viewer.current_frame
-        present_tracks = self._tracks_in_frame(frame_idx)
-        
+
         new_track = track_name
-        if new_track is not None and new_track in present_tracks:
-            return
         if new_track is None:
-            new_track = next((name for name in self.track_list
-                          if name not in present_tracks), None)
+            available = DataLoader.available_track_names_for_new_instance(frame_idx)
+            new_track = available[0] if available else None
+        elif DataLoader.frame_track_instance_count(frame_idx, new_track) >= DataLoader.get_max_instances_per_id():
+            return
         if new_track is None:
             return
 
@@ -656,9 +660,9 @@ class MouseController(QObject):
     def _replace_selected_instance(self, context_pos: QPoint | None = None):
         if self.selected_instance is None or not hasattr(self.video_viewer, "current_frame"):
             return
-        track_name = self.selected_instance
+        track_name = DataLoader.get_base_track_name(self.selected_instance)
         frame_idx = self.video_viewer.current_frame
-        if not DataLoader.delete_instance(frame_idx, track_name):
+        if not DataLoader.delete_instance(frame_idx, self.selected_instance):
             return
 
         coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
@@ -671,10 +675,7 @@ class MouseController(QObject):
         self._add_new_skeleton_label(track_name=track_name, context_pos=context_pos)
 
     def _tracks_in_frame(self, frame_idx: int):
-        df = DataLoader.loaded_data
-        if df is None or df.empty:
-            return set()
-        return set(df[df["frame_idx"] == frame_idx]["track"].unique())
+        return set(DataLoader.get_track_keys_for_frame(frame_idx))
 
     def _delete_selected_instance(self):
         if self.selected_instance is None:
@@ -693,7 +694,7 @@ class MouseController(QObject):
     def _change_instance_number_by_idx(self, idx):
         if idx >= len(self.track_list):
             return
-        if self.selected_instance == self.track_list[idx]:
+        if DataLoader.get_base_track_name(self.selected_instance) == self.track_list[idx]:
             return
         self._change_instance_number(self.track_list[idx])
 
@@ -702,8 +703,8 @@ class MouseController(QObject):
             return
         if new_track is None:
             from PyQt6.QtWidgets import QInputDialog
-            items = [nm for nm in range(self.max_animals)
-                     if nm != self.selected_instance]
+            current_base = DataLoader.get_base_track_name(self.selected_instance)
+            items = [name for name in self.track_list if name != current_base]
             if not items:
                 return
             ok = False
@@ -718,12 +719,13 @@ class MouseController(QObject):
 
         frame_idx   = getattr(self.video_viewer, "current_frame", 0)
         old_track   = self.selected_instance
-        if not DataLoader.swap_or_rename_instance(frame_idx, old_track, new_track):
+        updated_instance_key = DataLoader.swap_or_rename_instance(frame_idx, old_track, new_track)
+        if not updated_instance_key:
             return
 
         coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
         self.video_viewer.setCSVPoints(coords)
-        self.selected_instance = new_track
+        self.selected_instance = updated_instance_key
         self.selected_node = None
         self.video_viewer.update()
         self.kpt_list.update_list_visibility(coords)
@@ -736,12 +738,8 @@ class MouseController(QObject):
         frame_idx = getattr(self.video_viewer, "current_frame", 0)
 
         cur_vis = 2
-        df = DataLoader.loaded_data if hasattr(DataLoader, "loaded_data") else None
-        if df is not None:
-            try:
-                cur_vis = df.loc[(df["track"] == track) & (df["frame_idx"] == frame_idx), f"{kp}.visibility"].iat[0]
-            except Exception:
-                pass
+        if track in self.video_viewer.csv_points and kp in self.video_viewer.csv_points[track]:
+            cur_vis = self.video_viewer.csv_points[track][kp][2]
 
         new_vis = 1 if cur_vis == 2 else 2
         DataLoader.update_kpt_visibility(track, frame_idx, kp, new_vis)

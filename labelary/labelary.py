@@ -48,6 +48,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                                         self.frame_jump_spin)
         DataLoader.parent = self
         DataLoader.max_animals = self.project.num_animals
+        DataLoader.max_instances_per_id = self.project.get_max_instances_per_id()
         DataLoader.animals_name = self.project.animals_name
         self.skeleton_video_viewer.current_project = project
 
@@ -273,13 +274,14 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         current_frame = self.video_loader.current_frame
         coords_dict = DataLoader.get_keypoint_coordinates_by_frame(current_frame)
         self.skeleton_video_viewer.setCSVPoints(coords_dict)
+        self.update_keypoint_list()
         self.kpt_list.update_list_visibility(coords_dict)
         
     def update_keypoint_list(self):
         self.kpt_list.clear()
         if DataLoader.loaded_data is None:
             return
-        tracks = list(self.project.animals_name)
+        tracks = DataLoader.get_track_keys_for_frame(self.video_loader.current_frame)
         self.kpt_list.build(tracks, DataLoader.kp_order, self.skeleton)
 
     def set_color_combo(self):
@@ -772,7 +774,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             return []
 
         expected_kpts = len(DataLoader.kp_order)
-        best_by_class: dict[int, dict] = {}
+        detections_by_class: dict[int, list[dict]] = {}
+        per_class_limit = self.project.get_max_instances_per_id()
         for det_idx, cls_val in enumerate(cls_ids):
             class_idx = int(cls_val)
             if not (0 <= class_idx < len(self.project.animals_name)):
@@ -786,9 +789,6 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
             score = float(det_scores[det_idx]) if det_idx < len(det_scores) else 0.0
             if score < confidence_threshold:
-                continue
-            prev = best_by_class.get(class_idx)
-            if prev is not None and prev["score"] >= score:
                 continue
 
             kp_conf_row = None
@@ -806,19 +806,29 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 vis = 2 if conf is None or float(conf) > 0.0 else 1
                 kp_map[kp_name] = (x, y, vis)
 
-            best_by_class[class_idx] = {
+            detections_by_class.setdefault(class_idx, []).append({
                 "score": score,
                 "track": self.project.animals_name[class_idx],
                 "keypoints": kp_map,
-            }
+            })
 
-        return [
-            {
-                "track": item["track"],
-                "keypoints": item["keypoints"],
-            }
-            for _, item in sorted(best_by_class.items())
-        ]
+        instances: list[dict] = []
+        for class_idx in sorted(detections_by_class):
+            sorted_items = sorted(
+                detections_by_class[class_idx],
+                key=lambda item: item["score"],
+                reverse=True,
+            )[:per_class_limit]
+            for slot_idx, item in enumerate(sorted_items, start=1):
+                record = {
+                    "track": item["track"],
+                    "keypoints": item["keypoints"],
+                }
+                if per_class_limit > 1:
+                    record["instance_id"] = slot_idx
+                instances.append(record)
+
+        return instances
 
     def closeEvent(self, event) -> None:
         if self.mini_training_thread is not None and self.mini_training_thread.isRunning():

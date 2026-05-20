@@ -230,6 +230,7 @@ class ProjectInformation:
     title: str
     num_animals: int
     animals_name: list[str]
+    max_instances_per_id: int
     skeleton_name: str
     skeleton_yaml: Path
     skeleton_data: dict[str, Any] = field(default_factory=dict)
@@ -246,6 +247,7 @@ class ProjectInformation:
         title: str,
         num_animals: int,
         animals_name: list[str],
+        max_instances_per_id: int = 1,
         skeleton_name: str,
         moval_version: str,
         ui_state: Optional[dict[str, Any]] = None,
@@ -258,6 +260,7 @@ class ProjectInformation:
             title=title,
             num_animals=int(num_animals),
             animals_name=list(animals_name),
+            max_instances_per_id=max(1, int(max_instances_per_id)),
             skeleton_name=Path(skeleton_name).name,
             skeleton_yaml=project_dir_path / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
             skeleton_data=_load_skeleton_data_from_name(skeleton_name),
@@ -343,6 +346,7 @@ class ProjectInformation:
             title=str(data.get("title", "")),
             num_animals=int(data.get("num_animals", 0)),
             animals_name=list(data.get("animals_name", [])),
+            max_instances_per_id=max(1, int(data.get("max_instances_per_id", 1) or 1)),
             skeleton_name=skeleton_name,
             skeleton_yaml=project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
             skeleton_data=skeleton_data,
@@ -385,6 +389,7 @@ class ProjectInformation:
             title=str(data.get("title", "")),
             num_animals=int(data.get("num_animals", 0)),
             animals_name=list(data.get("animals_name", [])),
+            max_instances_per_id=1,
             skeleton_name=skeleton_name,
             skeleton_yaml=project_dir / PROJECT_SKELETON_DIRNAME / PROJECT_SKELETON_FILENAME,
             skeleton_data=skeleton_data,
@@ -444,6 +449,9 @@ class ProjectInformation:
             "kpt_names": kpt_names,
         }
 
+    def get_max_instances_per_id(self) -> int:
+        return max(1, int(self.max_instances_per_id or 1))
+
     def write_training_config_yaml(
         self,
         *,
@@ -468,6 +476,7 @@ class ProjectInformation:
             "title": self.title,
             "num_animals": self.num_animals,
             "animals_name": list(self.animals_name),
+            "max_instances_per_id": self.get_max_instances_per_id(),
             "skeleton": self.skeleton_name,
             "skeleton_data": self.skeleton_data,
             "videos": [record.to_dict() for record in self.video_records],
@@ -476,6 +485,7 @@ class ProjectInformation:
 
     def save(self) -> Path:
         self._ensure_ui_defaults()
+        self.max_instances_per_id = self.get_max_instances_per_id()
         self.ensure_project_skeleton_file()
         self.project_file.parent.mkdir(parents=True, exist_ok=True)
         with self.project_file.open("w", encoding="utf-8") as f:

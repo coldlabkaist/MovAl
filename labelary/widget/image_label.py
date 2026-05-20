@@ -147,8 +147,7 @@ class ClickableImageLabel(QLabel):
         csv_points: Dict[str, Dict[str, Tuple[float, float]]],
     ) -> None:
         self.current_animal_num = 0
-        for track in self.current_project.animals_name:  
-            pts = csv_points.get(track, {})
+        for track, pts in csv_points.items():
             if not pts:
                 continue
             self.current_animal_num += 1
@@ -364,7 +363,8 @@ class ClickableImageLabel(QLabel):
         self.update()
 
     def _skeleton_color(self, track: str) -> QColor:
-        idx = self._track_color_idx.get(track, 0)
+        base_track = DataLoader.get_base_track_name(track)
+        idx = self._track_color_idx.get(base_track, self._track_color_idx.get(track, 0))
         color = QColor(CUTIE_COLOR_BASE[idx % len(CUTIE_COLOR_BASE)])
         other, t = SKELETON_COLOR_SET[self.skeleton_color_mode]
         

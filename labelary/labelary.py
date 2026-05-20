@@ -443,6 +443,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self._set_model_path_display(model_path)
 
     def browse_and_load_model(self):
+        if self.auto_label_model is not None and self.auto_label_model_path is not None:
+            self.unload_model()
+            return
+
         raw_path = self._model_path_text()
         if raw_path:
             model_path = Path(raw_path).expanduser()
@@ -502,6 +506,16 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.automatic_label_checkbox.setChecked(True)
         self.auto_label_current_frame()
 
+    def unload_model(self):
+        self.auto_label_model = None
+        self.auto_label_model_path = None
+        self.auto_label_model_mode = None
+        self.automatic_label_checkbox.blockSignals(True)
+        self.automatic_label_checkbox.setChecked(False)
+        self.automatic_label_checkbox.blockSignals(False)
+        self._set_model_path_display("")
+        self._refresh_model_button_state()
+
     def on_model_path_changed(self, text: str):
         new_path = text.strip()
         if self.auto_label_model_path is None:
@@ -541,10 +555,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def _refresh_model_button_state(self):
         loaded = self.auto_label_model is not None and self.auto_label_model_path is not None
-        self.load_model_button.setText("Reload Model" if loaded else "Browse/Load Model")
+        self.load_model_button.setText("Cancel Model Load" if loaded else "Browse/Load Model")
         if loaded:
             self.load_model_button.setToolTip(
-                f"Loaded for mode '{self.auto_label_model_mode}': {self.auto_label_model_path}"
+                f"Loaded for mode '{self.auto_label_model_mode}': {self.auto_label_model_path}\n"
+                "Click to unload the current model."
             )
         else:
             self.load_model_button.setToolTip("")

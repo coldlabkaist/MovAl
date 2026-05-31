@@ -1,40 +1,55 @@
-from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QDialog, QLineEdit, QApplication, QMessageBox, QSpinBox
-)
-from PyQt6.QtGui import QClipboard
 from PyQt6.QtCore import Qt
-import subprocess
-import shutil
+from PyQt6.QtGui import QClipboard
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
+
 import os
+
+from .yolo_support import YoloUpdateDialog, download_yolo_pose_models
+
 
 class MainInstallDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Installation Manager")
-        self.setFixedSize(200, 150)
+        self.setFixedSize(220, 185)
 
         layout = QVBoxLayout()
 
         self.one_click_btn = QPushButton("One-Click Install")
+        self.update_yolo_btn = QPushButton("Update YOLO")
         self.manual_cutie_btn = QPushButton("Manual Install (Cutie)")
         self.manual_yolo_btn = QPushButton("Manual Install (YOLO)")
 
         layout.addWidget(self.one_click_btn)
+        layout.addWidget(self.update_yolo_btn)
         layout.addWidget(self.manual_cutie_btn)
         layout.addWidget(self.manual_yolo_btn)
-
         self.setLayout(layout)
 
         self.one_click_btn.clicked.connect(self.on_one_click)
+        self.update_yolo_btn.clicked.connect(self.on_update_yolo)
         self.manual_cutie_btn.clicked.connect(self.on_manual_cutie)
         self.manual_yolo_btn.clicked.connect(self.on_manual_yolo)
 
     def on_one_click(self):
         from installation_manager import OneClickInstallDialog
+
         dialog = OneClickInstallDialog(self)
         dialog.exec()
         self.accept()
+
+    def on_update_yolo(self):
+        dialog = YoloUpdateDialog(self)
+        dialog.exec()
 
     def on_manual_cutie(self):
         dialog = CutieInstallDialog(self)
@@ -43,6 +58,7 @@ class MainInstallDialog(QDialog):
     def on_manual_yolo(self):
         dialog = YoloInstallDialog(self)
         dialog.exec()
+
 
 class CutieInstallDialog(QDialog):
     def __init__(self, parent=None):
@@ -56,20 +72,20 @@ class CutieInstallDialog(QDialog):
         layout.addLayout(self.add_command_row("https://github.com/hkchengrex/Cutie"))
 
         layout.addWidget(QLabel("<b>Prerequisites:</b>"))
-        layout.addWidget(QLabel("• Python 3.8+"))
-        layout.addWidget(QLabel("• PyTorch 1.12+ and torchvision"))
+        layout.addWidget(QLabel("Python 3.8+"))
+        layout.addWidget(QLabel("PyTorch 1.12+ and torchvision"))
 
         layout.addWidget(QLabel("<b>Clone Cutie repository:</b>"))
         layout.addLayout(self.add_command_row("git clone https://github.com/hkchengrex/Cutie.git"))
-        
+
         layout.addWidget(QLabel("<b>Install with pip:</b>"))
         layout.addLayout(self.add_command_row("cd Cutie"))
         layout.addLayout(self.add_command_row("pip install -e ."))
 
         layout.addWidget(QLabel("<b>Download pretrained models:</b>"))
         layout.addLayout(self.add_command_row("python cutie/utils/download_models.py"))
-        
-        note = QLabel("⚠️ Upgrade pip with: <i>pip install --upgrade pip</i>")
+
+        note = QLabel("Upgrade pip with: <i>pip install --upgrade pip</i>")
         layout.addWidget(note)
 
         self.setLayout(layout)
@@ -92,16 +108,19 @@ class CutieInstallDialog(QDialog):
         clipboard: QClipboard = QApplication.clipboard()
         clipboard.setText(text)
 
+
 class YoloInstallDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("YOLO Install Guide")
-        self.setFixedSize(420, 260) 
+        self.setFixedSize(420, 260)
 
         layout = QVBoxLayout()
 
-        req_label = QLabel("<b>Requirements:</b><br>"
-                           "Python >= 3.8 / PyTorch >= 1.8 / Recommend the latest version of Ultralytics")
+        req_label = QLabel(
+            "<b>Requirements:</b><br>"
+            "Python >= 3.8 / PyTorch >= 1.8 / Recommend the latest version of Ultralytics"
+        )
         req_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         req_label.setWordWrap(True)
         layout.addWidget(req_label)
@@ -148,53 +167,22 @@ class YoloInstallDialog(QDialog):
         force_reinstall_yolo = False
         yolo_model_dir = "models"
         if os.path.isdir(yolo_model_dir):
-            ans = QMessageBox.question(
+            answer = QMessageBox.question(
                 self,
                 "Existing Directory Found",
-                "A YOLO models already exists.\n"
-                "Do you want to delete it and perform a reinstallation?",
+                "YOLO models already exist.\nDo you want to delete them and redownload?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            if ans == QMessageBox.StandardButton.No:
-                print("YOLO reinstallation skipped by user.")
-            else:
+            if answer == QMessageBox.StandardButton.Yes:
                 force_reinstall_yolo = True
-
-        if os.path.isdir(yolo_model_dir):
-            if force_reinstall_yolo:
-                print("· Deleting existing YOLO models …")
-                shutil.rmtree(yolo_model_dir, onerror=_force_remove)
             else:
-                print("· Repository already exists. Skipping installation.")
-                return
-        print("Downloading Models...")
+                print("YOLO model reinstallation skipped by user.")
 
-        models = [
-            'yolov8n-pose.pt',
-            'yolov8s-pose.pt',
-            'yolov8m-pose.pt',
-            'yolov8l-pose.pt',
-            'yolov8x-pose.pt',
-            'yolo11n-pose.pt',
-            'yolo11s-pose.pt',
-            'yolo11m-pose.pt',
-            'yolo11l-pose.pt',
-            'yolo11x-pose.pt'
-        ]
+        try:
+            download_yolo_pose_models(force_reinstall=force_reinstall_yolo)
+        except Exception as err:
+            QMessageBox.critical(self, "Download failed", f"Failed to download YOLO models:\n{err}")
+            return
 
-        cwd = os.getcwd()
-        weights_dir = os.path.join(cwd, yolo_model_dir)
-        os.makedirs(weights_dir, exist_ok=True)
-
-        from ultralytics import YOLO
-        for model in models:
-            model_path = os.path.join(weights_dir, model)
-            print(f". Downloading {model}...")
-            YOLO(model)
-            os.rename(model, model_path)
-        print(". All models downloaded")
-
-def _force_remove(func, path, exc_info):
-    os.chmod(path, stat.S_IWRITE)
-    func(path)
+        QMessageBox.information(self, "Download complete", "YOLO pose models downloaded successfully.")

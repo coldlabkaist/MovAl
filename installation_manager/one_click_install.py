@@ -1,13 +1,14 @@
-from PyQt6.QtCore import QThread, pyqtSignal
-from PyQt6.QtWidgets import (
-    QTextEdit, QProgressBar, QDialog, QVBoxLayout, 
-    QMessageBox, QTextEdit, QProgressBar
-)
-import subprocess
 import os
-import sys
 import shutil
 import stat
+import subprocess
+import sys
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import QDialog, QMessageBox, QProgressBar, QTextEdit, QVBoxLayout
+
+from .yolo_support import download_yolo_pose_models, install_ultralytics_package
+
 
 class OneClickInstallDialog(QDialog):
     def __init__(self, parent=None):
@@ -25,7 +26,7 @@ class OneClickInstallDialog(QDialog):
         force_reinstall_cutie = False
         cutie_dir = "Cutie"
         if os.path.isdir(cutie_dir):
-            ans = QMessageBox.question(
+            answer = QMessageBox.question(
                 self,
                 "Existing Directory Found",
                 "A Cutie directory already exists.\n"
@@ -33,39 +34,39 @@ class OneClickInstallDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            if ans == QMessageBox.StandardButton.No:
-                self.log_view.append("Cutie directory reinstallation skipped by user.")
-            else:
+            if answer == QMessageBox.StandardButton.Yes:
                 force_reinstall_cutie = True
+            else:
+                self.log_view.append("Cutie directory reinstallation skipped by user.")
 
         force_reinstall_yolo = False
         yolo_model_dir = "models"
         if os.path.isdir(yolo_model_dir):
-            ans = QMessageBox.question(
+            answer = QMessageBox.question(
                 self,
                 "Existing Directory Found",
-                "A YOLO models already exists.\n"
-                "Do you want to delete it and perform a reinstallation?",
+                "YOLO models already exist.\n"
+                "Do you want to delete them and perform a reinstallation?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
-            if ans == QMessageBox.StandardButton.No:
-                self.log_view.append("YOLO model reinstallation skipped by user.")
-            else:
+            if answer == QMessageBox.StandardButton.Yes:
                 force_reinstall_yolo = True
+            else:
+                self.log_view.append("YOLO model reinstallation skipped by user.")
 
         self.worker = OneClickWorker(
-            force_reinstall_cutie = force_reinstall_cutie, 
-            force_reinstall_yolo = force_reinstall_yolo, 
-            parent=self
+            force_reinstall_cutie=force_reinstall_cutie,
+            force_reinstall_yolo=force_reinstall_yolo,
+            parent=self,
         )
-        self.worker.log.connect(self.append_log) 
+        self.worker.log.connect(self.append_log)
         self.worker.progress.connect(self.bar.setValue)
         self.worker.done.connect(self.on_done)
         self.worker.start()
 
-    def append_log(self, txt: str):
-        self.log_view.append(txt)
+    def append_log(self, text: str):
+        self.log_view.append(text)
 
     def on_done(self, ok: bool):
         self.bar.setValue(100)
@@ -73,7 +74,7 @@ class OneClickInstallDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Installation Complete",
-                "Cutie has been successfully installed.",
+                "Cutie and YOLO dependencies have been successfully installed.",
             )
             self.accept()
         else:
@@ -83,59 +84,60 @@ class OneClickInstallDialog(QDialog):
                 "An error occurred during installation.\nPlease check the log.",
             )
 
+
 class OneClickWorker(QThread):
-    log      = pyqtSignal(str)
+    log = pyqtSignal(str)
     progress = pyqtSignal(int)
-    done     = pyqtSignal(bool)
+    done = pyqtSignal(bool)
 
     def __init__(self, force_reinstall_cutie=False, force_reinstall_yolo=False, parent=None):
         super().__init__(parent)
         self.cutie_url = "https://github.com/hkchengrex/Cutie.git"
         self.cutie_dir = "Cutie"
         self.yolo_model_dir = "models"
-        self.python   = sys.executable
+        self.python = sys.executable
         self.force_reinstall_cutie = force_reinstall_cutie
         self.force_reinstall_yolo = force_reinstall_yolo
 
     def run(self):
         try:
             steps_cutie = [
-                ("Cloning repository …",        self.clone_repo_cutie),
-                ("Installing package …",        self.pip_install_cutie),
-                ("Downloading models …",        self.download_models_cutie),
+                ("Cloning repository...", self.clone_repo_cutie),
+                ("Installing package...", self.pip_install_cutie),
+                ("Downloading models...", self.download_models_cutie),
             ]
             steps_yolo = [
-                ("Installing package …",        self.pip_install_ultralytics),
-                ("Downloading models …",        self.download_models_yolo),
+                ("Installing package...", self.pip_install_ultralytics),
+                ("Downloading models...", self.download_models_yolo),
             ]
-            n = len(steps_cutie) + len(steps_yolo)
+            total = len(steps_cutie) + len(steps_yolo)
 
-            for i, (msg, fn) in enumerate(steps_cutie, 1):
-                self.log.emit(msg)
-                fn()
-                self.progress.emit(int((i / n) * 100))
-            for i, (msg, fn) in enumerate(steps_yolo, 1):
-                self.log.emit(msg)
-                fn()
-                self.progress.emit(int(((len(steps_cutie) + i) / n) * 100))
+            for index, (message, action) in enumerate(steps_cutie, 1):
+                self.log.emit(message)
+                action()
+                self.progress.emit(int((index / total) * 100))
+
+            for index, (message, action) in enumerate(steps_yolo, 1):
+                self.log.emit(message)
+                action()
+                self.progress.emit(int(((len(steps_cutie) + index) / total) * 100))
+
             self.done.emit(True)
-
-        except Exception as e:
-            self.log.emit(f"error : {e}")
+        except Exception as err:
+            self.log.emit(f"error : {err}")
             self.done.emit(False)
 
     def clone_repo_cutie(self):
         if os.path.isdir(self.cutie_dir):
             if self.force_reinstall_cutie:
-                self.log.emit("· Deleting existing Cutie directory …")
+                self.log.emit("Deleting existing Cutie directory...")
                 shutil.rmtree(self.cutie_dir, onerror=_force_remove)
             else:
-                self.log.emit("· Repository already exists. Skipping installation.")
+                self.log.emit("Cutie repository already exists. Skipping clone.")
                 return
 
-        self.log.emit("· Cloning Cutie repository …")
-        subprocess.check_call(["git", "clone", "--depth", "1",
-                               self.cutie_url, self.cutie_dir])
+        self.log.emit("Cloning Cutie repository...")
+        subprocess.check_call(["git", "clone", "--depth", "1", self.cutie_url, self.cutie_dir])
 
     def pip_install_cutie(self):
         subprocess.check_call([self.python, "-m", "pip", "install", "-e", self.cutie_dir])
@@ -146,42 +148,14 @@ class OneClickWorker(QThread):
             subprocess.check_call([self.python, script])
 
     def pip_install_ultralytics(self):
-        subprocess.check_call([self.python, "-m", "pip", "install", "ultralytics"])
+        install_ultralytics_package(self.python, upgrade=False, log_fn=self.log.emit)
 
     def download_models_yolo(self):
-        if os.path.isdir(self.yolo_model_dir):
-            if self.force_reinstall_yolo:
-                self.log.emit("· Deleting existing YOLO models …")
-                shutil.rmtree(self.yolo_model_dir, onerror=_force_remove)
-            else:
-                self.log.emit("· Repository already exists. Skipping installation.")
-                return
-        self.log.emit("Downloading Models...")
-
-        models = [
-            'yolov8n-pose.pt',
-            'yolov8s-pose.pt',
-            'yolov8m-pose.pt',
-            'yolov8l-pose.pt',
-            'yolov8x-pose.pt',
-            'yolo11n-pose.pt',
-            'yolo11s-pose.pt',
-            'yolo11m-pose.pt',
-            'yolo11l-pose.pt',
-            'yolo11x-pose.pt'
-        ]
-
-        cwd = os.getcwd()
-        weights_dir = os.path.join(cwd, self.yolo_model_dir)
-        os.makedirs(weights_dir, exist_ok=True)
-
-        from ultralytics import YOLO
-        for model in models:
-            model_path = os.path.join(weights_dir, model)
-            self.log.emit(f". Downloading {model}...")
-            YOLO(model)
-            os.rename(model, model_path)
-        self.log.emit(". All models downloaded")
+        download_yolo_pose_models(
+            force_reinstall=self.force_reinstall_yolo,
+            yolo_model_dir=self.yolo_model_dir,
+            log_fn=self.log.emit,
+        )
 
 
 def _force_remove(func, path, exc_info):

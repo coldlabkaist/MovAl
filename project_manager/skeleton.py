@@ -257,10 +257,15 @@ class SkeletonManagerDialog(QDialog):
         self.scene.setStructureEditEnabled(enabled)
         self.add_node_radio.setEnabled(enabled)
         self.add_skeleton_radio.setEnabled(enabled)
+        self.node_list.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
+            if enabled
+            else QAbstractItemView.DragDropMode.NoDragDrop
+        )
         if enabled:
             self._structure_edit_unlocked = True
             self.structure_help_label.setText(
-                "Full edit enabled: you can add/remove keypoints and edit skeleton or symmetry links."
+                "Full edit enabled: you can reorder, rename, add/remove keypoints, and edit skeleton or symmetry links."
             )
             self._on_mode_toggled()
         else:
@@ -718,7 +723,19 @@ class SkeletonManagerDialog(QDialog):
         else:
             self.scene.setMode("add_edge")
 
+    def _sync_model_node_order_from_list(self) -> None:
+        ordered_names = []
+        for row in range(self.node_list.count()):
+            item = self.node_list.item(row)
+            if item is None:
+                continue
+            name = item.text().strip()
+            if name:
+                ordered_names.append(name)
+        self.model.reorder_nodes(ordered_names)
+
     def _save_config(self) -> None:
+        self._sync_model_node_order_from_list()
         if self._is_project_mode:
             try:
                 if self.save_callback is not None:

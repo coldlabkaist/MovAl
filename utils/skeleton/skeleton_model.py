@@ -56,9 +56,14 @@ class SkeletonModel:
             raise ValueError("Name already exists.")
         if old not in self.nodes:
             raise ValueError("Node not found.")
-        node = self.nodes.pop(old)
-        node.name = new
-        self.nodes[new] = node
+        reordered = {}
+        for name, node in self.nodes.items():
+            if name == old:
+                node.name = new
+                reordered[new] = node
+            else:
+                reordered[name] = node
+        self.nodes = reordered
 
         new_edges = set()
         for e in self.edges:
@@ -68,6 +73,21 @@ class SkeletonModel:
             else:
                 new_edges.add(e)
         self.edges = new_edges
+
+    def reorder_nodes(self, ordered_names):
+        ordered = {}
+        seen = set()
+
+        for name in ordered_names:
+            if name in self.nodes and name not in seen:
+                ordered[name] = self.nodes[name]
+                seen.add(name)
+
+        for name, node in self.nodes.items():
+            if name not in seen:
+                ordered[name] = node
+
+        self.nodes = ordered
 
     def add_edge(self, name1, name2):
         if name1 == name2:

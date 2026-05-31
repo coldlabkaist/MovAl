@@ -126,7 +126,7 @@ class DataLoader:
                 file_kps.append(col.split(".")[0])
         skel_kps = list(cls.skeleton_model.nodes)
 
-        if file_kps != skel_kps:
+        if len(file_kps) != len(skel_kps) or set(file_kps) != set(skel_kps):
             QMessageBox.warning(
                 cls.parent or parent,
                 "Skeleton Mismatch",
@@ -752,10 +752,28 @@ class DataLoader:
         cls._inference_mode = inference_mode
 
         if path.is_dir():
-            txt_files = sorted(path.glob("*.txt"))
+            candidate_dirs = [path]
+            if inference_mode:
+                labels_dir = path / "labels"
+                if labels_dir != path:
+                    candidate_dirs.append(labels_dir)
+
+            selected_dir: Path | None = None
+            txt_files: list[Path] = []
+            for candidate_dir in candidate_dirs:
+                if not candidate_dir.is_dir():
+                    continue
+                candidate_txt_files = sorted(candidate_dir.glob("*.txt"))
+                if candidate_txt_files:
+                    selected_dir = candidate_dir
+                    txt_files = candidate_txt_files
+                    break
+
             if not txt_files:
                 print("There is no txt file in the directory.")
                 return False
+            if selected_dir is not None and selected_dir != path:
+                print(f"Using TXT files from: {selected_dir}")
 
             cls._init_txt_schema(txt_files[0], sep)
             if not cls._check_txt_skeleton_compat(txt_files[0]):
@@ -876,12 +894,22 @@ class DataLoader:
                     df[vis_col] = 2
             df = df.drop(columns=[c for c in df.columns if c.endswith(".score")])
 
-            kp_order: List[str] = []
+            file_kp_order: List[str] = []
             for col in df.columns:
                 if isinstance(col, str) and col.endswith(".x"):
                     base = col[:-2]
-                    if base not in kp_order:
-                        kp_order.append(base)
+                    if base not in file_kp_order:
+                        file_kp_order.append(base)
+
+            skeleton_kp_order = list(cls.kp_order or [])
+            if (
+                skeleton_kp_order
+                and len(file_kp_order) == len(skeleton_kp_order)
+                and set(file_kp_order) == set(skeleton_kp_order)
+            ):
+                kp_order = skeleton_kp_order
+            else:
+                kp_order = file_kp_order
             cls.kp_order = kp_order
 
             base_cols = ["track", "frame_idx", "instance.visibility"]

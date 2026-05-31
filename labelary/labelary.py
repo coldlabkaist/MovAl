@@ -279,10 +279,15 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         
     def update_keypoint_list(self):
         self.kpt_list.clear()
-        if DataLoader.loaded_data is None:
-            return
-        tracks = DataLoader.get_track_keys_for_frame(self.video_loader.current_frame)
-        self.kpt_list.build(tracks, DataLoader.kp_order, self.skeleton)
+        visible_tracks = []
+        if DataLoader.loaded_data is not None:
+            visible_tracks = DataLoader.get_track_keys_for_frame(self.video_loader.current_frame)
+        self.kpt_list.build(
+            self.project.animals_name,
+            visible_tracks,
+            DataLoader.kp_order,
+            self.skeleton,
+        )
 
     def set_color_combo(self):
         self.color_combo.clear()

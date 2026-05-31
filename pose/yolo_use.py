@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 import re
 import pandas as pd
+from typing import Optional
 from utils.skeleton.skeleton_model import SkeletonModel
 
 class BrowseOnlyLineEdit(QLineEdit):
@@ -575,7 +576,7 @@ class YoloInferenceDialog(QDialog):
 
         self.show_tracking_checkbox = QCheckBox(checked=False)
         self.save_media_checkbox = QCheckBox(checked=False)
-        self.save_txt_checkbox = QCheckBox(checked=True)
+        self.save_txt_checkbox = QCheckBox(checked=False)
         self.convert_txt_to_csv_checkbox = QCheckBox(checked=True)
 
         form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
@@ -717,6 +718,92 @@ class YoloInferenceDialog(QDialog):
         max_det = len(classes) * self.current_project.get_max_instances_per_id()
         return classes, max_det
 
+    def _predicts_dir(self) -> Path:
+        return Path(self.current_project.project_dir) / "predicts"
+
+    def _make_inference_run_root_name(self, ts: datetime) -> str:
+        return f"run_{ts.strftime('%y%m%d_%H%M%S')}"
+
+    def _inference_run_root_dir(self, run_root_name: str) -> Path:
+        return self._predicts_dir() / run_root_name
+
+    def _inference_source_dir(self, run_root_name: str, source_name: str) -> Path:
+        return self._inference_run_root_dir(run_root_name) / source_name
+
+    def _inference_source_labels_dir(self, run_root_name: str, source_name: str) -> Path:
+        return self._inference_source_dir(run_root_name, source_name) / "labels"
+
+    def _inference_source_csv_path(self, run_root_name: str, source_name: str) -> Path:
+        return self._inference_run_root_dir(run_root_name) / f"{source_name}.csv"
+
+    def _dir_has_txt_files(self, path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        return next(path.glob("*.txt"), None) is not None
+
+    def _resolve_inference_txt_dir(self, run_root_name: str, source_name: str) -> Optional[Path]:
+        source_dir = self._inference_source_dir(run_root_name, source_name)
+        if self._dir_has_txt_files(source_dir):
+            return source_dir
+
+        labels_dir = self._inference_source_labels_dir(run_root_name, source_name)
+        if self._dir_has_txt_files(labels_dir):
+            return labels_dir
+        return None
+
+    def _remove_dir_if_empty(self, path: Path) -> None:
+        try:
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+        except OSError:
+            pass
+
+    def _flatten_inference_txt_outputs(self, run_root_name: str, source_name: str) -> None:
+        source_dir = self._inference_source_dir(run_root_name, source_name)
+        labels_dir = self._inference_source_labels_dir(run_root_name, source_name)
+        if not labels_dir.is_dir():
+            return
+
+        for txt_path in sorted(labels_dir.glob("*.txt"), key=lambda p: self._extract_frame_number(p.name)):
+            destination = source_dir / txt_path.name
+            if destination.exists():
+                destination.unlink()
+            txt_path.replace(destination)
+
+        self._remove_dir_if_empty(labels_dir)
+
+    def _delete_inference_txt_outputs(self, run_root_name: str, source_name: str) -> None:
+        source_dir = self._inference_source_dir(run_root_name, source_name)
+        labels_dir = self._inference_source_labels_dir(run_root_name, source_name)
+
+        for txt_dir in (labels_dir, source_dir):
+            if not txt_dir.is_dir():
+                continue
+            for txt_path in txt_dir.glob("*.txt"):
+                txt_path.unlink(missing_ok=True)
+
+        self._remove_dir_if_empty(labels_dir)
+        self._remove_dir_if_empty(source_dir)
+
+    def _finalize_inference_outputs(
+        self,
+        run_root_name: str,
+        source_name: str,
+        keep_txt: bool,
+        want_csv: bool,
+    ) -> None:
+        txt_dir = self._resolve_inference_txt_dir(run_root_name, source_name)
+        converted = False
+
+        if want_csv and txt_dir is not None:
+            self._convert_txt_result_to_csv(run_root_name, source_name, txt_dir=txt_dir)
+            converted = True
+
+        if keep_txt:
+            self._flatten_inference_txt_outputs(run_root_name, source_name)
+        elif not want_csv or converted or txt_dir is None:
+            self._delete_inference_txt_outputs(run_root_name, source_name)
+
     def _update_visualization_option_states(self):
         if hasattr(self, "show_tracking_checkbox"):
             if self.image_radio.isChecked():
@@ -725,12 +812,8 @@ class YoloInferenceDialog(QDialog):
             else:
                 self.show_tracking_checkbox.setEnabled(True)
 
-        if hasattr(self, "save_txt_checkbox") and hasattr(self, "convert_txt_to_csv_checkbox"):
-            if self.save_txt_checkbox.isChecked():
-                self.convert_txt_to_csv_checkbox.setEnabled(True)
-            else:
-                self.convert_txt_to_csv_checkbox.setChecked(False)
-                self.convert_txt_to_csv_checkbox.setEnabled(False)
+        if hasattr(self, "convert_txt_to_csv_checkbox"):
+            self.convert_txt_to_csv_checkbox.setEnabled(True)
 
     def run_inference(self):
         if is_project_compression_running():
@@ -775,20 +858,21 @@ class YoloInferenceDialog(QDialog):
         self.current_run_item = None
 
         ts = datetime.now()
-        ts_date = ts.strftime("%y%m%d")
-        ts_time = ts.strftime("%H%M%S")
-        base_out= os.path.join(self.current_project.project_dir, "predicts")
+        run_root_name = self._make_inference_run_root_name(ts)
+        base_out = self._inference_run_root_dir(run_root_name)
+        keep_txt = self.save_txt_checkbox.isChecked()
+        want_csv = self.convert_txt_to_csv_checkbox.isChecked()
+        need_txt_output = keep_txt or want_csv
 
         def norm(p):
             return str(p).replace("\\", "/")
         
         model_path = norm(model_path)
+        base_out.mkdir(parents=True, exist_ok=True)
         base_out = norm(base_out)
 
         for name, src in sources:
             src = norm(src)
-
-            run_name = f"predict__{name}_{ts_date}_{ts_time}"
 
             if self.tracking_radio.isChecked():
                 tracker_name = self.track_method_combo.currentText() + ".yaml"
@@ -798,7 +882,7 @@ class YoloInferenceDialog(QDialog):
                     f"tracker={tracker_name}",
                     f"source={src}",
                     f"project={base_out}",
-                    f"name={run_name}",
+                    f"name={name}",
                 ]
             else:
                 cmd = [
@@ -806,7 +890,7 @@ class YoloInferenceDialog(QDialog):
                     f"model={model_path}",
                     f"source={src}",
                     f"project={base_out}",
-                    f"name={run_name}",
+                    f"name={name}",
                 ]
 
             for k, v in infer_params.items():
@@ -822,14 +906,16 @@ class YoloInferenceDialog(QDialog):
                 cmd.append("show=True")
             if self.save_media_checkbox.isChecked():
                 cmd.append("save=True")
-            if self.save_txt_checkbox.isChecked():
+            if need_txt_output:
                 cmd.append("save_txt=True")
 
             self.command_queue.append(
                 {
                     "command": cmd,
-                    "run_name": run_name,
+                    "run_root_name": run_root_name,
                     "source_name": name,
+                    "keep_txt": keep_txt,
+                    "want_csv": want_csv,
                 }
             )
 
@@ -904,19 +990,18 @@ class YoloInferenceDialog(QDialog):
             return
 
         run_item = self.current_run_item or {}
-        run_name = run_item.get("run_name")
-        if (
-            run_name
-            and self.save_txt_checkbox.isChecked()
-            and self.convert_txt_to_csv_checkbox.isChecked()
-        ):
+        run_root_name = run_item.get("run_root_name")
+        source_name = run_item.get("source_name")
+        keep_txt = bool(run_item.get("keep_txt"))
+        want_csv = bool(run_item.get("want_csv"))
+        if run_root_name and source_name and (keep_txt or want_csv):
             try:
-                self._convert_txt_result_to_csv(run_name)
+                self._finalize_inference_outputs(run_root_name, source_name, keep_txt, want_csv)
             except Exception as err:
                 QMessageBox.warning(
                     self,
-                    "TXT to CSV conversion failed",
-                    f"Run: {run_name}\n{err}",
+                    "Inference output finalization failed",
+                    f"Run: {run_root_name}\nSource: {source_name}\n{err}",
                 )
         self._completed_commands += 1
         pose_execution_state.update_progress(
@@ -1037,10 +1122,15 @@ class YoloInferenceDialog(QDialog):
         _, _, kpt_names = skeleton_model.create_training_config()
         return list(kpt_names)
 
-    def _convert_txt_result_to_csv(self, run_name: str):
-        run_dir = Path(self.current_project.project_dir) / "predicts" / run_name
-        txt_dir = run_dir / "labels"
-        if not txt_dir.is_dir():
+    def _convert_txt_result_to_csv(
+        self,
+        run_root_name: str,
+        source_name: str,
+        txt_dir: Optional[Path] = None,
+    ):
+        if txt_dir is None:
+            txt_dir = self._resolve_inference_txt_dir(run_root_name, source_name)
+        if txt_dir is None or not txt_dir.is_dir():
             return
 
         txt_files = sorted(
@@ -1156,5 +1246,5 @@ class YoloInferenceDialog(QDialog):
             columns.append("instance.id")
 
         df = pd.DataFrame(rows, columns=columns)
-        csv_path = run_dir / "inference_result.csv"
+        csv_path = self._inference_source_csv_path(run_root_name, source_name)
         df.to_csv(csv_path, index=False)

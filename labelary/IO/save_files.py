@@ -100,6 +100,9 @@ def save_modified_data(parent: QWidget):
                 return
 
         df_to_save = df_orig.copy()
+        dropped_negative = 0
+        if hasattr(parent, "_shift_frame_indices_by_current_delay"):
+            df_to_save, dropped_negative = parent._shift_frame_indices_by_current_delay(df_to_save)
         for sc in [c for c in df_to_save.columns if c.endswith(".score")]:
             vis = sc.replace(".score", ".visibility")
             if vis not in df_to_save.columns:
@@ -108,7 +111,14 @@ def save_modified_data(parent: QWidget):
 
         try:
             df_to_save.to_csv(csv_path, index=False)
-            QMessageBox.information(parent, "Success", f"CSV Saved!:\n{csv_path}")
+            if hasattr(parent, "commit_current_delay_to_loaded_data"):
+                parent.commit_current_delay_to_loaded_data()
+            if hasattr(DataLoader, "csv_path"):
+                DataLoader.csv_path = str(csv_path)
+            message = f"CSV Saved!:\n{csv_path}"
+            if dropped_negative:
+                message += f"\n\nDropped {dropped_negative} rows with negative frame indices after applying the delay."
+            QMessageBox.information(parent, "Success", message)
             parent.update_label_combo(
                 video_index = (parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
                 set_text = csv_path

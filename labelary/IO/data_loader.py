@@ -51,6 +51,7 @@ class DataLoader:
     _inference_mode: bool = False
 
     INSTANCE_ID_COL = "instance.id"
+    INSTANCE_SCORE_COL = "instance.score"
     INSTANCE_KEY_SEPARATOR = "::instance::"
 
     @classmethod
@@ -275,6 +276,64 @@ class DataLoader:
             cls._assign_instance_ids_inplace(df)
 
         return cls._sort_df(df)
+
+    @classmethod
+    def _row_score_series(cls, df: pd.DataFrame) -> pd.Series:
+        if df.empty:
+            return pd.Series(dtype=float)
+
+        score = pd.Series(np.zeros(len(df), dtype=float), index=df.index, dtype=float)
+        if cls.INSTANCE_SCORE_COL in df.columns:
+            score = pd.to_numeric(df[cls.INSTANCE_SCORE_COL], errors="coerce").fillna(score)
+
+        kp_score_cols = [
+            col for col in df.columns
+            if isinstance(col, str)
+            and col.endswith(".score")
+            and col != cls.INSTANCE_SCORE_COL
+        ]
+        if kp_score_cols:
+            kp_score = (
+                df[kp_score_cols]
+                .apply(pd.to_numeric, errors="coerce")
+                .max(axis=1)
+                .fillna(score)
+            )
+            score = np.maximum(score.to_numpy(dtype=float), kp_score.to_numpy(dtype=float))
+            score = pd.Series(score, index=df.index, dtype=float)
+
+        return score.fillna(0.0)
+
+    @classmethod
+    def _prune_loaded_df(cls, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty or "frame_idx" not in df.columns or "track" not in df.columns:
+            return df
+
+        limit = cls.get_max_instances_per_id()
+        pruned = df.copy()
+        pruned["_instance_score_sort"] = cls._row_score_series(pruned)
+
+        sort_cols = ["frame_idx", "track", "_instance_score_sort"]
+        ascending = [True, True, False]
+        if cls.INSTANCE_ID_COL in pruned.columns:
+            pruned[cls.INSTANCE_ID_COL] = pd.to_numeric(pruned[cls.INSTANCE_ID_COL], errors="coerce")
+            sort_cols.append(cls.INSTANCE_ID_COL)
+            ascending.append(True)
+            pruned = (
+                pruned.sort_values(sort_cols, ascending=ascending, kind="stable")
+                .groupby(["frame_idx", "track", cls.INSTANCE_ID_COL], dropna=False, sort=False, group_keys=False)
+                .head(1)
+            )
+            sort_cols = ["frame_idx", "track", "_instance_score_sort", cls.INSTANCE_ID_COL]
+            ascending = [True, True, False, True]
+        pruned = (
+            pruned.sort_values(sort_cols, ascending=ascending, kind="stable")
+            .groupby(["frame_idx", "track"], sort=False, group_keys=False)
+            .head(limit)
+            .drop(columns=["_instance_score_sort"], errors="ignore")
+            .reset_index(drop=True)
+        )
+        return pruned
 
     @classmethod
     def visible_dataframe(cls, df: pd.DataFrame | None = None) -> pd.DataFrame:
@@ -837,12 +896,20 @@ class DataLoader:
 
         records = []
         for row in arr:
+            data_slice = row[5:-1] if has_instance_id else row[5:]
+            instance_score = 0.0
+            if cls._inference_mode and data_slice.size >= 3:
+                try:
+                    instance_score = float(np.max(data_slice[2::3]))
+                except Exception:
+                    instance_score = 0.0
             rec: dict = {
                 "track": f"track_{int(row[0])}",
-                "frame_idx": frame_idx + 1 if cls._inference_mode else frame_idx,
+                "frame_idx": frame_idx,
                 "instance.visibility": 2,
             }
-            data_slice = row[5:-1] if has_instance_id else row[5:]
+            if cls._inference_mode:
+                rec[cls.INSTANCE_SCORE_COL] = instance_score
             if has_instance_id:
                 rec[cls.INSTANCE_ID_COL] = int(row[-1])
 
@@ -852,6 +919,7 @@ class DataLoader:
                 rec[f"{kp}.x"] = float(x)
                 rec[f"{kp}.y"] = float(y)
                 if cls._inference_mode:
+                    rec[f"{kp}.score"] = float(vis)
                     rec[f"{kp}.visibility"] = 2
                 else:
                     vis_int = int(round(float(vis)))
@@ -887,6 +955,8 @@ class DataLoader:
                     return False
                 df["track"] = df["track"].map(mapping)
                 cls.track_mapping = mapping
+
+            df = cls._prune_loaded_df(df)
 
             for score_col in [c for c in df.columns if c.endswith(".score")]:
                 vis_col = score_col.replace(".score", ".visibility")

@@ -198,10 +198,8 @@ class VideoLoader:
             self.frame_jump_spin.setValue(self.current_frame)
             self.frame_jump_spin.blockSignals(False)
         self.frame_number_label.setText(f"{self.current_frame} (total frames : {self.total_frames})")
-
-        csv_points = DataLoader.get_keypoint_coordinates_by_frame(self.current_frame)
-        self.skeleton_video_viewer.setCSVPoints(csv_points)
-        self.kpt_list.update_list_visibility(csv_points)
+        if hasattr(self.parent, "refresh_frame_bound_views"):
+            self.parent.refresh_frame_bound_views()
 
     def toggle_playback(self):
         if self.timer.isActive():
@@ -272,7 +270,20 @@ class VideoLoader:
         return self.get_current_frame_path()
 
     def _labeled_frames_sorted(self):
-        return DataLoader.get_labeled_frames()
+        labeled_frames = DataLoader.get_labeled_frames()
+        if not hasattr(self.parent, "resolve_view_frame"):
+            return labeled_frames
+
+        resolved: list[int] = []
+        seen: set[int] = set()
+        for label_frame in labeled_frames:
+            view_frame = self.parent.resolve_view_frame(label_frame)
+            if view_frame is None or view_frame in seen:
+                continue
+            seen.add(view_frame)
+            resolved.append(view_frame)
+        resolved.sort()
+        return resolved
 
     def _find_neighbor_labeled_frame(self, start_idx: int, direction: int) -> int:
         labeled = self._labeled_frames_sorted()

@@ -413,6 +413,7 @@ class ProjectInformation:
         if not isinstance(labelary_state, dict):
             labelary_state = {}
         labelary_state["frame_index"] = max(0, int(labelary_state.get("frame_index", 0) or 0))
+        labelary_state["skeleton_frame_delay"] = int(labelary_state.get("skeleton_frame_delay", 0) or 0)
         if labelary_state.get("label_type") not in {"csv", "txt", None}:
             labelary_state["label_type"] = None
         self.ui_state["labelary"] = labelary_state
@@ -762,6 +763,7 @@ class ProjectInformation:
         label_name: Optional[str] = None,
         label_type: Optional[str] = None,
         frame_index: Optional[int] = None,
+        skeleton_frame_delay: Optional[int] = None,
         color_mode: Optional[str] = None,
         mode: Optional[str] = None,
         save: bool = True,
@@ -776,6 +778,8 @@ class ProjectInformation:
             labelary_state["label_type"] = label_type
         if frame_index is not None:
             labelary_state["frame_index"] = max(0, int(frame_index))
+        if skeleton_frame_delay is not None:
+            labelary_state["skeleton_frame_delay"] = int(skeleton_frame_delay)
         if color_mode is not None:
             labelary_state["color_mode"] = color_mode
         if mode is not None:

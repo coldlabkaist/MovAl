@@ -19,6 +19,7 @@ from pose.thread import TrainThread
 from typing import Union, Optional, List
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
 import sys
 
 class LabelaryDialog(QDialog, UI_LabelaryDialog):
@@ -64,6 +65,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.load_model_button.clicked.connect(self.browse_and_load_model)
         self.automatic_label_checkbox.toggled.connect(self.on_automatic_label_toggled)
         self.mini_training_button.clicked.connect(self.run_mini_training)
+        self.skeleton_delay_spin.valueChanged.connect(self.on_skeleton_delay_changed)
 
         self.video_combo.currentIndexChanged.connect(self.update_label_combo)
         self.video_combo.currentIndexChanged.connect(self._on_video_selection_changed)
@@ -117,6 +119,84 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         preferred_mode = self.project.get_preferred_frame_mode()
         index = self.mode_combo.findText(preferred_mode, Qt.MatchFlag.MatchExactly)
         self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def get_skeleton_frame_delay(self) -> int:
+        return int(self.skeleton_delay_spin.value())
+
+    def resolve_label_frame(self, view_frame: int) -> Optional[int]:
+        label_frame = int(view_frame) - self.get_skeleton_frame_delay()
+        if label_frame < 0:
+            return None
+        return label_frame
+
+    def resolve_view_frame(self, label_frame: int) -> Optional[int]:
+        view_frame = int(label_frame) + self.get_skeleton_frame_delay()
+        if self.video_loader.total_frames > 0 and not (0 <= view_frame < self.video_loader.total_frames):
+            return None
+        return view_frame
+
+    def _shift_frame_indices_by_current_delay(
+        self,
+        df: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, int]:
+        shifted = df.copy()
+        if "frame_idx" not in shifted.columns:
+            return shifted, 0
+
+        delay = self.get_skeleton_frame_delay()
+        if delay == 0:
+            return shifted, 0
+
+        shifted["frame_idx"] = (
+            pd.to_numeric(shifted["frame_idx"], errors="coerce").fillna(0).astype(int) + delay
+        )
+        negative_mask = shifted["frame_idx"] < 0
+        dropped = int(negative_mask.sum())
+        if dropped:
+            shifted = shifted.loc[~negative_mask].copy()
+        shifted.reset_index(drop=True, inplace=True)
+        return shifted, dropped
+
+    def commit_current_delay_to_loaded_data(self) -> int:
+        if DataLoader.loaded_data is None:
+            return 0
+
+        delay = self.get_skeleton_frame_delay()
+        if delay == 0:
+            return 0
+
+        shifted, dropped = self._shift_frame_indices_by_current_delay(DataLoader.loaded_data)
+        if shifted.empty:
+            shifted = shifted.reindex(columns=DataLoader.loaded_data.columns)
+            DataLoader.loaded_data = shifted.reset_index(drop=True)
+            DataLoader._bump_label_version()
+        else:
+            DataLoader.loaded_data = DataLoader._normalize_loaded_df(shifted)
+            DataLoader._bump_label_version()
+
+        self.skeleton_delay_spin.blockSignals(True)
+        self.skeleton_delay_spin.setValue(0)
+        self.skeleton_delay_spin.blockSignals(False)
+        self.refresh_frame_bound_views()
+        self._persist_ui_state(include_frame=True)
+        return dropped
+
+    def refresh_frame_bound_views(self) -> None:
+        if not getattr(self.skeleton_video_viewer, "video_loaded", False):
+            self.skeleton_video_viewer.setCSVPoints({})
+            self.kpt_list.clear()
+            self.kpt_list.update_list_visibility({})
+            return
+
+        label_frame = self.resolve_label_frame(self.video_loader.current_frame)
+        coords_dict = (
+            DataLoader.get_keypoint_coordinates_by_frame(label_frame)
+            if label_frame is not None
+            else {}
+        )
+        self.skeleton_video_viewer.setCSVPoints(coords_dict)
+        self.update_keypoint_list()
+        self.kpt_list.update_list_visibility(coords_dict)
 
     def update_label_combo(self, video_index = None, set_text = None):
         files = self.project.files
@@ -213,8 +293,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.mouse_controller.enable_control = True
         self.is_video_paused = True
         self._restore_saved_frame_index()
-        self.update_keypoint_list()
-        self.update_csv_points_on_image()
+        self.refresh_frame_bound_views()
         self.auto_label_current_frame()
         self._persist_ui_state(include_frame=True)
 
@@ -271,17 +350,14 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.auto_label_current_frame()
 
     def update_csv_points_on_image(self):
-        current_frame = self.video_loader.current_frame
-        coords_dict = DataLoader.get_keypoint_coordinates_by_frame(current_frame)
-        self.skeleton_video_viewer.setCSVPoints(coords_dict)
-        self.update_keypoint_list()
-        self.kpt_list.update_list_visibility(coords_dict)
+        self.refresh_frame_bound_views()
         
     def update_keypoint_list(self):
         self.kpt_list.clear()
         visible_tracks = []
-        if DataLoader.loaded_data is not None:
-            visible_tracks = DataLoader.get_track_keys_for_frame(self.video_loader.current_frame)
+        label_frame = self.resolve_label_frame(self.video_loader.current_frame)
+        if DataLoader.loaded_data is not None and label_frame is not None:
+            visible_tracks = DataLoader.get_track_keys_for_frame(label_frame)
         self.kpt_list.build(
             self.project.animals_name,
             visible_tracks,
@@ -327,6 +403,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 color_index = self.color_combo.findText(saved_color, Qt.MatchFlag.MatchExactly)
                 if color_index >= 0:
                     self.color_combo.setCurrentIndex(color_index)
+            self.skeleton_delay_spin.setValue(int(saved_state.get("skeleton_frame_delay", 0) or 0))
         finally:
             self._restoring_ui_state = False
 
@@ -386,6 +463,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             label_name=label_name,
             label_type=label_type,
             frame_index=frame_index,
+            skeleton_frame_delay=self.get_skeleton_frame_delay(),
             color_mode=self.color_combo.currentText() if self.color_combo.count() else None,
             mode=self.mode_combo.currentText(),
         )
@@ -416,6 +494,12 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             return
         self.project.set_preferred_frame_mode(mode)
         self._refresh_mini_training_button_state()
+
+    def on_skeleton_delay_changed(self, _value: int) -> None:
+        if getattr(self.skeleton_video_viewer, "video_loaded", False):
+            self.refresh_frame_bound_views()
+        if not self._restoring_ui_state:
+            self._persist_ui_state(include_frame=True)
 
     def open_save_dialog(self):
         self.shortcuts_enabled = False
@@ -740,7 +824,9 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.automatic_label_checkbox.blockSignals(False)
             return
 
-        frame_idx = self.video_loader.current_frame
+        frame_idx = self.resolve_label_frame(self.video_loader.current_frame)
+        if frame_idx is None:
+            return
         if DataLoader.frame_has_labels(frame_idx):
             return
 
@@ -843,6 +929,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 record = {
                     "track": item["track"],
                     "keypoints": item["keypoints"],
+                    "instance_score": item["score"],
                 }
                 if per_class_limit > 1:
                     record["instance_id"] = slot_idx

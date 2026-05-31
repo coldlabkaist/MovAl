@@ -153,6 +153,7 @@ class _VideoExportThread(QThread):
         height: int,
         fps: float,
         fourcc: int,
+        frame_delay: int,
     ) -> None:
         super().__init__()
         self.out_path = out_path
@@ -166,6 +167,7 @@ class _VideoExportThread(QThread):
         self.height = height
         self.fps = fps
         self.fourcc = fourcc
+        self.frame_delay = int(frame_delay)
 
     def run(self) -> None:
         skeleton_model = SkeletonModel()
@@ -178,14 +180,13 @@ class _VideoExportThread(QThread):
 
         try:
             total = len(self.image_files)
-            first_frame_is_one = bool(self.frame_groups and min(self.frame_groups) == 1)
             for index, img_path in enumerate(self.image_files):
                 frame_img = cv2.imread(str(img_path))
                 if frame_img is None:
                     self.progress_signal.emit(index + 1, total)
                     continue
 
-                frame_num = index + 1 if first_frame_is_one else index
+                frame_num = index - self.frame_delay
                 frame_df = self.frame_groups.get(frame_num)
                 if frame_df is not None:
                     frame_coords: dict[str, dict[str, tuple[float, float, int]]] = {}
@@ -351,6 +352,7 @@ def _export_video_stub(parent: QWidget) -> None:
     skeleton_data = parent.skeleton.to_dict()
     animals_name = list(parent.project.animals_name) if getattr(parent, "project", None) else list(DataLoader.animals_name or [])
     color_mode = getattr(parent.skeleton_video_viewer, "skeleton_color_mode", "cutie_light")
+    frame_delay = parent.get_skeleton_frame_delay() if hasattr(parent, "get_skeleton_frame_delay") else 0
 
     progress = QProgressDialog("Exporting video...", "", 0, len(image_files), parent)
     progress.setWindowTitle("Video Export")
@@ -374,6 +376,7 @@ def _export_video_stub(parent: QWidget) -> None:
         height=height,
         fps=fps,
         fourcc=fourcc,
+        frame_delay=frame_delay,
     )
 
     def _on_progress(done: int, total: int) -> None:

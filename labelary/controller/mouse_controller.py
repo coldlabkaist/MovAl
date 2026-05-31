@@ -60,6 +60,29 @@ class MouseController(QObject):
         self.kpt_list.highlight(track, kp)
         self.kpt_list.update() 
 
+    def _current_label_frame(self) -> int | None:
+        if not hasattr(self.video_viewer, "current_frame"):
+            return None
+        parent = getattr(self.video_loader, "parent", None)
+        if parent is not None and hasattr(parent, "resolve_label_frame"):
+            return parent.resolve_label_frame(self.video_viewer.current_frame)
+        return int(getattr(self.video_viewer, "current_frame", 0))
+
+    def _refresh_visible_overlay(self) -> None:
+        parent = getattr(self.video_loader, "parent", None)
+        if parent is not None and hasattr(parent, "refresh_frame_bound_views"):
+            parent.refresh_frame_bound_views()
+        else:
+            frame_idx = self._current_label_frame()
+            coords = (
+                DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
+                if frame_idx is not None
+                else {}
+            )
+            self.video_viewer.setCSVPoints(coords)
+            self.kpt_list.update_list_visibility(coords)
+        self.video_viewer.update()
+
     def _press(self, e: QMouseEvent) -> bool:
         if not self.video_viewer.click_enabled:
             return True
@@ -231,7 +254,9 @@ class MouseController(QObject):
         try:
             if self.video_viewer.dragging_target:
                 kind = self.video_viewer.dragging_target[0]
-                frame_idx = getattr(self.video_viewer, "current_frame", 0) 
+                frame_idx = self._current_label_frame()
+                if frame_idx is None:
+                    raise KeyError
                 if kind == "csv":
                     _, track, kp = self.video_viewer.dragging_target
                     nx, ny, _ = self.video_viewer.csv_points[track][kp]
@@ -338,7 +363,9 @@ class MouseController(QObject):
             act_prev_lbl.setShortcut(QKeySequence("Ctrl+Left"))
             act_next_lbl.setShortcut(QKeySequence("Ctrl+Right"))
 
-        current_frame = getattr(self.video_viewer, "current_frame", 0)
+        current_frame = self._current_label_frame()
+        if current_frame is None:
+            current_frame = -1
         act_add.setEnabled(DataLoader.frame_has_capacity_for_new_instance(current_frame))
         act_replace.setEnabled(self.selected_instance is not None)
         act_delete.setEnabled(self.selected_instance is not None)
@@ -628,9 +655,9 @@ class MouseController(QObject):
 
     
     def _add_new_skeleton_label(self, track_name: str | None = None, context_pos: QPoint | None = None):
-        if not hasattr(self.video_viewer, "current_frame"):
+        frame_idx = self._current_label_frame()
+        if frame_idx is None:
             return
-        frame_idx = self.video_viewer.current_frame
 
         new_track = track_name
         if new_track is None:
@@ -652,23 +679,19 @@ class MouseController(QObject):
         if not success:
             return
 
-        coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
-        self.video_viewer.setCSVPoints(coords)
-        self.kpt_list.update_list_visibility(coords)
-        self.video_viewer.update()
+        self._refresh_visible_overlay()
 
     def _replace_selected_instance(self, context_pos: QPoint | None = None):
-        if self.selected_instance is None or not hasattr(self.video_viewer, "current_frame"):
+        if self.selected_instance is None:
             return
         track_name = DataLoader.get_base_track_name(self.selected_instance)
-        frame_idx = self.video_viewer.current_frame
+        frame_idx = self._current_label_frame()
+        if frame_idx is None:
+            return
         if not DataLoader.delete_instance(frame_idx, self.selected_instance):
             return
 
-        coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
-        self.video_viewer.setCSVPoints(coords)
-        self.kpt_list.update_list_visibility(coords)
-        self.video_viewer.update()
+        self._refresh_visible_overlay()
 
         self.selected_instance = None
         self.selected_node = None
@@ -680,14 +703,14 @@ class MouseController(QObject):
     def _delete_selected_instance(self):
         if self.selected_instance is None:
             return
-        frame_idx = getattr(self.video_viewer, "current_frame", 0) 
+        frame_idx = self._current_label_frame()
+        if frame_idx is None:
+            return
         track = self.selected_instance
         success = DataLoader.delete_instance(frame_idx, track)
         if not success:
             return
-        coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
-        self.video_viewer.setCSVPoints(coords)
-        self.kpt_list.update_list_visibility(coords)
+        self._refresh_visible_overlay()
         self.selected_instance = None
         self.selected_node = None
 
@@ -717,25 +740,26 @@ class MouseController(QObject):
             if not ok:
                 return
 
-        frame_idx   = getattr(self.video_viewer, "current_frame", 0)
+        frame_idx = self._current_label_frame()
+        if frame_idx is None:
+            return
         old_track   = self.selected_instance
         updated_instance_key = DataLoader.swap_or_rename_instance(frame_idx, old_track, new_track)
         if not updated_instance_key:
             return
 
-        coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
-        self.video_viewer.setCSVPoints(coords)
+        self._refresh_visible_overlay()
         self.selected_instance = updated_instance_key
         self.selected_node = None
-        self.video_viewer.update()
-        self.kpt_list.update_list_visibility(coords)
         self._sync_list_selection()
 
     def _toggle_selected_node_visibility(self):
         if self.selected_node is None:
             return
         track, kp = self.selected_node
-        frame_idx = getattr(self.video_viewer, "current_frame", 0)
+        frame_idx = self._current_label_frame()
+        if frame_idx is None:
+            return
 
         cur_vis = 2
         if track in self.video_viewer.csv_points and kp in self.video_viewer.csv_points[track]:

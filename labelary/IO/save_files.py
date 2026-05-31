@@ -115,6 +115,8 @@ def save_modified_data(parent: QWidget):
                 parent.commit_current_delay_to_loaded_data()
             if hasattr(DataLoader, "csv_path"):
                 DataLoader.csv_path = str(csv_path)
+            if hasattr(parent, "mark_loaded_data_clean"):
+                parent.mark_loaded_data_clean()
             message = f"CSV Saved!:\n{csv_path}"
             if dropped_negative:
                 message += f"\n\nDropped {dropped_negative} rows with negative frame indices after applying the delay."

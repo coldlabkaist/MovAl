@@ -31,6 +31,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self._restoring_ui_state = False
         self.shortcuts_enabled = True
         self.is_video_paused = True
+        self._clean_loaded_data_snapshot: Optional[pd.DataFrame] = None
         self.auto_label_model = None
         self.auto_label_model_path: Optional[str] = None
         self.auto_label_model_mode: Optional[str] = None
@@ -198,6 +199,47 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.update_keypoint_list()
         self.kpt_list.update_list_visibility(coords_dict)
 
+    def _snapshot_loaded_data(self) -> Optional[pd.DataFrame]:
+        if DataLoader.loaded_data is None:
+            return None
+        df = DataLoader.loaded_data.copy()
+        df = df.reset_index(drop=True)
+        df = df.loc[:, ~df.columns.duplicated()]
+        return df
+
+    def mark_loaded_data_clean(self) -> None:
+        self._clean_loaded_data_snapshot = self._snapshot_loaded_data()
+
+    def has_unsaved_changes(self) -> bool:
+        if self.get_skeleton_frame_delay() != 0:
+            return True
+
+        current = self._snapshot_loaded_data()
+        baseline = self._clean_loaded_data_snapshot
+        if current is None and baseline is None:
+            return False
+        if current is None or baseline is None:
+            return True
+
+        try:
+            return not current.equals(baseline)
+        except Exception:
+            return True
+
+    def _confirm_discard_unsaved_changes(self, action_text: str) -> bool:
+        if not self.has_unsaved_changes():
+            return True
+
+        reply = QMessageBox.question(
+            self,
+            "Unsaved changes",
+            "There are unsaved changes in Labelary.\n\n"
+            f"Discard the current changes and {action_text}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def update_label_combo(self, video_index = None, set_text = None):
         files = self.project.files
         if not files:
@@ -254,6 +296,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self._persist_ui_state()
 
     def on_show_clicked(self):
+        if getattr(self.skeleton_video_viewer, "video_loaded", False):
+            if not self._confirm_discard_unsaved_changes("load another file"):
+                return
+
         video_path = self.video_combo.currentData(Qt.ItemDataRole.UserRole)
         display_mode = self.mode_combo.currentText()
         if not self.video_loader.load_video(video_path, display_mode):
@@ -294,6 +340,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.is_video_paused = True
         self._restore_saved_frame_index()
         self.refresh_frame_bound_views()
+        self.mark_loaded_data_clean()
         self.auto_label_current_frame()
         self._persist_ui_state(include_frame=True)
 
@@ -507,6 +554,15 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             save_modified_data(self)
         finally:
             self.shortcuts_enabled = True
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            event.ignore()
+            return
+        super().keyPressEvent(event)
+
+    def reject(self) -> None:
+        return
 
     def on_automatic_label_toggled(self, checked: bool):
         if not checked:
@@ -964,6 +1020,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                 )
                 event.ignore()
                 return
+
+        if not self._confirm_discard_unsaved_changes("close Labelary"):
+            event.ignore()
+            return
 
         self._persist_ui_state(include_frame=True)
         super().closeEvent(event)

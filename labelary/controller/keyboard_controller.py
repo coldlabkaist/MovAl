@@ -66,7 +66,7 @@ class KeyboardController(QObject):
                 return True
             elif (key == Qt.Key.Key_S and
                 event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-                self.main_dialog.open_save_dialog()
+                self.main_dialog.open_quick_save_dialog()
                 return True
             elif (key == Qt.Key.Key_D and
                   event.modifiers() & Qt.KeyboardModifier.ControlModifier):

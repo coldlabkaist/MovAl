@@ -9,7 +9,7 @@ from .gui import UI_LabelaryDialog
 from .IO.video_loader import VideoLoader
 from .widget.image_label import ClickableImageLabel
 from .IO.data_loader import DataLoader
-from .IO.save_files import save_modified_data, export_current_labels_to_txt_snapshot
+from .IO.save_files import save_modified_data, quick_save_csv, export_current_labels_to_txt_snapshot
 from .controller.keyboard_controller import KeyboardController
 from .controller.mouse_controller import MouseController
 from utils.skeleton import SkeletonModel
@@ -80,7 +80,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.color_combo.currentIndexChanged.connect(self.set_color_mode)
         self._restore_ui_state()
 
-        self.save_button.clicked.connect(self.open_save_dialog)
+        self.save_csv_button.clicked.connect(self.open_quick_save_dialog)
+        self.save_options_button.clicked.connect(self.open_save_dialog)
         self._refresh_model_button_state()
         self._refresh_mini_training_button_state()
 
@@ -298,7 +299,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
         reply = msg_box.exec()
         if reply == QMessageBox.StandardButton.Save:
-            self.open_save_dialog()
+            self.open_quick_save_dialog()
             return not self.has_unsaved_changes()
         if reply == QMessageBox.StandardButton.Discard:
             return True
@@ -633,6 +634,13 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.shortcuts_enabled = False
         try:
             save_modified_data(self)
+        finally:
+            self.shortcuts_enabled = True
+
+    def open_quick_save_dialog(self):
+        self.shortcuts_enabled = False
+        try:
+            quick_save_csv(self)
         finally:
             self.shortcuts_enabled = True
 

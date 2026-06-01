@@ -32,7 +32,7 @@ class _SaveActionDialog(QDialog):
 
         self._choice: str | None = None
 
-        btn_csv = QPushButton("save CSV", self)
+        btn_csv = QPushButton("save CSV as...", self)
         btn_txt = QPushButton("export TXT", self)
         btn_vid = QPushButton("export Video", self)
 
@@ -70,65 +70,38 @@ def save_modified_data(parent: QWidget):
     if action is None:
         return
 
-    df_orig = _sanitize_index(DataLoader.loaded_data.copy())
-
     project = _find_project(parent)
     if project is None or not hasattr(project, "project_dir"):
         QMessageBox.critical(parent, "Error", "Project information not found.")
         return
-    video_path, video_name = _current_video(parent)
+    _save_action(parent, action, project)
 
+
+def quick_save_csv(parent: QWidget) -> bool:
+    if DataLoader.loaded_data is None:
+        QMessageBox.warning(parent, "Warning", "Load CSV/TXT first")
+        return False
+
+    project = _find_project(parent)
+    if project is None or not hasattr(project, "project_dir"):
+        QMessageBox.critical(parent, "Error", "Project information not found.")
+        return False
+
+    csv_path = getattr(DataLoader, "csv_path", None)
+    if csv_path:
+        csv_path = Path(csv_path)
+        return _save_csv(parent, project, csv_path=csv_path, ask_name=False, confirm_overwrite=False)
+
+    return _save_csv(parent, project, csv_path=None, ask_name=True, confirm_overwrite=True)
+
+
+def _save_action(parent: QWidget, action: str, project) -> None:
     if action == "csv":
-        base_dir = Path(project.project_dir) / "labels" / video_name / "csv"
-        base_dir.mkdir(parents=True, exist_ok=True)
-
-        fname, ok = QInputDialog.getText(
-            parent, "Enter CSV file name", "File name (without extension):"
-        )
-        if not ok or not fname.strip():
-            return
-
-        csv_path = base_dir / f"{fname.strip()}.csv"
-        if csv_path.exists():
-            res = QMessageBox.question(
-                parent, "The file already exists",
-                f"Overwrite {csv_path.name}?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if res != QMessageBox.StandardButton.Yes:
-                return
-
-        df_to_save = df_orig.copy()
-        dropped_negative = 0
-        if hasattr(parent, "_shift_frame_indices_by_current_delay"):
-            df_to_save, dropped_negative = parent._shift_frame_indices_by_current_delay(df_to_save)
-        for sc in [c for c in df_to_save.columns if c.endswith(".score")]:
-            vis = sc.replace(".score", ".visibility")
-            if vis not in df_to_save.columns:
-                df_to_save[vis] = 2
-            df_to_save.drop(columns=[sc], inplace=True)
-
-        try:
-            df_to_save.to_csv(csv_path, index=False)
-            if hasattr(parent, "commit_current_delay_to_loaded_data"):
-                parent.commit_current_delay_to_loaded_data()
-            if hasattr(DataLoader, "csv_path"):
-                DataLoader.csv_path = str(csv_path)
-            if hasattr(parent, "mark_loaded_data_clean"):
-                parent.mark_loaded_data_clean()
-            message = f"CSV Saved!:\n{csv_path}"
-            if dropped_negative:
-                message += f"\n\nDropped {dropped_negative} rows with negative frame indices after applying the delay."
-            QMessageBox.information(parent, "Success", message)
-            parent.update_label_combo(
-                video_index = (parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
-                set_text = csv_path
-            )
-        except Exception as e:
-            QMessageBox.critical(parent, "Error", f"Failed to save CSV:\n{e}")
+        _save_csv(parent, project, csv_path=None, ask_name=True, confirm_overwrite=True)
         return
 
+    df_orig = _sanitize_index(DataLoader.loaded_data.copy())
+    _video_path, video_name = _current_video(parent)
     if action == "txt":
         txt_dir = Path(project.project_dir) / "labels" / video_name / "txt"
         txt_dir.mkdir(parents=True, exist_ok=True)
@@ -158,6 +131,74 @@ def save_modified_data(parent: QWidget):
     if action == "video":
         from .video_saver import _export_video_stub
         _export_video_stub(parent)
+
+
+def _save_csv(
+    parent: QWidget,
+    project,
+    *,
+    csv_path: Optional[Path],
+    ask_name: bool,
+    confirm_overwrite: bool,
+) -> bool:
+    _video_path, video_name = _current_video(parent)
+    if csv_path is None:
+        base_dir = Path(project.project_dir) / "labels" / video_name / "csv"
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        fname, ok = QInputDialog.getText(
+            parent, "Enter CSV file name", "File name (without extension):"
+        )
+        if not ok or not fname.strip():
+            return False
+        csv_path = base_dir / f"{fname.strip()}.csv"
+    else:
+        csv_path = Path(csv_path)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if confirm_overwrite and csv_path.exists():
+        res = QMessageBox.question(
+            parent,
+            "The file already exists",
+            f"Overwrite {csv_path.name}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if res != QMessageBox.StandardButton.Yes:
+            return False
+
+    df_orig = _sanitize_index(DataLoader.loaded_data.copy())
+    df_to_save = df_orig.copy()
+    dropped_negative = 0
+    if hasattr(parent, "_shift_frame_indices_by_current_delay"):
+        df_to_save, dropped_negative = parent._shift_frame_indices_by_current_delay(df_to_save)
+    for sc in [c for c in df_to_save.columns if c.endswith(".score")]:
+        vis = sc.replace(".score", ".visibility")
+        if vis not in df_to_save.columns:
+            df_to_save[vis] = 2
+        df_to_save.drop(columns=[sc], inplace=True)
+
+    try:
+        df_to_save.to_csv(csv_path, index=False)
+        if hasattr(parent, "commit_current_delay_to_loaded_data"):
+            parent.commit_current_delay_to_loaded_data()
+        if hasattr(DataLoader, "csv_path"):
+            DataLoader.csv_path = str(csv_path)
+        if hasattr(parent, "mark_loaded_data_clean"):
+            parent.mark_loaded_data_clean()
+        message = f"CSV Saved!:\n{csv_path}"
+        if dropped_negative:
+            message += f"\n\nDropped {dropped_negative} rows with negative frame indices after applying the delay."
+        QMessageBox.information(parent, "Success", message)
+        if hasattr(parent, "update_label_combo"):
+            parent.update_label_combo(
+                video_index=(parent.video_combo.currentIndex() if hasattr(parent, "video_combo") else None),
+                set_text=csv_path,
+            )
+        return True
+    except Exception as e:
+        QMessageBox.critical(parent, "Error", f"Failed to save CSV:\n{e}")
+        return False
         return
 
 

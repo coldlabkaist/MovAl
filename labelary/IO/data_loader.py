@@ -262,6 +262,46 @@ class DataLoader:
         ).astype("Int64")
 
     @classmethod
+    def _compact_instance_ids_inplace(
+        cls,
+        df: pd.DataFrame,
+        *,
+        frame_idx: Optional[int] = None,
+        track_name: Optional[str] = None,
+    ) -> None:
+        if cls.INSTANCE_ID_COL not in df.columns or df.empty:
+            return
+
+        work_df = df if frame_idx is None or track_name is None else df[
+            (df["frame_idx"] == int(frame_idx)) & (df["track"] == str(track_name))
+        ]
+        if work_df.empty:
+            return
+
+        groups = (
+            work_df.groupby(["frame_idx", "track"], sort=False).groups.items()
+            if frame_idx is None or track_name is None
+            else [((int(frame_idx), str(track_name)), work_df.index.tolist())]
+        )
+        for _, indices in groups:
+            ordered = sorted(
+                indices,
+                key=lambda idx: (
+                    pd.isna(df.at[idx, cls.INSTANCE_ID_COL]),
+                    int(df.at[idx, cls.INSTANCE_ID_COL])
+                    if pd.notna(df.at[idx, cls.INSTANCE_ID_COL])
+                    else 0,
+                    idx,
+                ),
+            )
+            for new_instance_id, idx in enumerate(ordered, start=1):
+                df.at[idx, cls.INSTANCE_ID_COL] = new_instance_id
+
+        df[cls.INSTANCE_ID_COL] = pd.to_numeric(
+            df[cls.INSTANCE_ID_COL], errors="coerce"
+        ).astype("Int64")
+
+    @classmethod
     def _normalize_loaded_df(cls, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df = df.reset_index(drop=True)
@@ -890,8 +930,12 @@ class DataLoader:
             print(f"DeleteInstance: nothing to delete ({track}@{frame_idx})")
             return False
 
+        base_track = cls.get_base_track(track)
         cls.loaded_data = cls.loaded_data.drop(index=row_index).reset_index(drop=True)
         if not cls.loaded_data.empty:
+            cls._compact_instance_ids_inplace(
+                cls.loaded_data, frame_idx=frame_idx, track_name=base_track
+            )
             cls.loaded_data = cls._normalize_loaded_df(cls.loaded_data)
         cls._bump_label_version()
         return True

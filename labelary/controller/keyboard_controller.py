@@ -1,4 +1,12 @@
 from PyQt6.QtCore import QObject, Qt, QEvent
+from PyQt6.QtWidgets import (
+    QApplication,
+    QAbstractSpinBox,
+    QComboBox,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
+)
 
 class KeyboardController(QObject):
     def __init__(self, main_dialog, video_loader, mouse_controller, parent=None):
@@ -12,6 +20,8 @@ class KeyboardController(QObject):
             return super().eventFilter(obj, event)
         if event.type() == QEvent.Type.KeyPress:
             if not getattr(self.main_dialog, "shortcuts_enabled", True):
+                return super().eventFilter(obj, event)
+            if self._is_typing_target_active(obj):
                 return super().eventFilter(obj, event)
             key = event.key()
             if (
@@ -81,3 +91,15 @@ class KeyboardController(QObject):
                     
 
         return super().eventFilter(obj, event)
+
+    def _is_typing_target_active(self, obj) -> bool:
+        focus_widget = QApplication.focusWidget()
+        candidates = [focus_widget, obj]
+        for widget in candidates:
+            if widget is None:
+                continue
+            if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)):
+                return True
+            if isinstance(widget, QComboBox) and widget.isEditable():
+                return True
+        return False

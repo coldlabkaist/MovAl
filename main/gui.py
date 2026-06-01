@@ -6,7 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Optional, Union
 
-from PyQt6.QtCore import QStandardPaths, Qt, QTimer
+from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
@@ -615,15 +615,28 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         labelary_dialog = getattr(self.controller, "_labelary_dialog", None)
-        should_prompt_labelary = (
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy():
+            reply = QMessageBox.question(
+                self,
+                "Pose task in progress",
+                f"{active_task or 'A pose task'} is currently running.\n\n"
+                "Do you want to close MovAl anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
+        if (
             labelary_dialog is not None
             and labelary_dialog.isVisible()
-            and hasattr(labelary_dialog, "prompt_close_after_main_window_closed")
-        )
+            and hasattr(labelary_dialog, "confirm_close_from_main_window")
+        ):
+            if not labelary_dialog.confirm_close_from_main_window():
+                event.ignore()
+                return
+            labelary_dialog.close()
 
         super().closeEvent(event)
-        if not event.isAccepted():
-            return
-
-        if should_prompt_labelary:
-            QTimer.singleShot(0, labelary_dialog.prompt_close_after_main_window_closed)

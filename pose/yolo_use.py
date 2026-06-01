@@ -453,12 +453,16 @@ class YoloInferenceDialog(QDialog):
         self.tracking_radio = QRadioButton("Tracking")
         self.track_method_combo = QComboBox(enabled=False)
         self.track_method_combo.addItems(["botsort", "bytetrack"])
+        self.track_method_combo.setStyleSheet(
+            "QComboBox:disabled { color: #8a8f98; background-color: #eceff3; border-color: #c6ccd6; }"
+        )
 
         for w in (self.inference_radio, self.tracking_radio):
             w.toggled.connect(self.update_mode)
             row.addWidget(w)
         row.addWidget(QLabel("Tracking Method:"))
         row.addWidget(self.track_method_combo)
+        self.update_mode()
         return row
 
     def build_video_group(self):
@@ -581,8 +585,8 @@ class YoloInferenceDialog(QDialog):
 
         form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
         form.addRow(QLabel("save image/video"), self.save_media_checkbox)
-        form.addRow(QLabel("save txt"), self.save_txt_checkbox)
-        form.addRow(QLabel("convert txt to csv"), self.convert_txt_to_csv_checkbox)
+        form.addRow(QLabel("save result as txt"), self.save_txt_checkbox)
+        form.addRow(QLabel("save result as csv"), self.convert_txt_to_csv_checkbox)
 
         self.save_txt_checkbox.toggled.connect(self._update_visualization_option_states)
         self._update_visualization_option_states()
@@ -1027,6 +1031,8 @@ class YoloInferenceDialog(QDialog):
         for widget in widgets:
             if widget is not None:
                 widget.setEnabled(enabled)
+        if enabled and hasattr(self, "track_method_combo"):
+            self.update_mode()
 
     def _stop_inference(self):
         active_task = (pose_execution_state.active_task() or "").lower()

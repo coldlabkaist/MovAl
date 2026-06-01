@@ -195,6 +195,45 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.raise_()
         self.activateWindow()
 
+    def confirm_close_from_main_window(self) -> bool:
+        if not self.isVisible():
+            return True
+
+        if self.mini_training_thread is not None and self.mini_training_thread.isRunning():
+            thread = self.mini_training_thread
+            reply = QMessageBox.question(
+                self,
+                "Mini training in progress",
+                "Mini training is currently running.\n\n"
+                "Stop training and close MovAl and Labelary?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self.raise_()
+                self.activateWindow()
+                return False
+
+            self._suppress_mini_training_feedback = True
+            thread.stop()
+            thread.wait(5000)
+            if thread.isRunning():
+                self._suppress_mini_training_feedback = False
+                QMessageBox.warning(
+                    self,
+                    "Stop failed",
+                    "Mini training is still running, so MovAl cannot be closed yet.",
+                )
+                self.raise_()
+                self.activateWindow()
+                return False
+
+        if not self._confirm_discard_unsaved_changes("closing MovAl and Labelary"):
+            self.raise_()
+            self.activateWindow()
+            return False
+        return True
+
     def refresh_frame_bound_views(self) -> None:
         if not getattr(self.skeleton_video_viewer, "video_loaded", False):
             self.skeleton_video_viewer.setCSVPoints({})

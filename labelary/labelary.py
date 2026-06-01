@@ -32,6 +32,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.shortcuts_enabled = True
         self.is_video_paused = True
         self._clean_loaded_data_snapshot: Optional[pd.DataFrame] = None
+        self._allow_dialog_reject = False
         self.auto_label_model = None
         self.auto_label_model_path: Optional[str] = None
         self.auto_label_model_mode: Optional[str] = None
@@ -231,15 +232,27 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         if not self.has_unsaved_changes():
             return True
 
-        reply = QMessageBox.question(
-            self,
-            "Unsaved changes",
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Unsaved changes")
+        msg_box.setText(
             "There are unsaved changes in Labelary.\n\n"
-            f"Discard the current changes and {action_text}?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            f"Do you want to save the current changes before {action_text}?"
         )
-        return reply == QMessageBox.StandardButton.Yes
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Save)
+
+        reply = msg_box.exec()
+        if reply == QMessageBox.StandardButton.Save:
+            self.open_save_dialog()
+            return not self.has_unsaved_changes()
+        if reply == QMessageBox.StandardButton.Discard:
+            return True
+        return False
 
     def update_label_combo(self, video_index = None, set_text = None):
         files = self.project.files
@@ -580,7 +593,19 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         super().keyPressEvent(event)
 
     def reject(self) -> None:
-        return
+        if self._allow_dialog_reject:
+            super().reject()
+            return
+
+        if not self._confirm_discard_unsaved_changes("close Labelary"):
+            return
+
+        self._persist_ui_state(include_frame=True)
+        self._allow_dialog_reject = True
+        try:
+            super().reject()
+        finally:
+            self._allow_dialog_reject = False
 
     def on_automatic_label_toggled(self, checked: bool):
         if not checked:
@@ -1044,7 +1069,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             return
 
         self._persist_ui_state(include_frame=True)
-        super().closeEvent(event)
+        self._allow_dialog_reject = True
+        try:
+            super().closeEvent(event)
+        finally:
+            self._allow_dialog_reject = False
 
 def run_labelary_with_project(current_project, parent=None):
     app = QApplication.instance() or QApplication(sys.argv)

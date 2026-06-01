@@ -127,10 +127,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         return int(self.skeleton_delay_spin.value())
 
     def resolve_label_frame(self, view_frame: int) -> Optional[int]:
-        label_frame = int(view_frame) - self.get_skeleton_frame_delay()
-        if label_frame < 0:
-            return None
-        return label_frame
+        return int(view_frame) - self.get_skeleton_frame_delay()
 
     def resolve_view_frame(self, label_frame: int) -> Optional[int]:
         view_frame = int(label_frame) + self.get_skeleton_frame_delay()
@@ -153,12 +150,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         shifted["frame_idx"] = (
             pd.to_numeric(shifted["frame_idx"], errors="coerce").fillna(0).astype(int) + delay
         )
-        negative_mask = shifted["frame_idx"] < 0
-        dropped = int(negative_mask.sum())
-        if dropped:
-            shifted = shifted.loc[~negative_mask].copy()
         shifted.reset_index(drop=True, inplace=True)
-        return shifted, dropped
+        return shifted, 0
 
     def commit_current_delay_to_loaded_data(self) -> int:
         if DataLoader.loaded_data is None:
@@ -183,6 +176,24 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.refresh_frame_bound_views()
         self._persist_ui_state(include_frame=True)
         return dropped
+
+    def prompt_close_after_main_window_closed(self) -> None:
+        if not self.isVisible():
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Close Labelary?",
+            "MovAl main window has been closed.\n\nDo you want to close Labelary too?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.close()
+            return
+
+        self.raise_()
+        self.activateWindow()
 
     def refresh_frame_bound_views(self) -> None:
         if not getattr(self.skeleton_video_viewer, "video_loaded", False):

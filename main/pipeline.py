@@ -54,7 +54,7 @@ class PipelineController:
             self._labelary_dialog.activateWindow()
             return
 
-        dialog = run_labelary_with_project(self.current_project, self.parent)
+        dialog = run_labelary_with_project(self.current_project, None)
         self._labelary_dialog = dialog
         if self._labelary_dialog is not None:
             self._labelary_dialog.destroyed.connect(self._on_labelary_dialog_destroyed)

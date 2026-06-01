@@ -1052,12 +1052,11 @@ class DataLoader:
                     f"The total number of tracks ({len(unique_tracks)}) exceeds the maximum allowed ({cls.max_animals}).",
                 )
                 return False
-            if set(unique_tracks) != set(cls.animals_name):
-                mapping = cls._match_tracks(unique_tracks, cls.animals_name)
-                if mapping is None:
-                    return False
-                df["track"] = df["track"].map(mapping)
-                cls.track_mapping = mapping
+            mapping = cls._resolve_track_mapping(unique_tracks, cls.animals_name)
+            if mapping is None:
+                return False
+            df["track"] = df["track"].map(mapping)
+            cls.track_mapping = mapping
 
             df = cls._prune_loaded_df(df)
 
@@ -1121,6 +1120,41 @@ class DataLoader:
         if dlg.exec() == QDialog.DialogCode.Accepted:
             return dlg.get_mapping()
         return None
+
+    @classmethod
+    def _resolve_track_mapping(cls, tracks: list[str], animal_names: list[str]) -> Optional[dict[str, str]]:
+        exact_mapping: dict[str, str] = {}
+        unresolved_tracks: list[str] = []
+
+        available_exact_names = {str(name) for name in animal_names}
+        for track in tracks:
+            track_name = str(track)
+            if track_name in available_exact_names:
+                exact_mapping[track_name] = track_name
+            else:
+                unresolved_tracks.append(track_name)
+
+        if not unresolved_tracks:
+            return exact_mapping
+
+        remaining_animal_names = [
+            str(name) for name in animal_names if str(name) not in exact_mapping.values()
+        ]
+        if len(unresolved_tracks) > len(remaining_animal_names):
+            QMessageBox.critical(
+                cls.parent,
+                "Load Error",
+                "The label file contains track names that cannot be uniquely mapped to the project animals.",
+            )
+            return None
+
+        resolved_mapping = cls._match_tracks(unresolved_tracks, remaining_animal_names)
+        if resolved_mapping is None:
+            return None
+
+        merged_mapping = dict(exact_mapping)
+        merged_mapping.update(resolved_mapping)
+        return merged_mapping
 
 
 class TrackMatchDialog(QDialog):

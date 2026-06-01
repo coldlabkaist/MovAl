@@ -6,7 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Optional, Union
 
-from PyQt6.QtCore import QStandardPaths, Qt
+from PyQt6.QtCore import QStandardPaths, Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog,
@@ -612,3 +612,18 @@ class MainWindow(QMainWindow):
             save_callback=save_callback,
         )
         dialog.exec()
+
+    def closeEvent(self, event) -> None:
+        labelary_dialog = getattr(self.controller, "_labelary_dialog", None)
+        should_prompt_labelary = (
+            labelary_dialog is not None
+            and labelary_dialog.isVisible()
+            and hasattr(labelary_dialog, "prompt_close_after_main_window_closed")
+        )
+
+        super().closeEvent(event)
+        if not event.isAccepted():
+            return
+
+        if should_prompt_labelary:
+            QTimer.singleShot(0, labelary_dialog.prompt_close_after_main_window_closed)

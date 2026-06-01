@@ -659,12 +659,14 @@ class MouseController(QObject):
         if frame_idx is None:
             return
 
-        new_track = track_name
-        if new_track is None:
-            available = DataLoader.available_track_names_for_new_instance(frame_idx)
-            new_track = available[0] if available else None
-        elif DataLoader.frame_track_instance_count(frame_idx, new_track) >= DataLoader.get_max_instances_per_id():
-            return
+        preferred_track = track_name
+        if preferred_track is None and self.selected_instance is not None:
+            preferred_track = DataLoader.get_base_track_name(self.selected_instance)
+
+        new_track = DataLoader.resolve_new_instance_track(
+            frame_idx,
+            preferred_track=preferred_track,
+        )
         if new_track is None:
             return
 

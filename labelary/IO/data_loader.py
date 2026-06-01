@@ -480,6 +480,107 @@ class DataLoader:
         return available
 
     @classmethod
+    def _track_priority_order(cls, preferred_track: Optional[str] = None) -> list[str]:
+        names = [str(name) for name in (cls.animals_name or [])]
+        if not names:
+            return []
+        if not preferred_track:
+            return names
+
+        preferred_track = cls._to_project_name(preferred_track)
+        if preferred_track not in names:
+            return names
+
+        start_idx = names.index(preferred_track)
+        return names[start_idx + 1 :] + names[: start_idx + 1]
+
+    @classmethod
+    def find_reference_instance_row(
+        cls,
+        frame_idx: int,
+        track_name: str,
+        instance_id: Optional[int],
+        nearby_range: int = 300,
+    ) -> Optional[pd.Series]:
+        if cls.loaded_data is None or cls.loaded_data.empty:
+            return None
+
+        track_name = cls._to_project_name(track_name)
+        mask = (
+            (cls.loaded_data["track"] == track_name)
+            & (cls.loaded_data["frame_idx"] != int(frame_idx))
+            & (cls.loaded_data["frame_idx"].between(frame_idx - nearby_range, frame_idx + nearby_range))
+        )
+
+        if instance_id is not None:
+            if cls.INSTANCE_ID_COL in cls.loaded_data.columns:
+                instance_series = pd.to_numeric(
+                    cls.loaded_data[cls.INSTANCE_ID_COL], errors="coerce"
+                )
+                mask &= instance_series == int(instance_id)
+            elif int(instance_id) != 1:
+                return None
+
+        ref_df = cls.loaded_data.loc[mask].copy()
+        if ref_df.empty:
+            return None
+
+        ref_df["_frame_distance"] = (ref_df["frame_idx"] - int(frame_idx)).abs()
+        ref_df = ref_df.sort_values(["_frame_distance"], kind="stable")
+        return ref_df.iloc[0]
+
+    @classmethod
+    def _has_reference_for_instance_slot(
+        cls,
+        frame_idx: int,
+        track_name: str,
+        instance_id: Optional[int],
+        nearby_range: int = 300,
+    ) -> bool:
+        return cls.find_reference_instance_row(
+            frame_idx,
+            track_name,
+            instance_id,
+            nearby_range=nearby_range,
+        ) is not None
+
+    @classmethod
+    def resolve_new_instance_track(
+        cls,
+        frame_idx: int,
+        preferred_track: Optional[str] = None,
+        nearby_range: int = 300,
+    ) -> Optional[str]:
+        cls._ensure_skeleton()
+        names = [str(name) for name in (cls.animals_name or [])]
+        if not names:
+            return None
+
+        limit = cls.get_max_instances_per_id()
+        preferred_track = cls._to_project_name(preferred_track) if preferred_track else None
+
+        if preferred_track and cls.frame_track_instance_count(frame_idx, preferred_track) < limit:
+            preferred_slot = cls._next_free_instance_id(frame_idx, preferred_track)
+            if cls._has_reference_for_instance_slot(
+                frame_idx,
+                preferred_track,
+                preferred_slot,
+                nearby_range=nearby_range,
+            ):
+                return preferred_track
+
+        ordered_tracks = cls._track_priority_order(preferred_track)
+        for slot in range(1, limit + 1):
+            for track_name in ordered_tracks:
+                if cls.frame_track_instance_count(frame_idx, track_name) >= limit:
+                    continue
+                if cls._next_free_instance_id(frame_idx, track_name) != slot:
+                    continue
+                return track_name
+
+        return None
+
+    @classmethod
     def _resolve_visible_row_index(cls, frame_idx: int, instance_key: str) -> Optional[int]:
         frame_df = cls._visible_frame_df(frame_idx)
         if frame_df.empty:
@@ -682,15 +783,13 @@ class DataLoader:
             new_row[cls.INSTANCE_ID_COL] = instance_id
 
         init_coords: dict[str, tuple[float, float, int]] = {}
-        mask = (
-            (cls.loaded_data["track"] == track_name)
-            & (cls.loaded_data["frame_idx"].between(frame_idx - nearby_range, frame_idx + nearby_range))
+        src = cls.find_reference_instance_row(
+            frame_idx,
+            track_name,
+            instance_id,
+            nearby_range=nearby_range,
         )
-        if not cls.loaded_data[mask].empty:
-            near_df = cls.loaded_data[mask].copy()
-            near_df["_frame_distance"] = (near_df["frame_idx"] - frame_idx).abs()
-            near_df = near_df.sort_values(["_frame_distance"], kind="stable")
-            src = near_df.iloc[0]
+        if src is not None:
             for kp in cls.kp_order:
                 xcol, ycol, vcol = f"{kp}.x", f"{kp}.y", f"{kp}.visibility"
                 init_coords[kp] = (src[xcol], src[ycol], int(src.get(vcol, 2)))

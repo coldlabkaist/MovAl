@@ -67,6 +67,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.automatic_label_checkbox.toggled.connect(self.on_automatic_label_toggled)
         self.mini_training_button.clicked.connect(self.run_mini_training)
         self.skeleton_delay_spin.valueChanged.connect(self.on_skeleton_delay_changed)
+        self.kpt_list.currentItemChanged.connect(self.on_keypoint_list_selection_changed)
 
         self.video_combo.currentIndexChanged.connect(self.update_label_combo)
         self.video_combo.currentIndexChanged.connect(self._on_video_selection_changed)
@@ -418,6 +419,23 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.color_combo.addItem("cutie_dark")
         self.color_combo.addItem("white")
         self.color_combo.addItem("black")
+
+    def on_keypoint_list_selection_changed(self, current, _previous):
+        if self.kpt_list.is_syncing_selection():
+            return
+        if self.mouse_controller is None:
+            return
+
+        instance_key, kp_name = self.kpt_list.get_item_selection(current)
+        if instance_key is None:
+            return
+
+        self.mouse_controller.selected_instance = instance_key
+        self.mouse_controller.selected_node = (
+            (instance_key, kp_name) if kp_name else None
+        )
+        self.mouse_controller._sync_list_selection()
+        self.skeleton_video_viewer.update()
         saved_color = self.project.get_labelary_state().get("color_mode")
         index = self.color_combo.findText(saved_color, Qt.MatchFlag.MatchExactly)
         self.color_combo.setCurrentIndex(index if index >= 0 else 0)

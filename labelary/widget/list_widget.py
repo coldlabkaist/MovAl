@@ -105,6 +105,7 @@ class KeypointListWidget(QListWidget):
 
         self._project_track_order: list[str] = []
         self._kp_order:    list[str] = []
+        self._syncing_selection = False
 
     def _base_color_index(self, base_track: str) -> int:
         try:
@@ -119,6 +120,14 @@ class KeypointListWidget(QListWidget):
 
     def _set_item_enabled_state(self, item: QListWidgetItem, enabled: bool) -> None:
         item.setForeground(QBrush(QColor("black") if enabled else QColor("lightgray")))
+
+    def _set_item_flags(self, item: QListWidgetItem, *, enabled: bool, selectable: bool) -> None:
+        flags = Qt.ItemFlag.NoItemFlags
+        if enabled:
+            flags |= Qt.ItemFlag.ItemIsEnabled
+        if selectable:
+            flags |= Qt.ItemFlag.ItemIsSelectable
+        item.setFlags(flags)
 
     def _add_group(
         self,
@@ -145,6 +154,7 @@ class KeypointListWidget(QListWidget):
         hdr.setData(ROLE_INSTANCE_KEY, instance_key)
         hdr.setData(ROLE_GROUP_ACTIVE, enabled)
         hdr.setData(ROLE_SHOW_COLOR_CHIP, False)
+        self._set_item_flags(hdr, enabled=True, selectable=instance_key is not None and enabled)
         self._set_item_enabled_state(hdr, enabled)
         self.addItem(hdr)
         if instance_key is not None:
@@ -161,7 +171,7 @@ class KeypointListWidget(QListWidget):
             it.setData(ROLE_INSTANCE_KEY, instance_key)
             it.setData(ROLE_GROUP_ACTIVE, enabled)
             it.setData(ROLE_SHOW_COLOR_CHIP, True)
-            it.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self._set_item_flags(it, enabled=True, selectable=instance_key is not None and enabled)
             self._set_item_enabled_state(it, enabled)
             self.addItem(it)
             self._all_keypoint_items.append(it)
@@ -243,11 +253,45 @@ class KeypointListWidget(QListWidget):
             if header_item is None:
                 return
             color_index = header_item.data(ROLE_COLOR_INDEX) or 0
+            target_item = header_item
             if kp:
                 kpt_item = self._item_map.get((track, kp))
                 if kpt_item is not None:
                     kpt_item.setBackground(_background_color_kpt(color_index))
+                    target_item = kpt_item
             header_item.setBackground(_background_color_track(color_index))
+            self._set_current_item(target_item)
+            return
+
+        self._set_current_item(None)
+
+    def _set_current_item(self, item: QListWidgetItem | None) -> None:
+        self._syncing_selection = True
+        try:
+            self.blockSignals(True)
+            self.setCurrentItem(item)
+            if item is not None:
+                item.setSelected(True)
+            else:
+                self.clearSelection()
+        finally:
+            self.blockSignals(False)
+            self._syncing_selection = False
+
+    def is_syncing_selection(self) -> bool:
+        return self._syncing_selection
+
+    def get_item_selection(self, item: QListWidgetItem | None) -> tuple[str | None, str | None]:
+        if item is None:
+            return None, None
+
+        instance_key = item.data(ROLE_INSTANCE_KEY)
+        if not instance_key:
+            return None, None
+
+        node = item.data(ROLE_NODE)
+        node_name = getattr(node, "name", None) if node is not None else None
+        return str(instance_key), node_name
 
     def update_list_visibility(self, coords: dict[str, dict[str, tuple]]):
         for item in self._header_map.values():

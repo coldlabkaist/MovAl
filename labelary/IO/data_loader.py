@@ -570,13 +570,17 @@ class DataLoader:
                 return preferred_track
 
         ordered_tracks = cls._track_priority_order(preferred_track)
-        for slot in range(1, limit + 1):
-            for track_name in ordered_tracks:
-                if cls.frame_track_instance_count(frame_idx, track_name) >= limit:
-                    continue
-                if cls._next_free_instance_id(frame_idx, track_name) != slot:
-                    continue
-                return track_name
+        fallback_tracks = ordered_tracks
+        if preferred_track and preferred_track in names:
+            fallback_tracks = [preferred_track] + [name for name in ordered_tracks if name != preferred_track]
+
+        # If we cannot copy a matching slot from another frame, fill the preferred
+        # track sequentially first (e.g. m1[2] -> m1[3] -> m1[4]) before moving on
+        # to the next project IDs.
+        for track_name in fallback_tracks:
+            if cls.frame_track_instance_count(frame_idx, track_name) >= limit:
+                continue
+            return track_name
 
         return None
 

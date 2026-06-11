@@ -318,6 +318,29 @@ class DataLoader:
         return cls._sort_df(df)
 
     @classmethod
+    def _append_loaded_rows(cls, new_rows: pd.DataFrame) -> pd.DataFrame:
+        if new_rows is None or new_rows.empty:
+            return cls.loaded_data
+
+        new_rows = new_rows.reset_index(drop=True)
+        if cls.loaded_data is None:
+            return new_rows
+
+        existing = cls.loaded_data.reset_index(drop=True)
+        if existing.empty:
+            merged_columns = list(dict.fromkeys([*existing.columns, *new_rows.columns]))
+            return new_rows.reindex(columns=merged_columns)
+
+        merged_columns = list(dict.fromkeys([*existing.columns, *new_rows.columns]))
+        existing = existing.reindex(columns=merged_columns)
+        new_rows = new_rows.reindex(columns=merged_columns)
+        return pd.concat(
+            [existing, new_rows],
+            ignore_index=True,
+            sort=False,
+        )
+
+    @classmethod
     def _row_score_series(cls, df: pd.DataFrame) -> pd.Series:
         if df.empty:
             return pd.Series(dtype=float)
@@ -430,6 +453,10 @@ class DataLoader:
     @classmethod
     def get_base_track_name(cls, key: str) -> str:
         return cls.split_instance_key(key)[0]
+
+    @classmethod
+    def get_base_track(cls, key: str) -> str:
+        return cls.get_base_track_name(key)
 
     @classmethod
     def get_instance_id_from_key(cls, key: str) -> Optional[int]:
@@ -755,13 +782,9 @@ class DataLoader:
 
         new_rows = pd.DataFrame.from_records(rows)
         if cls.loaded_data is None or cls.loaded_data.empty:
-            cls.loaded_data = new_rows
+            cls.loaded_data = cls._append_loaded_rows(new_rows)
         else:
-            cls.loaded_data = pd.concat(
-                [cls.loaded_data.reset_index(drop=True), new_rows],
-                ignore_index=True,
-                sort=False,
-            )
+            cls.loaded_data = cls._append_loaded_rows(new_rows)
 
         cls.loaded_data = cls._normalize_loaded_df(cls.loaded_data)
         cls._coords_normalized = True
@@ -865,11 +888,7 @@ class DataLoader:
             new_row[xcol], new_row[ycol], new_row[vcol] = nx, ny, vis
 
         try:
-            cls.loaded_data = pd.concat(
-                [cls.loaded_data.reset_index(drop=True), pd.DataFrame([new_row])],
-                ignore_index=True,
-                sort=False,
-            )
+            cls.loaded_data = cls._append_loaded_rows(pd.DataFrame([new_row]))
         except Exception as err:
             print(f"Failed to add new skeleton row: {err}")
             return False
@@ -930,7 +949,7 @@ class DataLoader:
             print(f"DeleteInstance: nothing to delete ({track}@{frame_idx})")
             return False
 
-        base_track = cls.get_base_track(track)
+        base_track = cls.get_base_track_name(track)
         cls.loaded_data = cls.loaded_data.drop(index=row_index).reset_index(drop=True)
         if not cls.loaded_data.empty:
             cls._compact_instance_ids_inplace(

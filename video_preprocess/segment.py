@@ -13,7 +13,9 @@ import shutil
 import os
 import sys 
 from utils.ui_theme import get_theme_colors
-        
+
+VIDEO_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
 class CutieDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,6 +53,7 @@ class CutieDialog(QDialog):
                 fname = f"{fname} [MISSING SOURCE]"
             item = QListWidgetItem(fname)
             item.setData(Qt.ItemDataRole.UserRole, fe.video)
+            item.setData(VIDEO_NAME_ROLE, fe.name)
             self.video_list.addItem(item)
         self.video_list.setCurrentRow(-1) 
         self.video_list.clearSelection()
@@ -96,10 +99,10 @@ class CutieDialog(QDialog):
         num_objects = self.current_project.num_animals
         for idx_vid in range(self.video_list.count()):
             video_path    = self.video_list.item(idx_vid).data(Qt.ItemDataRole.UserRole)
+            video_name    = self.video_list.item(idx_vid).data(VIDEO_NAME_ROLE)
             if not Path(video_path).exists():
                 self.log.append(f"[SKIP] {video_path} - source video not found.")
                 continue
-            video_name    = Path(video_path).stem
             workspace_dir = os.path.join(self.frame_dir, video_name)
 
             if os.path.exists(workspace_dir):
@@ -142,6 +145,7 @@ class CutieDialog(QDialog):
 
         num_objects = self.current_project.num_animals
         video_path = items[0].data(Qt.ItemDataRole.UserRole)
+        video_name = items[0].data(VIDEO_NAME_ROLE)
         if not Path(video_path).exists():
             QMessageBox.warning(
                 self,
@@ -151,7 +155,6 @@ class CutieDialog(QDialog):
                 "or place the same file under raw_videos.",
             )
             return
-        video_name    = Path(video_path).stem
         workspace_dir = os.path.join(self.frame_dir, video_name)
 
         cmd = [

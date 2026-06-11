@@ -22,6 +22,8 @@ from pathlib import Path
 import pandas as pd
 import sys
 
+VIDEO_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
 class LabelaryDialog(QDialog, UI_LabelaryDialog):
     def __init__(self, project, parent= None):
         super().__init__(parent)
@@ -112,9 +114,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def load_video_combo(self):
         self.video_combo.clear()
-        for video in self.project.get_video_list():
-            p = Path(video)
-            self.video_combo.addItem(p.name, p)
+        for file_entry in self.project.files:
+            video_path = Path(file_entry.video)
+            self.video_combo.addItem(video_path.name, video_path)
+            index = self.video_combo.count() - 1
+            self.video_combo.setItemData(index, file_entry.name, VIDEO_NAME_ROLE)
 
     def load_mode_combo(self):
         self.mode_combo.clear()
@@ -540,8 +544,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def _find_video_index(self, video_name: str) -> int:
         for index in range(self.video_combo.count()):
-            video_path = self.video_combo.itemData(index, Qt.ItemDataRole.UserRole)
-            if isinstance(video_path, Path) and video_path.stem == video_name:
+            if self.video_combo.itemData(index, VIDEO_NAME_ROLE) == video_name:
                 return index
         return 0
 
@@ -564,10 +567,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         return self.label_combo.count() - 1
 
     def _current_video_name(self) -> Optional[str]:
-        video_path = self.video_combo.currentData(Qt.ItemDataRole.UserRole)
-        if isinstance(video_path, Path):
-            return video_path.stem
-        return None
+        video_name = self.video_combo.currentData(VIDEO_NAME_ROLE)
+        return str(video_name) if video_name else None
 
     def _current_label_state(self) -> tuple[Optional[str], Optional[str]]:
         data = self.label_combo.currentData(Qt.ItemDataRole.UserRole)
@@ -874,7 +875,9 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             if current_video is None:
                 raise ValueError("Current video is not selected.")
 
-            current_video_name = Path(current_video).stem
+            current_video_name = self._current_video_name()
+            if not current_video_name:
+                raise ValueError("Current project video name is not available.")
             snapshot_dir = export_current_labels_to_txt_snapshot(self)
             dataset_dir, split_counts = create_online_training_dataset(
                 self.project,

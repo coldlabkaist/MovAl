@@ -544,9 +544,17 @@ class ProjectInformation:
 
     def get_video_record(self, video_name_or_path: str | Path) -> Optional[VideoRecord]:
         raw = str(video_name_or_path)
-        key = Path(raw).stem if Path(raw).suffix or Path(raw).parts else raw
+        raw_path = Path(raw).expanduser()
+        raw_name = raw_path.name
+        raw_posix = raw_path.as_posix()
         for record in self.video_records:
-            if record.name == key:
+            if record.name == raw:
+                return record
+            if raw_name and record.file_name == raw_name:
+                return record
+            if record.source_path and Path(record.source_path).expanduser().as_posix() == raw_posix:
+                return record
+            if self.resolve_video_path(record).expanduser().as_posix() == raw_posix:
                 return record
         return None
 

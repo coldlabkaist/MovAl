@@ -17,6 +17,8 @@ from ..widget.image_label import CUTIE_COLOR_BASE, SKELETON_COLOR_SET
 from .data_loader import DataLoader
 from .save_files import _find_project, _sanitize_index
 
+VIDEO_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
 
 def _qimage_to_rgb_array(image: QImage) -> np.ndarray:
     image = image.convertToFormat(QImage.Format.Format_RGB888)
@@ -247,7 +249,18 @@ def _export_video_stub(parent: QWidget) -> None:
         QMessageBox.critical(parent, "Error", "Project information not found.")
         return
     project_dir = Path(project.project_dir)
-    video_name = Path(parent.video_combo.currentText()).stem
+    video_name = parent.video_combo.currentData(VIDEO_NAME_ROLE) if hasattr(parent, "video_combo") else None
+    if not video_name and hasattr(parent, "video_combo"):
+        video_path_data = parent.video_combo.currentData(Qt.ItemDataRole.UserRole)
+        record = project.get_video_record(video_path_data) if video_path_data is not None else None
+        if record is not None:
+            video_name = record.name
+    if not video_name and hasattr(parent, "video_combo"):
+        record = project.get_video_record(parent.video_combo.currentText())
+        if record is not None:
+            video_name = record.name
+    if not video_name:
+        video_name = Path(parent.video_combo.currentText()).stem
     mode_text = parent.mode_combo.currentText() if hasattr(parent, "mode_combo") else "images"
 
     if mode_text == "video":

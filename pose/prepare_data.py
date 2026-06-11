@@ -105,7 +105,7 @@ def _collect_label_image_pairs(
     for fe in selected_entries:
         _raise_if_cancelled(should_cancel)
         video_path = Path(fe.video)
-        video_name = video_path.stem
+        video_name = fe.name
         label_dir = Path(label_dirs.get(video_name, project_dir / "labels" / video_name / "txt"))
         if not label_dir.is_dir():
             continue
@@ -374,23 +374,23 @@ class DataSplitDialog(QDialog):
         self._apply_ratio_constraints(self.train_spin.value(), self.valid_spin.value(), source="train")
 
     def _frame_type_changed(self):
-        selected_stems = self._selected_video_stems()
-        self._populate_file_items(selected_stems=selected_stems)
+        selected_names = self._selected_video_names()
+        self._populate_file_items(selected_names=selected_names)
         self._update_selection_count()
 
     def _save_frame_type(self, frame_type: str) -> None:
         self.current_project.set_preferred_frame_mode(frame_type)
 
-    def _populate_file_items(self, selected_stems: set[str] | None = None) -> None:
-        selected_stems = selected_stems or set()
+    def _populate_file_items(self, selected_names: set[str] | None = None) -> None:
+        selected_names = selected_names or set()
         self._clear_file_items()
         for fe in self.files:
             current_project = self.current_project
             video_path = Path(fe.video)
-            video_stem = video_path.stem
+            video_name = fe.name
             frame_type = self.frame_type_combo.currentText()
-            frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_stem, frame_type)
-            label_dir = Path(current_project.project_dir) / "labels" / video_stem / "txt"
+            frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_name, frame_type)
+            label_dir = Path(current_project.project_dir) / "labels" / video_name / "txt"
             frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
             if frame_type == "video" and frame_cnt == 0:
                 frame_cnt = _count_video_frames(video_path)
@@ -398,7 +398,7 @@ class DataSplitDialog(QDialog):
 
             row_lay = QHBoxLayout()
             chk = QCheckBox()
-            chk.setChecked(video_stem in selected_stems)
+            chk.setChecked(video_name in selected_names)
             chk.stateChanged.connect(self._update_selection_count)
             chk._frame_cnt = frame_cnt
             chk._label_cnt = label_cnt
@@ -416,7 +416,7 @@ class DataSplitDialog(QDialog):
 
         self.files_lay.addStretch(1)
 
-    def _selected_video_stems(self) -> set[str]:
+    def _selected_video_names(self) -> set[str]:
         selected: set[str] = set()
         for i in range(self.files_lay.count() - 1):
             lay = self.files_lay.itemAt(i)
@@ -426,7 +426,7 @@ class DataSplitDialog(QDialog):
             if isinstance(chk, QCheckBox) and chk.isChecked():
                 fe = getattr(chk, "_file_entry", None)
                 if fe is not None:
-                    selected.add(Path(fe.video).stem)
+                    selected.add(fe.name)
         return selected
 
     def _on_ratio_input_changed(self, source: str, value: int) -> None:

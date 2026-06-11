@@ -506,10 +506,9 @@ class YoloInferenceDialog(QDialog):
         vbox.setSpacing(2)
         self.video_checks = []
         for fe in self.current_project.files:
-            stem = Path(fe.video).stem
-            cb = QCheckBox(stem)
+            cb = QCheckBox(fe.file_name or Path(fe.video).name)
             vbox.addWidget(cb)
-            self.video_checks.append((cb, stem))
+            self.video_checks.append((cb, fe.name))
         vbox.addStretch()
         scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
         scroll.setWidget(container)
@@ -689,7 +688,7 @@ class YoloInferenceDialog(QDialog):
     def get_video_list(self):
         if self.image_radio.isChecked():
             selected_names: list[str] = [
-                stem for cb, stem in self.video_checks if cb.isChecked()
+                video_name for cb, video_name in self.video_checks if cb.isChecked()
             ]
             if not selected_names:
                 return None

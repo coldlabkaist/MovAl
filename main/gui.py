@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Optional, Union
 
+import yaml
 from PyQt6.QtCore import QStandardPaths, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from project_manager import ProjectManagerDialog
 from utils import __version__
 from utils.ui_theme import get_theme_colors
 from utils.project import ProjectInformation
@@ -305,6 +307,70 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _set_loaded_project(self, project: ProjectInformation) -> ProjectInformation:
+        self.current_project = project
+        self.controller.current_project = project
+        self.proj_name.setText(project.title or project.project_file.stem)
+        self.last_searched_dir = str(project.project_file.parent)
+        self._write_last_project_path(project.project_file)
+        return project
+
+    def _clear_loaded_project(self, *, clear_last_project_log: bool = False) -> None:
+        self.current_project = None
+        self.controller.current_project = None
+        self.proj_name.clear()
+        if clear_last_project_log:
+            self._clear_last_project_log()
+
+    def _is_same_project_path(
+        self,
+        left: Optional[Union[str, Path]],
+        right: Optional[Union[str, Path]],
+    ) -> bool:
+        if left is None or right is None:
+            return False
+        try:
+            return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+        except Exception:
+            return False
+
+    def _can_recover_from_load_error(
+        self,
+        path: Optional[Union[str, Path]],
+        err: Exception,
+        *,
+        open_create_on_failure: bool,
+    ) -> bool:
+        if not open_create_on_failure or path is None:
+            return False
+        if not isinstance(err, (json.JSONDecodeError, yaml.YAMLError, ValueError, TypeError, OSError)):
+            return False
+        last_path = self._read_last_project_path()
+        current_path = self.current_project.project_file if self.current_project is not None else None
+        return (
+            self.current_project is None
+            or self._is_same_project_path(path, current_path)
+            or self._is_same_project_path(path, last_path)
+        )
+
+    def _recover_from_failed_project_load(self, path: Union[str, Path], err: Exception) -> None:
+        clear_last_project_log = self._is_same_project_path(path, self._read_last_project_path())
+        if self.current_project is None or self._is_same_project_path(path, self.current_project.project_file):
+            self._clear_loaded_project(clear_last_project_log=clear_last_project_log)
+        elif clear_last_project_log:
+            self._clear_last_project_log()
+
+        QMessageBox.critical(
+            self,
+            "Load Error",
+            "The project could not be loaded safely.\n\n"
+            "MovAl removed it from the active load state and opened Create Project so you can rebuild or import a clean project.\n\n"
+            f"Details:\n{err}",
+        )
+        dialog = ProjectManagerDialog(self.on_load_project_clicked, self, None)
+        dialog.tabs.setCurrentWidget(dialog.create_tab)
+        dialog.exec()
+
     def setup_buttons(self) -> None:
         installation_label = QLabel("Installation (Cutie / YOLO)")
         installation_label.setObjectName("SectionTitle")
@@ -427,7 +493,9 @@ class MainWindow(QMainWindow):
         self,
         checked: bool = False,
         path: Optional[Union[str, Path]] = None,
-    ) -> None:
+        *,
+        open_create_on_failure: bool = True,
+    ) -> Optional[ProjectInformation]:
         start_dir = self.last_searched_dir if self.last_searched_dir else self.desktop_dir
         if path is None:
             path, _ = QFileDialog.getOpenFileName(
@@ -437,7 +505,7 @@ class MainWindow(QMainWindow):
                 "Project files (*.json *.yaml *.yml)",
             )
             if not path:
-                return
+                return None
             self.last_searched_dir = os.path.dirname(path)
         else:
             path = str(path)
@@ -445,26 +513,29 @@ class MainWindow(QMainWindow):
         try:
             project = ProjectInformation.from_path(path)
             if not self._handle_legacy_project_conversion(project):
-                return
+                return None
             if not self._ensure_project_has_skeleton(project):
-                return
+                return None
             project.ensure_project_file()
-
-            self.current_project = project
-            self.controller.current_project = project
-            self.proj_name.setText(project.title or project.project_file.stem)
-            self.last_searched_dir = str(project.project_file.parent)
-            self._write_last_project_path(project.project_file)
+            loaded_project = self._set_loaded_project(project)
         except FileNotFoundError as err:
             if Path(path).expanduser() == self._read_last_project_path():
                 self._clear_last_project_log()
             QMessageBox.warning(self, "File not found", str(err))
-            return
+            return None
         except Exception as err:
-            QMessageBox.critical(self, "Load Error", str(err))
-            return
+            if self._can_recover_from_load_error(
+                path,
+                err,
+                open_create_on_failure=open_create_on_failure,
+            ):
+                self._recover_from_failed_project_load(path, err)
+            else:
+                QMessageBox.critical(self, "Load Error", str(err))
+            return None
 
         self._warn_if_project_version_differs()
+        return loaded_project
 
     def _handle_legacy_project_conversion(self, project: ProjectInformation) -> bool:
         legacy_path = project.legacy_source_path

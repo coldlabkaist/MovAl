@@ -155,6 +155,30 @@ def _read_yaml_file(path: str | Path) -> dict[str, Any]:
     return data
 
 
+def _path_exists_safe(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _path_is_file_safe(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def _path_can_read_safe(path: Path) -> bool:
+    if not _path_is_file_safe(path):
+        return False
+    try:
+        with path.open("rb"):
+            return True
+    except OSError:
+        return False
+
+
 def _load_skeleton_data_from_name(skeleton_name: str) -> dict[str, Any]:
     if not skeleton_name:
         return {"nodes": [], "connections": [], "symmetry": []}
@@ -293,10 +317,11 @@ class ProjectInformation:
                 if csv_path.is_file()
             ]
             txt_entries = [txt_dir.resolve().as_posix()] if any(txt_dir.glob("*.txt")) else []
+            access_state = self.get_video_access_state(record)
             file_entries.append(
                 FileEntry(
                     name=record.name,
-                    video=self.resolve_video_path(record).as_posix(),
+                    video=access_state["path"].as_posix(),
                     csv=csv_files,
                     txt=txt_entries,
                     file_name=record.file_name,
@@ -556,22 +581,42 @@ class ProjectInformation:
             raise KeyError(f"Video not found: {record_or_name}")
 
         resolved_path = self.resolve_video_path(record)
-        source_exists = bool(record.source_path and Path(record.source_path).expanduser().exists())
-        raw_fallback_exists = (self.project_dir_path / "raw_videos" / record.file_name).exists()
+        source_path = Path(record.source_path).expanduser() if record.source_path else None
+        raw_fallback_path = self.project_dir_path / "raw_videos" / record.file_name
+        source_exists = bool(source_path and _path_exists_safe(source_path))
+        raw_fallback_exists = _path_exists_safe(raw_fallback_path)
+        path_exists = _path_exists_safe(resolved_path)
+        path_readable = _path_can_read_safe(resolved_path)
         if record.relative_path:
             storage = "project_copy"
-            status = "available" if resolved_path.exists() else "missing_source"
+            if not path_exists:
+                status = "missing_source"
+            elif not path_readable:
+                status = "unreadable_source"
+            else:
+                status = "available"
             using_raw_fallback = False
         else:
             storage = "external_source"
             using_raw_fallback = bool(record.source_path and not source_exists and raw_fallback_exists)
-            status = "fallback_copy" if using_raw_fallback else ("available" if resolved_path.exists() else "missing_source")
+            if using_raw_fallback:
+                if not path_readable:
+                    status = "unreadable_source"
+                else:
+                    status = "fallback_copy"
+            elif not path_exists:
+                status = "missing_source"
+            elif not path_readable:
+                status = "unreadable_source"
+            else:
+                status = "available"
 
         return {
             "name": record.name,
             "storage": storage,
             "path": resolved_path,
-            "exists": resolved_path.exists(),
+            "exists": path_exists,
+            "readable": path_readable,
             "source_exists": source_exists,
             "raw_fallback_exists": raw_fallback_exists,
             "using_raw_fallback": using_raw_fallback,

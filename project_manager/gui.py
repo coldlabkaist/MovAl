@@ -779,6 +779,13 @@ class _ManageProjectTab(QWidget):
         self.project = project
         self.refresh_views()
 
+    def _sync_project_state(self) -> None:
+        if self.project is None:
+            return
+        self.project.save()
+        self.dialog.set_current_project(self.project)
+        self.project = self.dialog.current_project or self.project
+
     def _set_controls_enabled(self, enabled: bool) -> None:
         for widget in self._managed_widgets:
             widget.setEnabled(enabled)
@@ -787,6 +794,8 @@ class _ManageProjectTab(QWidget):
         status = access_state.get("status")
         if status == "fallback_copy":
             return "Fallback copy"
+        if status == "unreadable_source":
+            return "Unreadable"
         if status == "missing_source":
             return "Missing source"
         if record.relative_path:
@@ -838,11 +847,10 @@ class _ManageProjectTab(QWidget):
 
         self.video_tree.clear()
         self.csv_video_combo.clear()
-        file_entries_by_name = {entry.name: entry for entry in self.project.files}
 
         for record in self.project.video_records:
-            file_entry = file_entries_by_name.get(record.name)
-            csv_count = len(file_entry.csv) if file_entry else 0
+            csv_dir = self.project.csv_dir(record.name)
+            csv_count = sum(1 for _ in csv_dir.glob("*.csv")) if csv_dir.exists() else 0
             txt_dir = self.project.txt_dir(record.name)
             txt_count = sum(1 for _ in txt_dir.glob("*.txt")) if txt_dir.exists() else 0
             access_state = self.project.get_video_access_state(record)
@@ -857,7 +865,7 @@ class _ManageProjectTab(QWidget):
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, record.name)
-            if access_state["status"] == "missing_source":
+            if access_state["status"] in {"missing_source", "unreadable_source"}:
                 for column in range(len(self.VIDEO_TREE_COLUMNS)):
                     item.setForeground(column, QBrush(QColor("#b3261e")))
             elif access_state["status"] == "fallback_copy":
@@ -880,14 +888,15 @@ class _ManageProjectTab(QWidget):
             self.txt_label.setText("No video selected.")
             return
 
-        entry = next((item for item in self.project.files if item.name == video_name), None)
-        if entry is None:
-            self.txt_label.setText("No data found for the selected video.")
-            return
-
-        for csv_path in entry.csv:
-            item = QListWidgetItem(Path(csv_path).name)
-            item.setData(Qt.ItemDataRole.UserRole, csv_path)
+        csv_dir = self.project.csv_dir(video_name)
+        csv_paths = [
+            csv_path.resolve()
+            for csv_path in sorted(csv_dir.glob("*.csv"))
+            if csv_path.is_file()
+        ]
+        for csv_path in csv_paths:
+            item = QListWidgetItem(csv_path.name)
+            item.setData(Qt.ItemDataRole.UserRole, csv_path.as_posix())
             self.csv_list.addItem(item)
 
         txt_dir = self.project.txt_dir(video_name)
@@ -944,9 +953,7 @@ class _ManageProjectTab(QWidget):
                 errors.append(f"{Path(path).name}: {err}")
 
         if added:
-            self.project.save()
-            self.dialog.load_project(self.project.project_file)
-            self.project = self.dialog.current_project or self.project
+            self._sync_project_state()
 
         self.refresh_views()
         if errors:
@@ -990,8 +997,7 @@ class _ManageProjectTab(QWidget):
             QMessageBox.critical(self, "Relink failed", str(err))
             return
 
-        self.dialog.load_project(self.project.project_file)
-        self.project = self.dialog.current_project or self.project
+        self._sync_project_state()
         self.refresh_views()
         QMessageBox.information(
             self,
@@ -1030,9 +1036,7 @@ class _ManageProjectTab(QWidget):
                 errors.append(f"{record.file_name}: {err}")
 
         if copied:
-            self.project.save()
-            self.dialog.load_project(self.project.project_file)
-            self.project = self.dialog.current_project or self.project
+            self._sync_project_state()
         self.refresh_views()
 
         lines = [f"Copied {copied} video(s) into raw_videos."]
@@ -1069,9 +1073,7 @@ class _ManageProjectTab(QWidget):
         for name in names:
             self.project.remove_video(name, delete_project_data=True, save=False)
 
-        self.project.save()
-        self.dialog.load_project(self.project.project_file)
-        self.project = self.dialog.current_project or self.project
+        self._sync_project_state()
         self.refresh_views()
 
     def _add_csvs(self) -> None:
@@ -1142,7 +1144,7 @@ class _ManageProjectTab(QWidget):
                 model_count += sum(1 for _ in (self.project.project_dir_path / "runs").rglob(suffix))
 
             self.project.set_skeleton_data(model.to_dict(), save=True)
-            self.dialog.load_project(self.project.project_file)
+            self.dialog.set_current_project(self.project)
             self.project = self.dialog.current_project or self.project
             self.refresh_views()
 
@@ -1172,7 +1174,7 @@ class _ManageProjectTab(QWidget):
             return
 
         self.project.max_instances_per_id = max(1, int(self.max_instances_per_id_spin.value()))
-        self.project.save()
+        self._sync_project_state()
         self.refresh_views()
         QMessageBox.information(
             self,
@@ -1343,17 +1345,22 @@ class ProjectManagerDialog(QDialog):
     def load_project(self, path: str | Path) -> None:
         loaded_project: Optional[ProjectInformation] = None
         if self.main_window_load_project is not None:
-            previous_project = getattr(self.parent(), "current_project", None)
-            self.main_window_load_project(path=path)
-            loaded_project = getattr(self.parent(), "current_project", None)
-            if (
-                isinstance(loaded_project, ProjectInformation)
-                and loaded_project is not previous_project
-            ):
+            loaded_project = self.main_window_load_project(
+                path=path,
+                open_create_on_failure=False,
+            )
+            if isinstance(loaded_project, ProjectInformation):
                 self.set_current_project(loaded_project)
                 return
+            existing_project = getattr(self.parent(), "current_project", None)
+            if isinstance(existing_project, ProjectInformation):
+                self.set_current_project(existing_project)
+            else:
+                self.set_current_project(None)
+                self.tabs.setCurrentWidget(self.create_tab)
+            return
 
-        if loaded_project is None:
+        try:
             loaded_project = ProjectInformation.from_path(path)
             if not self._handle_legacy_project_conversion(loaded_project):
                 return
@@ -1363,6 +1370,16 @@ class ProjectManagerDialog(QDialog):
                     return
             elif not self._ensure_project_has_skeleton(loaded_project):
                 return
+        except FileNotFoundError as err:
+            QMessageBox.warning(self, "File not found", str(err))
+            self.set_current_project(None)
+            self.tabs.setCurrentWidget(self.create_tab)
+            return
+        except Exception as err:
+            QMessageBox.critical(self, "Load Error", str(err))
+            self.set_current_project(None)
+            self.tabs.setCurrentWidget(self.create_tab)
+            return
 
         self.set_current_project(loaded_project)
 
@@ -1493,6 +1510,14 @@ class ProjectManagerDialog(QDialog):
 
     def set_current_project(self, project: Optional[ProjectInformation]) -> None:
         self.current_project = project
+        parent = self.parent()
+        if parent is not None:
+            sync_loaded_project = getattr(parent, "_set_loaded_project", None)
+            clear_loaded_project = getattr(parent, "_clear_loaded_project", None)
+            if project is not None and callable(sync_loaded_project):
+                sync_loaded_project(project)
+            elif project is None and callable(clear_loaded_project):
+                clear_loaded_project()
         self.manage_tab.set_project(project)
         if project is not None:
             self.tabs.setCurrentWidget(self.manage_tab)

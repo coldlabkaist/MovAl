@@ -792,14 +792,14 @@ class _ManageProjectTab(QWidget):
 
     def _format_status_text(self, record, access_state: dict) -> str:
         status = access_state.get("status")
+        if status == "available":
+            return "Available"
         if status == "fallback_copy":
             return "Fallback copy"
         if status == "unreadable_source":
             return "Unreadable"
         if status == "missing_source":
             return "Missing source"
-        if record.relative_path:
-            return "Available"
         return "Missing source"
 
     def _format_storage_text(self, record) -> str:

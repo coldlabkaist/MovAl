@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QListView, QTreeView, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIntValidator
 import os
 from pathlib import Path
 import pandas as pd
@@ -23,13 +24,14 @@ class TxtToCsvDialog(QDialog):
     def __init__(self, current_project=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("TXT to CSV Convert")
-        self.setFixedSize(600, 400)
+        self.setFixedSize(680, 460)
 
         self.current_project = current_project
         self.kpt_names = []
         self.txt_folders = []
         self.video_to_txts = {}
         self.video_widget_map = {}
+        self._pixel_value_validator = QIntValidator(1, 100000, self)
 
         main_layout = QVBoxLayout(self)
 
@@ -45,6 +47,29 @@ class TxtToCsvDialog(QDialog):
         self.kpt_names_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.kpt_names_label.setWordWrap(True)
         main_layout.addWidget(self.kpt_names_label)
+
+        bulk_label = QLabel("Pixel size batch apply")
+        bulk_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        main_layout.addWidget(bulk_label)
+
+        bulk_layout = QHBoxLayout()
+        self.bulk_width_edit = QLineEdit()
+        self.bulk_width_edit.setPlaceholderText("width")
+        self.bulk_width_edit.setValidator(self._pixel_value_validator)
+        self.bulk_height_edit = QLineEdit()
+        self.bulk_height_edit.setPlaceholderText("height")
+        self.bulk_height_edit.setValidator(self._pixel_value_validator)
+        self.apply_all_pixels_btn = QPushButton("Apply to all")
+        self.apply_all_pixels_btn.clicked.connect(self.apply_pixel_size_to_all)
+        self.fill_empty_pixels_btn = QPushButton("Fill empty only")
+        self.fill_empty_pixels_btn.clicked.connect(
+            lambda: self.apply_pixel_size_to_all(fill_empty_only=True)
+        )
+        bulk_layout.addWidget(self.bulk_width_edit)
+        bulk_layout.addWidget(self.bulk_height_edit)
+        bulk_layout.addWidget(self.apply_all_pixels_btn)
+        bulk_layout.addWidget(self.fill_empty_pixels_btn)
+        main_layout.addLayout(bulk_layout)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -106,6 +131,48 @@ class TxtToCsvDialog(QDialog):
         for idx, name in enumerate(self.kpt_names):
             kpt_text += f"{idx} : {name}\n"
         self.kpt_names_label.setText(kpt_text)
+
+    def _create_pixel_line_edit(self, placeholder: str) -> QLineEdit:
+        line_edit = QLineEdit()
+        line_edit.setPlaceholderText(placeholder)
+        line_edit.setValidator(self._pixel_value_validator)
+        return line_edit
+
+    def _bulk_pixel_size(self):
+        width_text = self.bulk_width_edit.text().strip()
+        height_text = self.bulk_height_edit.text().strip()
+        if not width_text or not height_text:
+            QMessageBox.warning(
+                self,
+                "Bulk pixel size missing",
+                "Enter both width and height before applying them in bulk.",
+            )
+            return None
+        return width_text, height_text
+
+    def apply_pixel_size_to_all(self, fill_empty_only: bool = False) -> None:
+        if not self.video_widget_map:
+            QMessageBox.warning(
+                self,
+                "No videos loaded",
+                "Load TXT folders first.",
+            )
+            return
+
+        pixel_size = self._bulk_pixel_size()
+        if pixel_size is None:
+            return
+        width_text, height_text = pixel_size
+
+        for width_edit, height_edit in self.video_widget_map.values():
+            if fill_empty_only:
+                if not width_edit.text().strip():
+                    width_edit.setText(width_text)
+                if not height_edit.text().strip():
+                    height_edit.setText(height_text)
+                continue
+            width_edit.setText(width_text)
+            height_edit.setText(height_text)
 
     def load_txt_folders(self):
         self.txt_folders = []
@@ -182,10 +249,8 @@ class TxtToCsvDialog(QDialog):
         for name in sorted(video_names):
             layout = QHBoxLayout()
             name_label = QLabel(name)
-            width_edit = QLineEdit()
-            width_edit.setPlaceholderText("width")
-            height_edit = QLineEdit()
-            height_edit.setPlaceholderText("height")
+            width_edit = self._create_pixel_line_edit("width")
+            height_edit = self._create_pixel_line_edit("height")
             layout.addWidget(name_label)
             layout.addWidget(width_edit)
             layout.addWidget(height_edit)

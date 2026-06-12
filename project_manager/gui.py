@@ -43,7 +43,7 @@ from utils.runtime_locks import (
     try_acquire_project_compression_lock,
 )
 from utils.skeleton import SkeletonModel
-from utils.ui_theme import get_theme_colors
+from utils.ui_theme import build_list_widget_stylesheet
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,17 +62,10 @@ def _make_separator(parent: QWidget) -> QFrame:
 class _FileListWidget(QListWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._theme_colors = get_theme_colors()
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
-        self.setStyleSheet(
-            f"""
-            QListWidget::item:hover {{ background: {self._theme_colors["list_item_hover"]}; color: {self._theme_colors["text_primary"]}; }}
-            QListWidget::item:selected {{ background: {self._theme_colors["list_item_selected"]}; color: {self._theme_colors["text_primary"]}; }}
-            QListWidget::item:selected:!active {{ background: {self._theme_colors["list_item_selected"]}; color: {self._theme_colors["text_primary"]}; }}
-            """
-        )
+        self.setStyleSheet(build_list_widget_stylesheet())
 
         delete_action = QAction("Delete\t(Del)", self)
         delete_action.setShortcut("Delete")

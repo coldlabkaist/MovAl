@@ -32,6 +32,26 @@ def get_theme_colors(overrides: Mapping[str, str] | None = None) -> dict[str, st
     return colors
 
 
+def build_list_widget_stylesheet(
+    theme_colors: Mapping[str, str] | None = None,
+) -> str:
+    c = get_theme_colors(theme_colors)
+    return f"""
+    QListWidget::item:hover {{
+        background: {c["list_item_hover"]};
+        color: {c["text_primary"]};
+    }}
+    QListWidget::item:selected {{
+        background: {c["accent"]};
+        color: #ffffff;
+    }}
+    QListWidget::item:selected:!active {{
+        background: {c["accent"]};
+        color: #ffffff;
+    }}
+    """
+
+
 def build_app_stylesheet(theme_colors: Mapping[str, str] | None = None) -> str:
     assets_dir = Path(__file__).resolve().parent / "ui_assets"
     combo_down = (assets_dir / "chevron_down.svg").resolve().as_posix()

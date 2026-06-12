@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QScrollArea, QGridLayout,
     QDialog, QLineEdit, QMessageBox, QSpinBox, QFileDialog, QGroupBox, QFormLayout,
-    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QFrame
+    QCheckBox, QComboBox, QDoubleSpinBox, QRadioButton, QListWidget, QFrame,
+    QListWidgetItem, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
 import os
@@ -12,8 +13,9 @@ from datetime import datetime
 from pathlib import Path
 import re
 import pandas as pd
-from typing import Optional
+from typing import Optional, Union
 from utils.skeleton.skeleton_model import SkeletonModel
+from utils.ui_theme import build_list_widget_stylesheet
 
 class BrowseOnlyLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -395,7 +397,7 @@ class YoloInferenceDialog(QDialog):
 
     def build_ui(self):
         self.setWindowTitle("YOLO Pose Inference")
-        self.setMinimumSize(600, 620)
+        self.setMinimumSize(720, 700)
 
         main_layout = QVBoxLayout(self)
         main_layout.addLayout(self.build_model_row())
@@ -499,26 +501,22 @@ class YoloInferenceDialog(QDialog):
             self.image_mode_combo.setCurrentIndex(preferred_index)
         self.image_mode_combo.currentTextChanged.connect(self._save_image_mode)
         lay.addWidget(self.image_mode_combo)
-
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0,0,0,0)
-        vbox.setSpacing(2)
-        self.video_checks = []
-        for fe in self.current_project.files:
-            cb = QCheckBox(fe.file_name or Path(fe.video).name)
-            vbox.addWidget(cb)
-            self.video_checks.append((cb, fe.name))
-        vbox.addStretch()
-        scroll = QScrollArea(frameShape=QFrame.Shape.NoFrame, widgetResizable=True)
-        scroll.setWidget(container)
-        lay.addWidget(scroll)
+        self.image_source_hint = QLabel(
+            "Only items shown in this list will be included in inference."
+        )
+        self.image_source_hint.setWordWrap(True)
+        lay.addWidget(self.image_source_hint)
+        self.image_source_list = self._create_source_list_widget()
+        self._populate_image_source_list()
+        lay.addWidget(self.image_source_list)
 
         button_row = QHBoxLayout()
-        self.select_all_images_btn = QPushButton("Select All", clicked=self.select_all_image_sources)
-        self.deselect_all_images_btn = QPushButton("Deselect All", clicked=self.deselect_all_image_sources)
-        button_row.addWidget(self.select_all_images_btn)
-        button_row.addWidget(self.deselect_all_images_btn)
+        self.exclude_image_sources_btn = QPushButton("Exclude Selected", clicked=self.exclude_selected_image_sources)
+        self.keep_only_image_sources_btn = QPushButton("Keep Only Selected", clicked=self.keep_only_selected_image_sources)
+        button_row.addWidget(self.exclude_image_sources_btn)
+        button_row.addWidget(self.keep_only_image_sources_btn)
+        self.reset_image_sources_btn = QPushButton("Reset From Project", clicked=self.reset_image_sources)
+        button_row.addWidget(self.reset_image_sources_btn)
         lay.addLayout(button_row)
         return sect
 
@@ -532,21 +530,29 @@ class YoloInferenceDialog(QDialog):
         lay  = QVBoxLayout(sect)
         lay.setContentsMargins(0,0,0,0)
         self.load_video_btn = QPushButton("Load Video...", clicked=self.load_videos)
-        self.loaded_list = QListWidget()
-        seen = set()
-        for fe in self.current_project.files:
-            path_obj = Path(fe.video)
-            if not path_obj.exists():
-                continue
-            path = str(path_obj)
-            if path in seen:
-                continue
-            seen.add(path)
-            self.loaded_list.addItem(path)
+        self.video_source_hint = QLabel(
+            "Only items shown in this list will be included in inference."
+        )
+        self.video_source_hint.setWordWrap(True)
+        self.loaded_list = self._create_source_list_widget()
+        self._populate_loaded_videos_from_project()
+        self.exclude_selected_videos_btn = QPushButton(
+            "Exclude Selected",
+            clicked=self.exclude_selected_videos,
+        )
+        self.include_only_selected_videos_btn = QPushButton(
+            "Keep Only Selected",
+            clicked=self.include_only_selected_videos,
+        )
         self.clear_video_btn = QPushButton("Clear List", clicked=self.clear_videos)
         lay.addWidget(self.load_video_btn)
+        lay.addWidget(self.video_source_hint)
         lay.addWidget(self.loaded_list)
-        lay.addWidget(self.clear_video_btn)
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.exclude_selected_videos_btn)
+        action_row.addWidget(self.include_only_selected_videos_btn)
+        action_row.addWidget(self.clear_video_btn)
+        lay.addLayout(action_row)
         return sect
 
     def build_target_group(self):
@@ -651,13 +657,207 @@ class YoloInferenceDialog(QDialog):
     def clear_videos(self):
         self.loaded_list.clear()
 
-    def select_all_image_sources(self):
-        for cb, _ in self.video_checks:
-            cb.setChecked(True)
+    def _create_source_list_widget(self) -> QListWidget:
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        list_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        list_widget.setStyleSheet(build_list_widget_stylesheet())
+        return list_widget
 
-    def deselect_all_image_sources(self):
-        for cb, _ in self.video_checks:
-            cb.setChecked(False)
+    def _populate_image_source_list(self) -> None:
+        self.image_source_list.clear()
+        for file_entry in self.current_project.files:
+            item = QListWidgetItem(str(file_entry.name))
+            item.setData(Qt.ItemDataRole.UserRole, file_entry.name)
+            item.setToolTip(str(file_entry.video))
+            self.image_source_list.addItem(item)
+
+    def _item_user_value(self, item: QListWidgetItem) -> str:
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if value is None:
+            return item.text()
+        return str(value)
+
+    def _exclude_selected_items(self, list_widget: QListWidget) -> None:
+        selected_rows = sorted(
+            {list_widget.row(item) for item in list_widget.selectedItems()},
+            reverse=True,
+        )
+        for row in selected_rows:
+            list_widget.takeItem(row)
+
+    def _keep_only_selected_items(self, list_widget: QListWidget) -> None:
+        selected_items = list_widget.selectedItems()
+        if not selected_items:
+            return
+
+        kept_values = [self._item_user_value(item) for item in selected_items]
+        list_widget.clear()
+        self._restore_list_items(list_widget, kept_values)
+
+    def _restore_list_items(self, list_widget: QListWidget, values: list[str]) -> None:
+        if list_widget is self.image_source_list:
+            self._add_image_source_items(values)
+            return
+        if list_widget is self.loaded_list:
+            self._add_loaded_video_paths(values)
+            return
+        raise ValueError("Unsupported source list widget")
+
+    def _project_image_source_names(self) -> list[str]:
+        names: list[str] = []
+        seen: set[str] = set()
+        for file_entry in self.current_project.files:
+            source_name = str(file_entry.name)
+            if source_name in seen:
+                continue
+            seen.add(source_name)
+            names.append(source_name)
+        return names
+
+    def _add_image_source_items(self, source_names: list[str]) -> None:
+        existing = {
+            self._item_user_value(self.image_source_list.item(i))
+            for i in range(self.image_source_list.count())
+        }
+        project_entries = {
+            str(file_entry.name): file_entry
+            for file_entry in self.current_project.files
+        }
+        for source_name in source_names:
+            if source_name in existing:
+                continue
+            file_entry = project_entries.get(str(source_name))
+            if file_entry is None:
+                continue
+            item = QListWidgetItem(str(file_entry.name))
+            item.setData(Qt.ItemDataRole.UserRole, str(file_entry.name))
+            item.setToolTip(str(file_entry.video))
+            self.image_source_list.addItem(item)
+            existing.add(str(source_name))
+
+    def reset_image_sources(self) -> None:
+        self.image_source_list.clear()
+        self._add_image_source_items(self._project_image_source_names())
+
+    def exclude_selected_image_sources(self) -> None:
+        self._exclude_selected_items(self.image_source_list)
+
+    def keep_only_selected_image_sources(self) -> None:
+        self._keep_only_selected_items(self.image_source_list)
+
+    def clear_image_sources(self) -> None:
+        self.image_source_list.clear()
+
+    def _normalized_video_source_key(self, source: Union[str, Path]) -> str:
+        try:
+            return str(Path(source).expanduser().resolve())
+        except Exception:
+            return str(Path(source))
+
+    def _project_video_source_paths(self) -> list[str]:
+        sources: list[str] = []
+        seen: set[str] = set()
+        for file_entry in self.current_project.files:
+            path_obj = Path(file_entry.video)
+            if not path_obj.exists():
+                continue
+            normalized = self._normalized_video_source_key(path_obj)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            sources.append(str(path_obj))
+        return sources
+
+    def _build_video_display_labels(self, path_texts: list[str]) -> dict[str, str]:
+        path_objects = [Path(path_text) for path_text in path_texts]
+        labels = {path_text: path_obj.stem for path_text, path_obj in zip(path_texts, path_objects)}
+        duplicate_groups: dict[str, list[tuple[str, Path]]] = {}
+
+        for path_text, path_obj in zip(path_texts, path_objects):
+            duplicate_groups.setdefault(path_obj.stem, []).append((path_text, path_obj))
+
+        for duplicates in duplicate_groups.values():
+            if len(duplicates) <= 1:
+                continue
+
+            resolved: dict[str, str] = {}
+            depth = 1
+            while len(resolved) < len(duplicates):
+                candidate_map: dict[str, list[str]] = {}
+                for path_text, path_obj in duplicates:
+                    parents = [part for part in path_obj.parts[:-1] if part not in (path_obj.anchor,)]
+                    if parents:
+                        tail = parents[-depth:]
+                        prefix = "/".join(tail)
+                        candidate = f"{prefix}/{path_obj.stem}" if prefix else path_obj.stem
+                    else:
+                        candidate = path_obj.stem
+                    candidate_map.setdefault(candidate, []).append(path_text)
+
+                collisions = False
+                for candidate, keys in candidate_map.items():
+                    if len(keys) == 1:
+                        resolved[keys[0]] = candidate
+                    else:
+                        collisions = True
+
+                if not collisions:
+                    break
+
+                depth += 1
+                if depth > max((len(Path(path_text).parts) for path_text, _ in duplicates), default=1):
+                    break
+
+            for path_text, path_obj in duplicates:
+                labels[path_text] = resolved.get(path_text, path_obj.name)
+
+        return labels
+
+    def _refresh_loaded_video_labels(self) -> None:
+        path_texts = [
+            self._item_user_value(self.loaded_list.item(i))
+            for i in range(self.loaded_list.count())
+        ]
+        labels = self._build_video_display_labels(path_texts)
+        for i in range(self.loaded_list.count()):
+            item = self.loaded_list.item(i)
+            path_text = self._item_user_value(item)
+            item.setText(labels.get(path_text, Path(path_text).stem))
+            item.setToolTip(path_text)
+
+    def _add_loaded_video_item(self, path: Union[str, Path]) -> None:
+        path_text = str(path)
+        item = QListWidgetItem(Path(path_text).stem)
+        item.setData(Qt.ItemDataRole.UserRole, path_text)
+        item.setToolTip(path_text)
+        self.loaded_list.addItem(item)
+
+    def _add_loaded_video_paths(self, paths: list[Union[str, Path]]) -> None:
+        existing = {
+            self._normalized_video_source_key(self._item_user_value(self.loaded_list.item(i)))
+            for i in range(self.loaded_list.count())
+        }
+        for raw_path in paths:
+            path_text = str(raw_path)
+            normalized = self._normalized_video_source_key(path_text)
+            if normalized in existing:
+                continue
+            existing.add(normalized)
+            self._add_loaded_video_item(path_text)
+        self._refresh_loaded_video_labels()
+
+    def _populate_loaded_videos_from_project(self) -> None:
+        self.loaded_list.clear()
+        self._add_loaded_video_paths(self._project_video_source_paths())
+
+    def exclude_selected_videos(self) -> None:
+        self._exclude_selected_items(self.loaded_list)
+        self._refresh_loaded_video_labels()
+
+    def include_only_selected_videos(self) -> None:
+        self._keep_only_selected_items(self.loaded_list)
+        self._refresh_loaded_video_labels()
 
     def load_videos(self):
         paths, _ = QFileDialog.getOpenFileNames(
@@ -666,9 +866,8 @@ class YoloInferenceDialog(QDialog):
             self.current_project.project_dir, 
             "Video (*.mp4 *.avi *.mov)"
         )
-        for p in paths:
-            if p and not any(p == self.loaded_list.item(i).text() for i in range(self.loaded_list.count())):
-                self.loaded_list.addItem(p)
+        valid_paths = [path for path in paths if path]
+        self._add_loaded_video_paths(valid_paths)
 
     def get_params_from_group(self, group):
         params = {}
@@ -687,22 +886,23 @@ class YoloInferenceDialog(QDialog):
         
     def get_video_list(self):
         if self.image_radio.isChecked():
-            selected_names: list[str] = [
-                video_name for cb, video_name in self.video_checks if cb.isChecked()
+            source_names: list[str] = [
+                self.image_source_list.item(i).data(Qt.ItemDataRole.UserRole)
+                for i in range(self.image_source_list.count())
             ]
-            if not selected_names:
+            if not source_names:
                 return None
             image_mode = self.image_mode_combo.currentText() 
             base_dir = Path(self.current_project.project_dir)
             if image_mode in ("davis", "contour"):
                 sources = [
                     (name, base_dir / "frames" / name / "visualization" / image_mode)
-                    for name in selected_names
+                    for name in source_names
                 ]
             else:
                 sources = [
                     (name, base_dir / "frames" / name / "images")
-                    for name in selected_names
+                    for name in source_names
                 ]
             return sources
         elif self.video_radio.isChecked():
@@ -711,7 +911,7 @@ class YoloInferenceDialog(QDialog):
                 return None
             sources = []
             for i in range(count):
-                src = Path(self.loaded_list.item(i).text())
+                src = Path(self._item_user_value(self.loaded_list.item(i)))
                 sources.append((src.stem, src))
             return sources
         raise

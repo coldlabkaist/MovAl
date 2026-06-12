@@ -8,7 +8,7 @@ from video_preprocess import PreprocessDialog
 from labelary import run_labelary_with_project
 from pose import PoseEstimationDialog
 from pose.task_state import pose_execution_state
-from utils import TxtToCsvDialog, DataConverterDialog
+from utils import TxtToCsvDialog, DataConverterDialog, CsvInterpolationDialog
 
 class PipelineController:
     def __init__(self):    
@@ -82,6 +82,10 @@ class PipelineController:
 
     def data_extract(self):
         dialog = TxtToCsvDialog(current_project=self.current_project)
+        dialog.exec()
+
+    def csv_interpolation(self):
+        dialog = CsvInterpolationDialog(self.parent)
         dialog.exec()
 
     def _on_pose_dialog_destroyed(self, *args):

@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import pandas as pd
 from typing import Optional, Union
+from utils.csv_interpolation import interpolate_pose_csv
 from utils.skeleton.skeleton_model import SkeletonModel
 from utils.ui_theme import build_list_widget_stylesheet
 
@@ -40,6 +41,11 @@ class BrowseOnlyLineEdit(QLineEdit):
 
     def dropEvent(self, event):
         event.ignore()
+
+
+DISABLED_COMBOBOX_STYLESHEET = (
+    "QComboBox:disabled { color: #8a8f98; background-color: #eceff3; border-color: #c6ccd6; }"
+)
 
 class YOLODialog(QDialog):
     def __init__(self, current_project, parent=None):
@@ -455,9 +461,7 @@ class YoloInferenceDialog(QDialog):
         self.tracking_radio = QRadioButton("Tracking")
         self.track_method_combo = QComboBox(enabled=False)
         self.track_method_combo.addItems(["botsort", "bytetrack"])
-        self.track_method_combo.setStyleSheet(
-            "QComboBox:disabled { color: #8a8f98; background-color: #eceff3; border-color: #c6ccd6; }"
-        )
+        self.track_method_combo.setStyleSheet(DISABLED_COMBOBOX_STYLESHEET)
 
         for w in (self.inference_radio, self.tracking_radio):
             w.toggled.connect(self.update_mode)
@@ -587,13 +591,18 @@ class YoloInferenceDialog(QDialog):
         self.save_media_checkbox = QCheckBox(checked=False)
         self.save_txt_checkbox = QCheckBox(checked=False)
         self.convert_txt_to_csv_checkbox = QCheckBox(checked=True)
+        self.csv_output_mode_combo = QComboBox()
+        self.csv_output_mode_combo.addItems(["Raw CSV only", "Raw + interpolated CSV"])
+        self.csv_output_mode_combo.setStyleSheet(DISABLED_COMBOBOX_STYLESHEET)
 
         form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
         form.addRow(QLabel("save image/video"), self.save_media_checkbox)
         form.addRow(QLabel("save result as txt"), self.save_txt_checkbox)
         form.addRow(QLabel("save result as csv"), self.convert_txt_to_csv_checkbox)
+        form.addRow(QLabel("csv output mode"), self.csv_output_mode_combo)
 
         self.save_txt_checkbox.toggled.connect(self._update_visualization_option_states)
+        self.convert_txt_to_csv_checkbox.toggled.connect(self._update_visualization_option_states)
         self._update_visualization_option_states()
         return group
 
@@ -939,6 +948,9 @@ class YoloInferenceDialog(QDialog):
     def _inference_source_csv_path(self, run_root_name: str, source_name: str) -> Path:
         return self._inference_run_root_dir(run_root_name) / f"{source_name}.csv"
 
+    def _inference_source_interpolated_csv_path(self, run_root_name: str, source_name: str) -> Path:
+        return self._inference_run_root_dir(run_root_name) / f"{source_name}.interpolated.csv"
+
     def _dir_has_txt_files(self, path: Path) -> bool:
         if not path.is_dir():
             return False
@@ -994,13 +1006,22 @@ class YoloInferenceDialog(QDialog):
         source_name: str,
         keep_txt: bool,
         want_csv: bool,
+        csv_output_mode: str,
     ) -> None:
         txt_dir = self._resolve_inference_txt_dir(run_root_name, source_name)
         converted = False
 
         if want_csv and txt_dir is not None:
-            self._convert_txt_result_to_csv(run_root_name, source_name, txt_dir=txt_dir)
+            csv_path = self._convert_txt_result_to_csv(run_root_name, source_name, txt_dir=txt_dir)
             converted = True
+            if (
+                csv_path is not None
+                and csv_output_mode == "Raw + interpolated CSV"
+            ):
+                interpolate_pose_csv(
+                    csv_path,
+                    self._inference_source_interpolated_csv_path(run_root_name, source_name),
+                )
 
         if keep_txt:
             self._flatten_inference_txt_outputs(run_root_name, source_name)
@@ -1017,6 +1038,8 @@ class YoloInferenceDialog(QDialog):
 
         if hasattr(self, "convert_txt_to_csv_checkbox"):
             self.convert_txt_to_csv_checkbox.setEnabled(True)
+        if hasattr(self, "csv_output_mode_combo") and hasattr(self, "convert_txt_to_csv_checkbox"):
+            self.csv_output_mode_combo.setEnabled(self.convert_txt_to_csv_checkbox.isChecked())
 
     def run_inference(self):
         if is_project_compression_running():
@@ -1065,6 +1088,7 @@ class YoloInferenceDialog(QDialog):
         base_out = self._inference_run_root_dir(run_root_name)
         keep_txt = self.save_txt_checkbox.isChecked()
         want_csv = self.convert_txt_to_csv_checkbox.isChecked()
+        csv_output_mode = self.csv_output_mode_combo.currentText()
         need_txt_output = keep_txt or want_csv
 
         def norm(p):
@@ -1119,6 +1143,7 @@ class YoloInferenceDialog(QDialog):
                     "source_name": name,
                     "keep_txt": keep_txt,
                     "want_csv": want_csv,
+                    "csv_output_mode": csv_output_mode,
                 }
             )
 
@@ -1197,9 +1222,16 @@ class YoloInferenceDialog(QDialog):
         source_name = run_item.get("source_name")
         keep_txt = bool(run_item.get("keep_txt"))
         want_csv = bool(run_item.get("want_csv"))
+        csv_output_mode = str(run_item.get("csv_output_mode", "Raw CSV only"))
         if run_root_name and source_name and (keep_txt or want_csv):
             try:
-                self._finalize_inference_outputs(run_root_name, source_name, keep_txt, want_csv)
+                self._finalize_inference_outputs(
+                    run_root_name,
+                    source_name,
+                    keep_txt,
+                    want_csv,
+                    csv_output_mode,
+                )
             except Exception as err:
                 QMessageBox.warning(
                     self,
@@ -1332,22 +1364,22 @@ class YoloInferenceDialog(QDialog):
         run_root_name: str,
         source_name: str,
         txt_dir: Optional[Path] = None,
-    ):
+    ) -> Optional[Path]:
         if txt_dir is None:
             txt_dir = self._resolve_inference_txt_dir(run_root_name, source_name)
         if txt_dir is None or not txt_dir.is_dir():
-            return
+            return None
 
         txt_files = sorted(
             txt_dir.glob("*.txt"),
             key=lambda p: self._extract_frame_number(p.name),
         )
         if not txt_files:
-            return
+            return None
 
         kpt_names = self._project_kpt_names()
         if not kpt_names:
-            return
+            return None
 
         rows = []
         has_instance_id = False
@@ -1442,7 +1474,7 @@ class YoloInferenceDialog(QDialog):
                 rows.append(row)
 
         if not rows:
-            return
+            return None
 
         columns = ["track", "frame_idx", "instance.score"]
         for name in kpt_names:
@@ -1453,3 +1485,4 @@ class YoloInferenceDialog(QDialog):
         df = pd.DataFrame(rows, columns=columns)
         csv_path = self._inference_source_csv_path(run_root_name, source_name)
         df.to_csv(csv_path, index=False)
+        return csv_path

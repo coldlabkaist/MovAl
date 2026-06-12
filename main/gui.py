@@ -35,26 +35,26 @@ class AdditionalToolsDialog(QDialog):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Additional Tools")
-        self.setFixedSize(350, 160)
+        self.setFixedSize(350, 190)
         self.controller = controller
 
         layout = QVBoxLayout(self)
-        step1_label = QLabel("Step 1")
-        step1_label.setProperty("stepLabel", True)
-        layout.addWidget(step1_label)
         self.convert_btn = QPushButton("Data Convert")
         self.convert_btn.setFixedHeight(40)
         self.convert_btn.clicked.connect(self.controller.data_convert)
         layout.addWidget(self.convert_btn)
 
         layout.addSpacing(10)
-        step2_label = QLabel("Step 2")
-        step2_label.setProperty("stepLabel", True)
-        layout.addWidget(step2_label)
         self.extract_btn = QPushButton("Data Extract")
         self.extract_btn.setFixedHeight(40)
         self.extract_btn.clicked.connect(self.controller.data_extract)
         layout.addWidget(self.extract_btn)
+
+        layout.addSpacing(10)
+        self.interpolate_btn = QPushButton("CSV Interpolation")
+        self.interpolate_btn.setFixedHeight(40)
+        self.interpolate_btn.clicked.connect(self.controller.csv_interpolation)
+        layout.addWidget(self.interpolate_btn)
 
 
 class MainWindow(QMainWindow):

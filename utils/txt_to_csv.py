@@ -430,4 +430,3 @@ class TxtToCsvDialog(QDialog):
             save_path = os.path.join(output_dir, f"{video_name}.csv")
             df.to_csv(save_path, index=False)
             print(f"Saved: {save_path}")
-

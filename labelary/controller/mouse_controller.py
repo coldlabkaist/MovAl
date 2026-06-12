@@ -363,6 +363,28 @@ class MouseController(QObject):
             act_prev_lbl.setShortcut(QKeySequence("Ctrl+Left"))
             act_next_lbl.setShortcut(QKeySequence("Ctrl+Right"))
 
+        parent_dialog = getattr(self.video_loader, "parent", None)
+        menu.addSeparator()
+        act_toggle_auto = menu.addAction("Toggle Automatic Labeling")
+        act_toggle_auto.setCheckable(True)
+        act_toggle_auto.setShortcut(QKeySequence("Ctrl+T"))
+        act_toggle_auto.setShortcutVisibleInContextMenu(True)
+
+        act_auto_add = menu.addAction("Automatic Label Addition")
+        act_auto_add.setShortcut(QKeySequence("Ctrl+E"))
+        act_auto_add.setShortcutVisibleInContextMenu(True)
+
+        act_auto_relabel = menu.addAction("Automatic Re-labeling")
+        act_auto_relabel.setShortcut(QKeySequence("Ctrl+R"))
+        act_auto_relabel.setShortcutVisibleInContextMenu(True)
+
+        if parent_dialog is not None and hasattr(parent_dialog, "automatic_label_checkbox"):
+            act_toggle_auto.setChecked(parent_dialog.automatic_label_checkbox.isChecked())
+        else:
+            act_toggle_auto.setEnabled(False)
+            act_auto_add.setEnabled(False)
+            act_auto_relabel.setEnabled(False)
+
         current_frame = self._current_label_frame()
         if current_frame is None:
             current_frame = -1
@@ -376,6 +398,12 @@ class MouseController(QObject):
         act_replace.triggered.connect(lambda: self._replace_selected_instance(context_pos=pos))
         act_delete.triggered.connect(self._delete_selected_instance)
         act_vis.triggered.connect(self._toggle_selected_node_visibility)
+        if parent_dialog is not None:
+            act_toggle_auto.triggered.connect(
+                lambda _checked=False: parent_dialog.toggle_automatic_labeling()
+            )
+            act_auto_add.triggered.connect(parent_dialog.run_automatic_label_addition)
+            act_auto_relabel.triggered.connect(parent_dialog.run_automatic_relabel)
         
         menu.aboutToHide.connect(lambda: setattr(self, "_active_menu", None))
         global_pt = e.globalPosition().toPoint()

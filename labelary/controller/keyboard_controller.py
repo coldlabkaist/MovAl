@@ -84,6 +84,18 @@ class KeyboardController(QObject):
                   event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                 self.mouse_controller._toggle_selected_node_visibility()
                 return True
+            elif (key == Qt.Key.Key_T and
+                  event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self.main_dialog.toggle_automatic_labeling()
+                return True
+            elif (key == Qt.Key.Key_E and
+                  event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self.main_dialog.run_automatic_label_addition()
+                return True
+            elif (key == Qt.Key.Key_R and
+                  event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self.main_dialog.run_automatic_relabel()
+                return True
             for idx, key_num in enumerate([1,2,3,4,5,6,7,8,9,0]):
                 if (key == getattr(Qt.Key, f"Key_{key_num}") and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
                     self.mouse_controller._change_instance_number_by_idx(idx)

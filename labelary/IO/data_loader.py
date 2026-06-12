@@ -727,16 +727,38 @@ class DataLoader:
         return True
 
     @classmethod
-    def add_auto_labeled_frame(cls, frame_idx: int, instances: list[dict]) -> bool:
+    def add_auto_labeled_frame(
+        cls,
+        frame_idx: int,
+        instances: list[dict],
+        *,
+        merge_mode: str = "empty_only",
+    ) -> bool:
         cls._ensure_skeleton()
-        if not instances:
+        if merge_mode not in {"empty_only", "append", "replace"}:
+            raise ValueError(f"Unsupported merge_mode: {merge_mode}")
+
+        if cls.loaded_data is None:
+            cls.create_new_data()
+
+        frame_idx = int(frame_idx)
+        had_existing = cls.frame_has_labels(frame_idx)
+        if merge_mode == "empty_only" and had_existing:
+            return False
+        if not instances and not (merge_mode == "replace" and had_existing):
             return False
 
         if cls.loaded_data is None:
             cls.create_new_data()
 
-        if cls.frame_has_labels(frame_idx):
-            return False
+        if merge_mode == "replace" and cls.loaded_data is not None:
+            cls.loaded_data = cls.loaded_data[
+                cls.loaded_data["frame_idx"] != frame_idx
+            ].reset_index(drop=True)
+
+        frame_df = cls._frame_df(frame_idx) if merge_mode == "append" else pd.DataFrame(
+            columns=(cls.loaded_data.columns if cls.loaded_data is not None else [])
+        )
 
         rows: list[dict] = []
         per_track_counts: dict[str, int] = {}
@@ -744,6 +766,19 @@ class DataLoader:
         include_instance_id = cls.is_multi_instance_enabled() or (
             cls.loaded_data is not None and cls.INSTANCE_ID_COL in cls.loaded_data.columns
         )
+        if not frame_df.empty:
+            per_track_counts = (
+                frame_df["track"].astype(str).value_counts().to_dict()
+            )
+
+        used_instance_ids: dict[str, set[int]] = {}
+        if include_instance_id and not frame_df.empty and cls.INSTANCE_ID_COL in frame_df.columns:
+            for track_name, group in frame_df.groupby("track", sort=False):
+                used_instance_ids[str(track_name)] = {
+                    int(v)
+                    for v in pd.to_numeric(group[cls.INSTANCE_ID_COL], errors="coerce").dropna().tolist()
+                    if int(v) > 0
+                }
 
         for instance in instances:
             track_name = instance.get("track")
@@ -760,14 +795,25 @@ class DataLoader:
                 "frame_idx": int(frame_idx),
                 "instance.visibility": 2,
             }
-            raw_instance_id = instance.get("instance_id")
-            resolved_instance_id = (
-                int(raw_instance_id)
-                if raw_instance_id is not None and str(raw_instance_id).strip() != ""
-                else count + 1
-            )
             if include_instance_id:
+                used_ids = used_instance_ids.setdefault(track_name, set())
+                resolved_instance_id: Optional[int] = None
+                raw_instance_id = instance.get("instance_id")
+                if raw_instance_id is not None and str(raw_instance_id).strip() != "":
+                    try:
+                        parsed_instance_id = int(raw_instance_id)
+                        if parsed_instance_id > 0 and parsed_instance_id not in used_ids:
+                            resolved_instance_id = parsed_instance_id
+                    except Exception:
+                        resolved_instance_id = None
+                if resolved_instance_id is None:
+                    resolved_instance_id = 1
+                    while resolved_instance_id in used_ids:
+                        resolved_instance_id += 1
+                used_ids.add(resolved_instance_id)
                 row[cls.INSTANCE_ID_COL] = resolved_instance_id
+            if cls.INSTANCE_SCORE_COL in (cls.loaded_data.columns if cls.loaded_data is not None else []) or "instance_score" in instance:
+                row[cls.INSTANCE_SCORE_COL] = float(instance.get("instance_score", 0.0))
 
             for kp in cls.kp_order:
                 x, y, vis = keypoints.get(kp, (0.0, 0.0, 1))
@@ -778,6 +824,12 @@ class DataLoader:
             per_track_counts[track_name] = count + 1
 
         if not rows:
+            if merge_mode == "replace" and had_existing:
+                if cls.loaded_data is not None:
+                    cls.loaded_data = cls._normalize_loaded_df(cls.loaded_data)
+                cls._coords_normalized = True
+                cls._bump_label_version()
+                return True
             return False
 
         new_rows = pd.DataFrame.from_records(rows)

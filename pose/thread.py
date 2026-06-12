@@ -3,6 +3,8 @@ import subprocess
 import sys
 import os
 import shlex
+import locale
+import re
 
 def _to_cmd_list(command):
     if isinstance(command, (list, tuple)):
@@ -16,8 +18,42 @@ def _make_env():
     env.setdefault("MKL_NUM_THREADS", "1")
     return env
 
+
+_ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_ANSI_OSC_RE = re.compile(r"\x1b\].*?(?:\x07|\x1b\\)")
+
+
+def _decode_console_bytes(data: bytes) -> str:
+    encodings = []
+    preferred = locale.getpreferredencoding(False)
+    if preferred:
+        encodings.append(preferred)
+    encodings.extend(["utf-8", "cp949", "utf-8-sig"])
+
+    for encoding in dict.fromkeys(encodings):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _sanitize_console_text(text: str) -> str:
+    clean = _ANSI_OSC_RE.sub("", text)
+    clean = _ANSI_CSI_RE.sub("", clean)
+    clean = clean.replace("\r", "")
+    return clean
+
+
+def _iter_clean_lines(stream):
+    for raw_line in iter(stream.readline, b""):
+        if not raw_line:
+            continue
+        yield _sanitize_console_text(_decode_console_bytes(raw_line)).rstrip("\n")
+
 class TrainThread(QThread):
     finished_signal = pyqtSignal()
+    log_signal = pyqtSignal(str)
 
     def __init__(self, command):
         super().__init__()
@@ -57,35 +93,28 @@ class TrainThread(QThread):
                 cmd_list,
                 shell=False,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                encoding="utf-8",
-                errors="replace", 
+                stderr=subprocess.STDOUT,
+                text=False,
+                bufsize=0,
                 env=env,
             )
             self._process = process
 
-            # stdout
-            for line in iter(process.stdout.readline, ''):
+            for line in _iter_clean_lines(process.stdout):
                 if line:
-                    sys.stdout.write(line)
+                    sys.stdout.write(f"{line}\n")
                     sys.stdout.flush()
-
-            # stderr
-            for line in iter(process.stderr.readline, ''):
-                if line:
-                    sys.stderr.write(line)
-                    sys.stderr.flush()
+                    self.log_signal.emit(line)
 
             process.stdout.close()
-            process.stderr.close()
             rc = process.wait()
             self.exit_code = rc
 
             if rc != 0 and not self._stop_requested:
-                sys.stderr.write(f"\n[TrainThread] YOLO exited with code {rc}\n")
+                message = f"[TrainThread] YOLO exited with code {rc}"
+                sys.stderr.write(f"\n{message}\n")
                 sys.stderr.flush()
+                self.log_signal.emit(message)
         finally:
             self._process = None
             self.finished_signal.emit()
@@ -132,22 +161,20 @@ class InferenceThread(QThread):
                 shell=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                encoding="utf-8",
-                errors="replace",
+                text=False,
+                bufsize=0,
                 env=env,
             )
             self._process = process
 
-            for line in iter(process.stdout.readline, ''):
+            for line in _iter_clean_lines(process.stdout):
                 if line:
-                    sys.stdout.write(line)
+                    sys.stdout.write(f"{line}\n")
                     sys.stdout.flush()
 
-            for line in iter(process.stderr.readline, ''):
+            for line in _iter_clean_lines(process.stderr):
                 if line:
-                    sys.stderr.write(line)
+                    sys.stderr.write(f"{line}\n")
                     sys.stderr.flush()
 
             process.stdout.close()

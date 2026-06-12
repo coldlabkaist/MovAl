@@ -247,6 +247,8 @@ def create_online_training_dataset(
     dataset_root: str | Path | None = None,
     seed: int | None = None,
     label_dirs: dict[str, Path] | None = None,
+    progress_callback=None,
+    should_cancel=None,
 ) -> tuple[Path, dict[str, int]]:
     project_dir = Path(current_project.project_dir)
     dataset_root = Path(dataset_root) if dataset_root is not None else project_dir / "runs" / ONLINE_DATASET_ROOT
@@ -262,7 +264,8 @@ def create_online_training_dataset(
         clear_existing=False,
         seed=seed,
         label_dirs=label_dirs,
-        should_cancel=None,
+        progress_callback=progress_callback,
+        should_cancel=should_cancel,
     )
     return dataset_dir, counts
 

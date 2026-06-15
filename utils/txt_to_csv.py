@@ -9,9 +9,9 @@ import os
 from pathlib import Path
 import pandas as pd
 import yaml
-import numpy as np
 import re
 from utils.skeleton.skeleton_model import SkeletonModel
+from utils.txt_conversion import parse_txt_pose_detections, resolve_frame_track_data
 
 def extract_frame_number(filename):
     match = re.search(r'_(\d+)\.txt$', filename)
@@ -280,92 +280,51 @@ class TxtToCsvDialog(QDialog):
             all_txts = sorted(self.video_to_txts.get(video_name, []), key=lambda x: extract_frame_number(os.path.basename(x)))
 
             rows = []
-            has_instance_id = False
             per_id_limit = (
                 self.current_project.get_max_instances_per_id()
                 if self.current_project is not None and hasattr(self.current_project, "get_max_instances_per_id")
                 else 1
             )
+            include_instance_id = per_id_limit > 1
             for idx, txt_path in enumerate(all_txts):
                 with open(txt_path, "r") as f:
                     lines = f.readlines()
-                    
-                detections = []
-                for line in lines:
-                    items = line.strip().split()
-                    if len(items) < 6:
-                        continue
-                    track_id = int(items[0])
-                    raw = items[5:]
 
-                    if len(raw) % 3 == 1:
-                        try:
-                            instance_id = int(raw[-1])
-                            kpt_data = list(map(float, raw[:-1]))
-                            has_instance_id = True
-                        except:
-                            continue
-                    else:
-                        instance_id = None
-                        kpt_data = list(map(float, raw))
-
-                    remapped_id = instance_id if instance_id is not None else ""
-                    detections.append((track_id, remapped_id, kpt_data))
+                detections, frame_has_instance_id = parse_txt_pose_detections(lines)
+                include_instance_id = include_instance_id or frame_has_instance_id
 
                 # Use actual frame number from filename instead of sequential index
                 frame_num = extract_frame_number(os.path.basename(txt_path))
                 if frame_num < 0:
                     frame_num = idx + 1
 
-                track_data = []
-                if has_instance_id:
-                    merged_by_key = {}
-                    for track_id, remapped_id, kpt_data in detections:
-                        key = (track_id, remapped_id if remapped_id != "" else None)
-                        if key not in merged_by_key:
-                            merged_by_key[key] = (kpt_data, remapped_id)
-                        else:
-                            prev, rid = merged_by_key[key]
-                            prev_np = np.array(prev)
-                            curr_np = np.array(kpt_data)
-                            for kp in range(len(self.kpt_names)):
-                                if curr_np[kp * 3 + 2] > prev_np[kp * 3 + 2]:
-                                    prev_np[kp * 3:kp * 3 + 3] = curr_np[kp * 3:kp * 3 + 3]
-                            merged_by_key[key] = (prev_np.tolist(), rid)
-                    track_data = [
-                        (track_id, kpt_data, remapped_id)
-                        for (track_id, _), (kpt_data, remapped_id) in merged_by_key.items()
-                    ]
-                elif per_id_limit > 1:
-                    counts_by_track = {}
-                    for track_id, _remapped_id, kpt_data in detections:
-                        next_slot = counts_by_track.get(track_id, 0) + 1
-                        if next_slot > per_id_limit:
-                            continue
-                        counts_by_track[track_id] = next_slot
-                        track_data.append((track_id, kpt_data, next_slot))
-                    has_instance_id = has_instance_id or bool(track_data)
-                else:
-                    seen_tracks = set()
-                    for track_id, _remapped_id, kpt_data in detections:
-                        if track_id in seen_tracks:
-                            continue
-                        seen_tracks.add(track_id)
-                        track_data.append((track_id, kpt_data, ""))
+                track_data, frame_uses_instance_id = resolve_frame_track_data(
+                    detections,
+                    keypoint_count=len(self.kpt_names),
+                    per_id_limit=per_id_limit,
+                )
+                include_instance_id = include_instance_id or frame_uses_instance_id
 
                 for track_id, kpt_data, remapped_id in track_data:
-                    row = [f"track_{track_id}", frame_num, 0.9]
+                    row = {
+                        "track": f"track_{track_id}",
+                        "frame_idx": frame_num,
+                        "instance.score": 0.9,
+                    }
                     for kp in range(len(self.kpt_names)):
                         x, y, conf = kpt_data[kp*3:kp*3+3]
-                        row.extend([x, y, conf])
-                    if has_instance_id:
-                        row.append(remapped_id)
+                        kp_name = self.kpt_names[kp]
+                        row[f"{kp_name}.x"] = x
+                        row[f"{kp_name}.y"] = y
+                        row[f"{kp_name}.score"] = conf
+                    if remapped_id is not None:
+                        row["instance.id"] = remapped_id
                     rows.append(row)
 
             columns = ["track", "frame_idx", "instance.score"]
             for name in self.kpt_names:
                 columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
-            if has_instance_id:
+            if include_instance_id:
                 columns.append("instance.id")
 
             df = pd.DataFrame(rows, columns=columns)
@@ -401,94 +360,50 @@ class TxtToCsvDialog(QDialog):
             all_txts = sorted(self.video_to_txts.get(video_name, []), key=lambda x: extract_frame_number(os.path.basename(x)))
 
             rows = []
-            has_instance_id = False
             per_id_limit = (
                 self.current_project.get_max_instances_per_id()
                 if self.current_project is not None and hasattr(self.current_project, "get_max_instances_per_id")
                 else 1
             )
+            include_instance_id = per_id_limit > 1
 
             for idx, txt_path in enumerate(all_txts):
                 with open(txt_path, "r") as f:
                     lines = f.readlines()
 
-                detections = []  # list of tuples: (track_id, remapped_id, kpt_data)
-                for line in lines:
-                    items = line.strip().split()
-                    if len(items) < 6:
-                        continue
-                    track_id = int(items[0])
-                    raw = items[5:]
-
-                    if len(raw) % 3 == 1:
-                        try:
-                            instance_id = int(raw[-1])
-                            kpt_data = list(map(float, raw[:-1]))
-                            has_instance_id = True
-                        except:
-                            continue
-                    else:
-                        instance_id = None
-                        kpt_data = list(map(float, raw))
-
-                    remapped_id = instance_id if instance_id is not None else ""
-                    detections.append((track_id, remapped_id, kpt_data))
+                detections, frame_has_instance_id = parse_txt_pose_detections(lines)
+                include_instance_id = include_instance_id or frame_has_instance_id
                 # Use actual frame number from filename instead of sequential index
                 frame_num = extract_frame_number(os.path.basename(txt_path))
                 if frame_num < 0:
                     frame_num = idx + 1
 
-                track_data = []
-                if has_instance_id:
-                    merged_by_key = {}
-                    for track_id, remapped_id, kpt_data in detections:
-                        key = (track_id, remapped_id if remapped_id != "" else None)
-                        if key not in merged_by_key:
-                            merged_by_key[key] = (kpt_data, remapped_id)
-                        else:
-                            prev, rid = merged_by_key[key]
-                            prev_np = np.array(prev)
-                            curr_np = np.array(kpt_data)
-                            for kp in range(len(self.kpt_names)):
-                                if curr_np[kp * 3 + 2] > prev_np[kp * 3 + 2]:
-                                    prev_np[kp * 3:kp * 3 + 3] = curr_np[kp * 3:kp * 3 + 3]
-                            merged_by_key[key] = (prev_np.tolist(), rid)
-                    track_data = [
-                        (track_id, kpt_data, remapped_id)
-                        for (track_id, _), (kpt_data, remapped_id) in merged_by_key.items()
-                    ]
-                elif per_id_limit > 1:
-                    counts_by_track = {}
-                    for track_id, _remapped_id, kpt_data in detections:
-                        next_slot = counts_by_track.get(track_id, 0) + 1
-                        if next_slot > per_id_limit:
-                            continue
-                        counts_by_track[track_id] = next_slot
-                        track_data.append((track_id, kpt_data, next_slot))
-                    has_instance_id = has_instance_id or bool(track_data)
-                else:
-                    seen_tracks = set()
-                    for track_id, _remapped_id, kpt_data in detections:
-                        if track_id in seen_tracks:
-                            continue
-                        seen_tracks.add(track_id)
-                        track_data.append((track_id, kpt_data, ""))
+                track_data, frame_uses_instance_id = resolve_frame_track_data(
+                    detections,
+                    keypoint_count=len(self.kpt_names),
+                    per_id_limit=per_id_limit,
+                )
+                include_instance_id = include_instance_id or frame_uses_instance_id
 
                 for track_id, kpt_data, remapped_id in track_data:
-                    row = [f"track_{track_id}", frame_num, 0.9]
+                    row = {
+                        "track": f"track_{track_id}",
+                        "frame_idx": frame_num,
+                        "instance.score": 0.9,
+                    }
                     for kp in range(len(self.kpt_names)):
-                        x = kpt_data[kp*3] * width
-                        y = kpt_data[kp*3+1] * height
-                        conf = kpt_data[kp*3+2]
-                        row.extend([x, y, conf])
-                    if has_instance_id:
-                        row.append(remapped_id)
+                        kp_name = self.kpt_names[kp]
+                        row[f"{kp_name}.x"] = kpt_data[kp * 3] * width
+                        row[f"{kp_name}.y"] = kpt_data[kp * 3 + 1] * height
+                        row[f"{kp_name}.score"] = kpt_data[kp * 3 + 2]
+                    if remapped_id is not None:
+                        row["instance.id"] = remapped_id
                     rows.append(row)
 
             columns = ["track", "frame_idx", "instance.score"]
             for name in self.kpt_names:
                 columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
-            if has_instance_id:
+            if include_instance_id:
                 columns.append("instance.id")
 
             df = pd.DataFrame(rows, columns=columns)

@@ -17,6 +17,7 @@ from typing import Optional, Union
 from utils.csv_interpolation import interpolate_pose_csv
 from utils.skeleton.skeleton_model import SkeletonModel
 from utils.ui_theme import build_list_widget_stylesheet
+from utils.txt_conversion import parse_txt_pose_detections, resolve_frame_track_data
 
 class BrowseOnlyLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -1382,78 +1383,26 @@ class YoloInferenceDialog(QDialog):
             return None
 
         rows = []
-        has_instance_id = False
         per_id_limit = self.current_project.get_max_instances_per_id()
+        include_instance_id = per_id_limit > 1
 
         for idx, txt_path in enumerate(txt_files):
             with txt_path.open("r", encoding="utf-8") as f:
                 lines = f.readlines()
 
-            detections = []
-            for line in lines:
-                items = line.strip().split()
-                if len(items) < 6:
-                    continue
-                try:
-                    track_id = int(float(items[0]))
-                except Exception:
-                    continue
-                raw = items[5:]
-
-                if len(raw) % 3 == 1:
-                    try:
-                        instance_id = int(float(raw[-1]))
-                        kpt_data = list(map(float, raw[:-1]))
-                        has_instance_id = True
-                    except Exception:
-                        continue
-                else:
-                    instance_id = None
-                    try:
-                        kpt_data = list(map(float, raw))
-                    except Exception:
-                        continue
-
-                remapped_id = instance_id if instance_id is not None else ""
-                detections.append((track_id, remapped_id, kpt_data))
+            detections, frame_has_instance_id = parse_txt_pose_detections(lines)
+            include_instance_id = include_instance_id or frame_has_instance_id
 
             frame_num = self._extract_frame_number(txt_path.name)
             if frame_num < 0:
                 frame_num = idx + 1
 
-            track_data = []
-            if has_instance_id:
-                merged_by_key = {}
-                for track_id, remapped_id, kpt_data in detections:
-                    key = (track_id, remapped_id if remapped_id != "" else None)
-                    if key not in merged_by_key:
-                        merged_by_key[key] = (kpt_data, remapped_id)
-                        continue
-                    prev, rid = merged_by_key[key]
-                    for kp in range(min(len(kpt_names), len(prev) // 3, len(kpt_data) // 3)):
-                        if kpt_data[kp * 3 + 2] > prev[kp * 3 + 2]:
-                            prev[kp * 3:kp * 3 + 3] = kpt_data[kp * 3:kp * 3 + 3]
-                    merged_by_key[key] = (prev, rid)
-                track_data = [
-                    (track_id, kpt_data, remapped_id)
-                    for (track_id, _), (kpt_data, remapped_id) in merged_by_key.items()
-                ]
-            elif per_id_limit > 1:
-                counts_by_track: dict[int, int] = {}
-                for track_id, _remapped_id, kpt_data in detections:
-                    next_slot = counts_by_track.get(track_id, 0) + 1
-                    if next_slot > per_id_limit:
-                        continue
-                    counts_by_track[track_id] = next_slot
-                    track_data.append((track_id, kpt_data, next_slot))
-                has_instance_id = has_instance_id or bool(track_data)
-            else:
-                seen_tracks: set[int] = set()
-                for track_id, _remapped_id, kpt_data in detections:
-                    if track_id in seen_tracks:
-                        continue
-                    seen_tracks.add(track_id)
-                    track_data.append((track_id, kpt_data, ""))
+            track_data, frame_uses_instance_id = resolve_frame_track_data(
+                detections,
+                keypoint_count=len(kpt_names),
+                per_id_limit=per_id_limit,
+            )
+            include_instance_id = include_instance_id or frame_uses_instance_id
 
             for track_id, kpt_data, remapped_id in track_data:
                 track_name = (
@@ -1461,16 +1410,23 @@ class YoloInferenceDialog(QDialog):
                     if 0 <= track_id < len(self.animals_name)
                     else f"track_{track_id}"
                 )
-                row = [track_name, frame_num, 0.9]
+                row = {
+                    "track": track_name,
+                    "frame_idx": frame_num,
+                    "instance.score": 0.9,
+                }
                 for kp in range(len(kpt_names)):
                     base = kp * 3
                     if base + 2 < len(kpt_data):
                         x, y, conf = kpt_data[base:base + 3]
                     else:
                         x, y, conf = 0.0, 0.0, 0.0
-                    row.extend([x, y, conf])
-                if has_instance_id:
-                    row.append(remapped_id)
+                    kp_name = kpt_names[kp]
+                    row[f"{kp_name}.x"] = x
+                    row[f"{kp_name}.y"] = y
+                    row[f"{kp_name}.score"] = conf
+                if remapped_id is not None:
+                    row["instance.id"] = remapped_id
                 rows.append(row)
 
         if not rows:
@@ -1479,7 +1435,7 @@ class YoloInferenceDialog(QDialog):
         columns = ["track", "frame_idx", "instance.score"]
         for name in kpt_names:
             columns += [f"{name}.x", f"{name}.y", f"{name}.score"]
-        if has_instance_id:
+        if include_instance_id:
             columns.append("instance.id")
 
         df = pd.DataFrame(rows, columns=columns)

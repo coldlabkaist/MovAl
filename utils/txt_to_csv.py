@@ -39,7 +39,7 @@ class TxtToCsvDialog(QDialog):
         txt_btn.clicked.connect(self.load_txt_folders)
         main_layout.addWidget(txt_btn)
 
-        yaml_btn = QPushButton("Load Keypoints from YAML (Optional)")
+        yaml_btn = QPushButton("Load Keypoints from YAML (Optional, skeleton/(you_skeleton).yaml)")
         yaml_btn.clicked.connect(self.load_yaml)
         main_layout.addWidget(yaml_btn)
 

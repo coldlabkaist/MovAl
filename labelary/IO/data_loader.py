@@ -456,7 +456,19 @@ class DataLoader:
 
     @classmethod
     def get_base_track(cls, key: str) -> str:
+        # Backward-compatible alias for older controller/delete paths.
         return cls.get_base_track_name(key)
+
+    @classmethod
+    def resolve_base_track_name(cls, key: str) -> str:
+        """
+        Resolve the visible/base track name without depending on optional aliases.
+        This keeps delete/rename flows safe even if older code paths still refer
+        to `get_base_track()` while newer code uses `get_base_track_name()`.
+        """
+        if hasattr(cls, "get_base_track_name"):
+            return cls.get_base_track_name(key)
+        return cls.split_instance_key(key)[0]
 
     @classmethod
     def get_instance_id_from_key(cls, key: str) -> Optional[int]:
@@ -1001,7 +1013,7 @@ class DataLoader:
             print(f"DeleteInstance: nothing to delete ({track}@{frame_idx})")
             return False
 
-        base_track = cls.get_base_track_name(track)
+        base_track = cls.resolve_base_track_name(track)
         cls.loaded_data = cls.loaded_data.drop(index=row_index).reset_index(drop=True)
         if not cls.loaded_data.empty:
             cls._compact_instance_ids_inplace(
@@ -1012,8 +1024,13 @@ class DataLoader:
         return True
 
     @classmethod
-    def load_csv_data(cls, file_path: Union[str, Path]) -> bool:
+    def load_csv_data(
+        cls,
+        file_path: Union[str, Path],
+        inference_mode: bool = False,
+    ) -> bool:
         cls._ensure_skeleton()
+        cls._inference_mode = inference_mode
         return cls._load_generic(file_path, read_func=pd.read_csv)
 
     @classmethod

@@ -24,6 +24,9 @@ import pandas as pd
 import sys
 
 VIDEO_NAME_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+LABEL_ACTION_LOAD_INFERENCE_TXT = "action:load_inference_txt"
+LABEL_ACTION_LOAD_INFERENCE_CSV = "action:load_inference_csv"
+LABEL_ACTION_CREATE_NEW = "action:create_new_label"
 
 
 class MiniTrainingLogDialog(QDialog):
@@ -555,8 +558,9 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         for txt_path in file_entry.txt:
             p = Path(txt_path)
             self.label_combo.addItem(p.name, p)
-        self.label_combo.addItem("Load inference result", "Load inference result")
-        self.label_combo.addItem("Create new label", "Create new label")
+        self.label_combo.addItem("Load inference TXT result", LABEL_ACTION_LOAD_INFERENCE_TXT)
+        self.label_combo.addItem("Load inference CSV result", LABEL_ACTION_LOAD_INFERENCE_CSV)
+        self.label_combo.addItem("Create new label", LABEL_ACTION_CREATE_NEW)
 
         if set_text:
             target_stem = Path(set_text).stem
@@ -597,27 +601,42 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             return
         self.skeleton_video_viewer.video_loaded = True
 
-        label_name = self.label_combo.currentText()
-        if label_name == "Create new label":
+        label_action = self.label_combo.currentData(Qt.ItemDataRole.UserRole)
+        if label_action == LABEL_ACTION_CREATE_NEW:
             self.create_new_label()
-        elif label_name == "Load inference result":
+            self._apply_loaded_label_delay(inference_mode=False)
+        elif label_action == LABEL_ACTION_LOAD_INFERENCE_TXT:
             dir_path = QFileDialog.getExistingDirectory(
                 self,
-                "Select inference result directory",
+                "Select inference TXT result directory",
                 str(Path(self.project.project_dir)/"predicts")
             )
             if not dir_path:
                 return
             if not Path(dir_path).exists():
                 return
-            self.load_txt(dir_path)
+            if not self.load_txt(dir_path, inference_mode=True):
+                return
+        elif label_action == LABEL_ACTION_LOAD_INFERENCE_CSV:
+            csv_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select inference CSV result",
+                str(Path(self.project.project_dir) / "predicts"),
+                "CSV Files (*.csv)",
+            )
+            if not csv_path:
+                return
+            if not Path(csv_path).exists():
+                return
+            if not self.load_csv(csv_path, inference_mode=True):
+                return
         else:
             label_path = Path(self.label_combo.currentData(Qt.ItemDataRole.UserRole))
             if label_path.is_dir():
-                if not self.load_txt(label_path):
+                if not self.load_txt(label_path, inference_mode=False):
                     return
             elif label_path.suffix.lower() == ".csv":
-                if not self.load_csv(label_path):
+                if not self.load_csv(label_path, inference_mode=False):
                     return
             else:
                 QMessageBox.warning(
@@ -635,21 +654,30 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.auto_label_current_frame()
         self._persist_ui_state(include_frame=True)
 
-    def load_csv(self, path):
-        loaded = DataLoader.load_csv_data(path)
+    def _apply_loaded_label_delay(self, *, inference_mode: bool) -> None:
+        delay_value = -1 if inference_mode else 0
+        self.skeleton_delay_spin.blockSignals(True)
+        self.skeleton_delay_spin.setValue(delay_value)
+        self.skeleton_delay_spin.blockSignals(False)
+
+    def load_csv(self, path, *, inference_mode: bool = False):
+        loaded = DataLoader.load_csv_data(path, inference_mode=inference_mode)
         if not loaded:
             DataLoader.loaded_data = None
             self.skeleton_video_viewer.setCSVPoints({})
             self.kpt_list.clear()
+            return loaded
+        self._apply_loaded_label_delay(inference_mode=inference_mode)
         return loaded
 
-    def load_txt(self, path):
-        inference_mode = self.label_combo.currentText() == "Load inference result"
+    def load_txt(self, path, *, inference_mode: bool = False):
         loaded = DataLoader.load_txt_data(path, inference_mode=inference_mode)
         if not loaded:
             DataLoader.loaded_data = None
             self.skeleton_video_viewer.setCSVPoints({})
             self.kpt_list.clear()
+            return loaded
+        self._apply_loaded_label_delay(inference_mode=inference_mode)
         return loaded
 
     def create_new_label(self):

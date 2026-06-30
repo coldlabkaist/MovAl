@@ -39,7 +39,7 @@ class TxtToCsvDialog(QDialog):
         txt_btn.clicked.connect(self.load_txt_folders)
         main_layout.addWidget(txt_btn)
 
-        yaml_btn = QPushButton("Load Keypoints from YAML (Optional, skeleton/(you_skeleton).yaml)")
+        yaml_btn = QPushButton("Load Keypoints from YAML (Optional / from skeleton/(you_skeleton).yaml)")
         yaml_btn.clicked.connect(self.load_yaml)
         main_layout.addWidget(yaml_btn)
 
@@ -180,7 +180,6 @@ class TxtToCsvDialog(QDialog):
         dialog = QFileDialog(self, "Select TXT Folders")
         dialog.setFileMode(QFileDialog.FileMode.Directory)
         dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
-        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
         for view in dialog.findChildren(QListView) + dialog.findChildren(QTreeView):
             view.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
 

@@ -48,6 +48,62 @@ DISABLED_COMBOBOX_STYLESHEET = (
     "QComboBox:disabled { color: #8a8f98; background-color: #eceff3; border-color: #c6ccd6; }"
 )
 
+_MODEL_LOAD_FAILURE_MARKERS = (
+    "pytorchstreamreader failed reading zip archive",
+    "failed finding central directory",
+    "pickle data was truncated",
+    "unexpected eof",
+    "invalid load key",
+    "is not a valid yolo model",
+    "not a valid yolo model",
+)
+
+
+def _extract_command_arg(command, key):
+    prefix = f"{key}="
+    for part in command or []:
+        text = str(part)
+        if text.startswith(prefix):
+            return text[len(prefix):]
+    return ""
+
+
+def _tail_text(text, max_lines=12):
+    lines = [line for line in str(text or "").splitlines() if line.strip()]
+    return "\n".join(lines[-max_lines:])
+
+
+def _looks_like_model_load_failure(output_text):
+    lowered = str(output_text or "").lower()
+    return any(marker in lowered for marker in _MODEL_LOAD_FAILURE_MARKERS)
+
+
+def _format_yolo_failure_message(command, output_text, exit_code):
+    model_path = _extract_command_arg(command, "model")
+    details = _tail_text(output_text)
+
+    if _looks_like_model_load_failure(output_text):
+        lines = [
+            "YOLO가 선택한 모델 파일을 불러오지 못했습니다.",
+            "",
+            "모델 파일이 손상되었거나, 복사/다운로드가 완료되지 않았거나, 올바른 .pt 파일이 아닐 수 있습니다.",
+            "모델을 재검토한 뒤 다시 선택해 주세요.",
+        ]
+    else:
+        lines = [
+            "YOLO 실행이 실패했습니다.",
+            "콘솔 로그를 확인한 뒤 설정과 입력 파일을 다시 확인해 주세요.",
+        ]
+
+    if model_path:
+        lines.extend(["", f"Model: {model_path}"])
+    if exit_code is not None:
+        lines.append(f"Exit code: {exit_code}")
+    if details:
+        lines.extend(["", "Details:", details])
+    return "\n".join(lines)
+
+
 class YOLODialog(QDialog):
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
@@ -337,7 +393,12 @@ class YOLODialog(QDialog):
         self._on_pose_task_busy_changed(True, "training")
 
     def _on_train_finished(self):
-        was_stopped = self.train_thread.was_stopped if self.train_thread is not None else False
+        thread = self.train_thread
+        was_stopped = thread.was_stopped if thread is not None else False
+        exit_code = thread.exit_code if thread is not None else None
+        command = thread.command if thread is not None else []
+        output_text = thread.output_text if thread is not None else ""
+
         pose_execution_state.release(owner=self)
         self.train_thread = None
         self._training_running = False
@@ -349,6 +410,13 @@ class YOLODialog(QDialog):
         if was_stopped:
             print("[Training] Stopped.", flush=True)
             QMessageBox.information(self, "Stopped", "Training stopped.")
+        elif exit_code != 0:
+            print("[Training] Failed.", flush=True)
+            QMessageBox.critical(
+                self,
+                "Training failed",
+                _format_yolo_failure_message(command, output_text, exit_code),
+            )
         else:
             print("[Training] Completed.", flush=True)
             QMessageBox.information(self, "Done", "Training Completed")
@@ -1216,6 +1284,28 @@ class YoloInferenceDialog(QDialog):
             self.command_queue.clear()
             self.current_run_item = None
             self._finish_inference_run(success=False, cancelled=True)
+            return
+
+        exit_code = thread.exit_code if thread is not None else None
+        if exit_code != 0:
+            command = thread.command if thread is not None else []
+            output_text = thread.output_text if thread is not None else ""
+            run_item = self.current_run_item or {}
+            source_name = run_item.get("source_name", "")
+            print("[Inference] Failed.", flush=True)
+            self.command_queue.clear()
+            self.current_run_item = None
+            pose_execution_state.update_progress(
+                self._completed_commands,
+                self._total_commands,
+                f"Inference failed: {source_name}" if source_name else "Inference failed",
+            )
+            self._finish_inference_run(success=False)
+            QMessageBox.critical(
+                self,
+                "Inference failed",
+                _format_yolo_failure_message(command, output_text, exit_code),
+            )
             return
 
         run_item = self.current_run_item or {}

@@ -51,6 +51,16 @@ def _iter_clean_lines(stream):
             continue
         yield _sanitize_console_text(_decode_console_bytes(raw_line)).rstrip("\n")
 
+
+_OUTPUT_TAIL_LIMIT = 200
+
+
+def _append_output_tail(lines, line) -> None:
+    lines.append(line)
+    if len(lines) > _OUTPUT_TAIL_LIMIT:
+        del lines[: len(lines) - _OUTPUT_TAIL_LIMIT]
+
+
 class TrainThread(QThread):
     finished_signal = pyqtSignal()
     log_signal = pyqtSignal(str)
@@ -61,6 +71,11 @@ class TrainThread(QThread):
         self._process = None
         self._stop_requested = False
         self.exit_code = None
+        self.output_lines = []
+
+    @property
+    def output_text(self) -> str:
+        return "\n".join(self.output_lines)
 
     @property
     def was_stopped(self) -> bool:
@@ -85,6 +100,7 @@ class TrainThread(QThread):
     def run(self):
         cmd_list = _to_cmd_list(self.command)
         env = _make_env()
+        self.output_lines.clear()
 
         process = None
         rc = None
@@ -102,6 +118,7 @@ class TrainThread(QThread):
 
             for line in _iter_clean_lines(process.stdout):
                 if line:
+                    _append_output_tail(self.output_lines, line)
                     sys.stdout.write(f"{line}\n")
                     sys.stdout.flush()
                     self.log_signal.emit(line)
@@ -112,6 +129,7 @@ class TrainThread(QThread):
 
             if rc != 0 and not self._stop_requested:
                 message = f"[TrainThread] YOLO exited with code {rc}"
+                _append_output_tail(self.output_lines, message)
                 sys.stderr.write(f"\n{message}\n")
                 sys.stderr.flush()
                 self.log_signal.emit(message)
@@ -128,6 +146,11 @@ class InferenceThread(QThread):
         self._process = None
         self._stop_requested = False
         self.exit_code = None
+        self.output_lines = []
+
+    @property
+    def output_text(self) -> str:
+        return "\n".join(self.output_lines)
 
     @property
     def was_stopped(self) -> bool:
@@ -152,6 +175,7 @@ class InferenceThread(QThread):
     def run(self):
         cmd_list = _to_cmd_list(self.command)
         env = _make_env()
+        self.output_lines.clear()
 
         process = None
         rc = None
@@ -169,11 +193,13 @@ class InferenceThread(QThread):
 
             for line in _iter_clean_lines(process.stdout):
                 if line:
+                    _append_output_tail(self.output_lines, line)
                     sys.stdout.write(f"{line}\n")
                     sys.stdout.flush()
 
             for line in _iter_clean_lines(process.stderr):
                 if line:
+                    _append_output_tail(self.output_lines, line)
                     sys.stderr.write(f"{line}\n")
                     sys.stderr.flush()
 
@@ -183,7 +209,9 @@ class InferenceThread(QThread):
             self.exit_code = rc
 
             if rc != 0 and not self._stop_requested:
-                sys.stderr.write(f"\n[InferenceThread] YOLO exited with code {rc}\n")
+                message = f"[InferenceThread] YOLO exited with code {rc}"
+                _append_output_tail(self.output_lines, message)
+                sys.stderr.write(f"\n{message}\n")
                 sys.stderr.flush()
         finally:
             self._process = None

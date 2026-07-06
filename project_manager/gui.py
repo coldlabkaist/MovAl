@@ -43,7 +43,7 @@ from utils.runtime_locks import (
     try_acquire_project_compression_lock,
 )
 from utils.skeleton import SkeletonModel
-from utils.ui_theme import build_list_widget_stylesheet
+from utils.ui_theme import build_list_widget_stylesheet, get_theme_colors
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,10 +62,11 @@ def _make_separator(parent: QWidget) -> QFrame:
 class _FileListWidget(QListWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._theme_colors = get_theme_colors()
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
-        self.setStyleSheet(build_list_widget_stylesheet())
+        self.setStyleSheet(build_list_widget_stylesheet(self._theme_colors))
 
         delete_action = QAction("Delete\t(Del)", self)
         delete_action.setShortcut("Delete")

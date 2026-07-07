@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -32,49 +33,27 @@ from utils.runtime_locks import is_project_compression_running
 ONLINE_DATASET_ROOT = "online_datasets"
 
 
+@dataclass(frozen=True)
+class DatasetSample:
+    label_path: Path
+    video_path: Path
+    video_name: str
+    frame_idx: int
+    base_name: str
+    image_path: Path | None = None
+
+
 def _raise_if_cancelled(should_cancel) -> None:
     if callable(should_cancel) and should_cancel():
         raise InterruptedError("Operation cancelled by user.")
 
 
 def _resolve_frame_dir(project_dir: Path, video_name: str, frame_type: str) -> Path:
-    if frame_type == "video":
-        return project_dir / "frames" / video_name / "images"
     if frame_type in ("davis", "contour"):
         return project_dir / "frames" / video_name / "visualization" / frame_type
     if frame_type == "images":
         return project_dir / "frames" / video_name / "images"
     raise ValueError(f"Unsupported frame type: {frame_type}")
-
-
-def _extract_video_frames_to_images(video_path: Path, image_dir: Path, *, should_cancel=None) -> int:
-    image_dir.mkdir(parents=True, exist_ok=True)
-
-    cap = cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG)
-    if not cap.isOpened():
-        cap.release()
-        cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Unable to open video for frame extraction: {video_path}")
-
-    frame_idx = 0
-    while True:
-        _raise_if_cancelled(should_cancel)
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            break
-
-        out_path = image_dir / f"{frame_idx:07d}.jpg"
-        if not cv2.imwrite(str(out_path), frame):
-            cap.release()
-            raise RuntimeError(f"Failed to write frame image: {out_path}")
-        frame_idx += 1
-
-    cap.release()
-
-    if frame_idx == 0:
-        raise ValueError(f"No decodable frames found in video: {video_path}")
-    return frame_idx
 
 
 def _count_video_frames(video_path: Path) -> int:
@@ -89,17 +68,38 @@ def _count_video_frames(video_path: Path) -> int:
     return max(0, count)
 
 
-def _collect_label_image_pairs(
+def _open_video_capture(video_path: Path):
+    for backend in (cv2.CAP_FFMPEG, cv2.CAP_ANY):
+        cap = cv2.VideoCapture(str(video_path), backend)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    return None
+
+
+def _write_image_checked(frame, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(output_path), frame):
+        raise RuntimeError(f"Failed to write frame image: {output_path}")
+    try:
+        if not output_path.is_file() or output_path.stat().st_size <= 0:
+            raise RuntimeError(f"Frame image was not written correctly: {output_path}")
+    except OSError as err:
+        raise RuntimeError(f"Unable to verify written frame image: {output_path}") from err
+
+
+def _collect_training_samples(
     current_project,
     selected_entries,
     frame_type: str,
     label_dirs: dict[str, Path] | None = None,
     *,
     should_cancel=None,
-) -> list[tuple[Path, Path, str]]:
+) -> list[DatasetSample]:
     project_dir = Path(current_project.project_dir)
     digit_re = re.compile(r"(\d+)$")
-    pair_list: list[tuple[Path, Path, str]] = []
+    samples: list[DatasetSample] = []
+    missing_images: list[str] = []
     label_dirs = label_dirs or {}
 
     for fe in selected_entries:
@@ -110,9 +110,7 @@ def _collect_label_image_pairs(
         if not label_dir.is_dir():
             continue
 
-        img_dir = _resolve_frame_dir(project_dir, video_name, frame_type)
-        if frame_type == "video" and not any(img_dir.glob("*.jpg")):
-            _extract_video_frames_to_images(video_path, img_dir, should_cancel=should_cancel)
+        img_dir = None if frame_type == "video" else _resolve_frame_dir(project_dir, video_name, frame_type)
 
         for lbl_file in sorted(label_dir.glob("*.txt")):
             _raise_if_cancelled(should_cancel)
@@ -122,15 +120,122 @@ def _collect_label_image_pairs(
 
             orig_num_str = match.group(1)
             frame_idx = int(orig_num_str)
-            frame_num = f"{frame_idx:07d}"
             base_name = f"{video_name}_{frame_idx:0{len(orig_num_str)}d}"
-            img_path = img_dir / f"{frame_num}.jpg"
-            if not img_path.exists():
+
+            if frame_type == "video":
+                samples.append(
+                    DatasetSample(
+                        label_path=lbl_file,
+                        video_path=video_path,
+                        video_name=video_name,
+                        frame_idx=frame_idx,
+                        base_name=base_name,
+                    )
+                )
                 continue
 
-            pair_list.append((lbl_file, img_path, base_name))
+            frame_num = f"{frame_idx:07d}"
+            img_path = img_dir / f"{frame_num}.jpg"
+            if not img_path.exists():
+                missing_images.append(f"{video_name}:{frame_idx} ({img_path})")
+                continue
 
-    return pair_list
+            samples.append(
+                DatasetSample(
+                    label_path=lbl_file,
+                    video_path=video_path,
+                    video_name=video_name,
+                    frame_idx=frame_idx,
+                    base_name=base_name,
+                    image_path=img_path,
+                )
+            )
+
+    if missing_images:
+        preview = "\n".join(missing_images[:20])
+        more = "" if len(missing_images) <= 20 else f"\n... and {len(missing_images) - 20} more"
+        raise FileNotFoundError(f"Missing frame images for labels:\n{preview}{more}")
+
+    return samples
+
+
+def _materialize_image_samples(
+    split_map: dict[str, list[DatasetSample]],
+    dataset_dir: Path,
+    *,
+    progress_callback=None,
+    should_cancel=None,
+) -> None:
+    copied = 0
+    total = sum(len(samples) for samples in split_map.values())
+    for split, samples in split_map.items():
+        img_dst_root = dataset_dir / split / "images"
+        lbl_dst_root = dataset_dir / split / "labels"
+        for sample in samples:
+            _raise_if_cancelled(should_cancel)
+            if sample.image_path is None or not sample.image_path.exists():
+                raise FileNotFoundError(
+                    f"Missing source image for {sample.video_name}:{sample.frame_idx}"
+                )
+            shutil.copy(sample.label_path, lbl_dst_root / f"{sample.base_name}.txt")
+            shutil.copy(sample.image_path, img_dst_root / f"{sample.base_name}{sample.image_path.suffix.lower()}")
+            copied += 1
+            if progress_callback is not None:
+                progress_callback(copied, total, f"Copying {split} split ({copied}/{total})")
+
+
+def _materialize_video_samples(
+    split_map: dict[str, list[DatasetSample]],
+    dataset_dir: Path,
+    *,
+    progress_callback=None,
+    should_cancel=None,
+) -> None:
+    targets_by_video: dict[Path, dict[int, list[tuple[str, DatasetSample]]]] = {}
+    for split, samples in split_map.items():
+        for sample in samples:
+            targets_by_video.setdefault(sample.video_path, {}).setdefault(sample.frame_idx, []).append((split, sample))
+
+    written = 0
+    total = sum(len(samples) for samples in split_map.values())
+    for video_path, targets in targets_by_video.items():
+        _raise_if_cancelled(should_cancel)
+        cap = _open_video_capture(video_path)
+        if cap is None:
+            raise FileNotFoundError(f"Unable to open video for dataset split: {video_path}")
+
+        target_frames = sorted(targets)
+        max_target = target_frames[-1] if target_frames else -1
+        current_idx = 0
+        try:
+            while current_idx <= max_target:
+                _raise_if_cancelled(should_cancel)
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    missing = [idx for idx in target_frames if idx >= current_idx]
+                    preview = ", ".join(str(idx) for idx in missing[:20])
+                    more = "" if len(missing) <= 20 else f", ... and {len(missing) - 20} more"
+                    raise RuntimeError(
+                        f"Video ended or failed before labeled frames could be decoded: "
+                        f"{video_path}\nMissing frame indices: {preview}{more}"
+                    )
+
+                if current_idx in targets:
+                    for split, sample in targets[current_idx]:
+                        img_dst = dataset_dir / split / "images" / f"{sample.base_name}.jpg"
+                        lbl_dst = dataset_dir / split / "labels" / f"{sample.base_name}.txt"
+                        _write_image_checked(frame, img_dst)
+                        shutil.copy(sample.label_path, lbl_dst)
+                        written += 1
+                        if progress_callback is not None:
+                            progress_callback(
+                                written,
+                                total,
+                                f"Writing video frames ({written}/{total})",
+                            )
+                current_idx += 1
+        finally:
+            cap.release()
 
 
 def create_dataset_split(
@@ -149,41 +254,28 @@ def create_dataset_split(
 ) -> dict[str, int]:
     _raise_if_cancelled(should_cancel)
     if progress_callback is not None:
-        progress_callback(0, 0, "Collecting label-image pairs...")
+        progress_callback(0, 0, "Collecting labeled frames...")
 
     dataset_dir = Path(dataset_dir)
-    pair_list = _collect_label_image_pairs(
+    samples = _collect_training_samples(
         current_project,
         selected_entries,
         frame_type,
         label_dirs=label_dirs,
         should_cancel=should_cancel,
     )
-    if not pair_list:
-        raise ValueError("Could not find label-image pair.")
+    if not samples:
+        raise ValueError("Could not find labeled training samples.")
 
-    total_pairs = len(pair_list)
-    if progress_callback is not None:
-        progress_callback(0, total_pairs, "Copying split files...")
-
-    _raise_if_cancelled(should_cancel)
-    if dataset_dir.exists() and clear_existing:
-        shutil.rmtree(dataset_dir)
-
-    for split in ("train", "val", "test"):
-        _raise_if_cancelled(should_cancel)
-        (dataset_dir / split / "images").mkdir(parents=True, exist_ok=True)
-        (dataset_dir / split / "labels").mkdir(parents=True, exist_ok=True)
-
-    shuffled_pairs = list(pair_list)
-    random.Random(seed).shuffle(shuffled_pairs)
-    total = len(shuffled_pairs)
+    shuffled_samples = list(samples)
+    random.Random(seed).shuffle(shuffled_samples)
+    total = len(shuffled_samples)
 
     if total == 1:
         # Ultralytics requires a non-empty validation set. Reuse the only sample.
         split_map = {
-            "train": shuffled_pairs[:],
-            "val": shuffled_pairs[:],
+            "train": shuffled_samples[:],
+            "val": shuffled_samples[:],
             "test": [],
         }
     else:
@@ -211,31 +303,56 @@ def create_dataset_split(
         train_end = train_count
         val_end = train_end + val_count
         split_map = {
-            "train": shuffled_pairs[:train_end],
-            "val": shuffled_pairs[train_end:val_end],
-            "test": shuffled_pairs[val_end:],
+            "train": shuffled_samples[:train_end],
+            "val": shuffled_samples[train_end:val_end],
+            "test": shuffled_samples[val_end:],
         }
 
-    copied_pairs = 0
-    for split, pairs in split_map.items():
-        _raise_if_cancelled(should_cancel)
-        img_dst_root = dataset_dir / split / "images"
-        lbl_dst_root = dataset_dir / split / "labels"
-        for lbl_path, img_path, base in pairs:
+    materialize_total = sum(len(items) for items in split_map.values())
+    if progress_callback is not None:
+        progress_callback(0, materialize_total, "Preparing dataset split files...")
+
+    _raise_if_cancelled(should_cancel)
+    build_dir = dataset_dir.with_name(f"{dataset_dir.name}.building")
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+
+    try:
+        for split in ("train", "val", "test"):
             _raise_if_cancelled(should_cancel)
-            shutil.copy(lbl_path, lbl_dst_root / f"{base}.txt")
-            shutil.copy(img_path, img_dst_root / f"{base}{img_path.suffix.lower()}")
-            copied_pairs += 1
-            if progress_callback is not None:
-                progress_callback(
-                    copied_pairs,
-                    total_pairs,
-                    f"Copying {split} split ({copied_pairs}/{total_pairs})",
-                )
+            (build_dir / split / "images").mkdir(parents=True, exist_ok=True)
+            (build_dir / split / "labels").mkdir(parents=True, exist_ok=True)
+
+        if frame_type == "video":
+            _materialize_video_samples(
+                split_map,
+                build_dir,
+                progress_callback=progress_callback,
+                should_cancel=should_cancel,
+            )
+        else:
+            _materialize_image_samples(
+                split_map,
+                build_dir,
+                progress_callback=progress_callback,
+                should_cancel=should_cancel,
+            )
+
+        _raise_if_cancelled(should_cancel)
+        if dataset_dir.exists():
+            if clear_existing:
+                shutil.rmtree(dataset_dir)
+            else:
+                raise FileExistsError(f"Dataset directory already exists: {dataset_dir}")
+        build_dir.rename(dataset_dir)
+    except Exception:
+        if build_dir.exists():
+            shutil.rmtree(build_dir, ignore_errors=True)
+        raise
 
     if progress_callback is not None:
-        progress_callback(total_pairs, total_pairs, "Dataset split complete")
-    return {split: len(pairs) for split, pairs in split_map.items()}
+        progress_callback(materialize_total, materialize_total, "Dataset split complete")
+    return {split: len(items) for split, items in split_map.items()}
 
 
 def create_online_training_dataset(
@@ -392,11 +509,12 @@ class DataSplitDialog(QDialog):
             video_path = Path(fe.video)
             video_name = fe.name
             frame_type = self.frame_type_combo.currentText()
-            frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_name, frame_type)
             label_dir = Path(current_project.project_dir) / "labels" / video_name / "txt"
-            frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
-            if frame_type == "video" and frame_cnt == 0:
+            if frame_type == "video":
                 frame_cnt = _count_video_frames(video_path)
+            else:
+                frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_name, frame_type)
+                frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
             label_cnt = sum(1 for _ in label_dir.glob("*.txt"))
 
             row_lay = QHBoxLayout()

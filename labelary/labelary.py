@@ -20,6 +20,7 @@ from pose.thread import TrainThread
 from typing import Union, Optional, List
 from datetime import datetime
 from pathlib import Path
+import gc
 import pandas as pd
 import sys
 
@@ -1246,19 +1247,34 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self._refresh_mini_training_button_state()
 
     def _refresh_mini_training_button_state(self):
-        if self._mini_training_is_active():
-            self.mini_training_button.setEnabled(True)
-            self.mini_training_button.setText("Mini Training Log")
-        else:
-            self.mini_training_button.setEnabled(True)
-            self.mini_training_button.setText("Run Mini Training")
-
-        frame_mode = self.video_loader.frame_display_mode if getattr(self.skeleton_video_viewer, "video_loaded", False) else self.mode_combo.currentText()
-        self.mini_training_button.setToolTip(
-            "Export current in-memory labels to a timestamped snapshot under runs/, "
-            "build a separate online dataset, run short fine-tuning, and hot-load the resulting best.pt "
-            f"using the current frame mode '{frame_mode}'."
+        setup_running = (
+            self.mini_training_setup_worker is not None
+            and self.mini_training_setup_worker.isRunning()
         )
+        train_running = (
+            self.mini_training_thread is not None
+            and self.mini_training_thread.isRunning()
+        )
+        frame_mode = self.video_loader.frame_display_mode if getattr(self.skeleton_video_viewer, "video_loaded", False) else self.mode_combo.currentText()
+
+        self.mini_training_button.setEnabled(True)
+        if setup_running:
+            self.mini_training_button.setText("Preparing Mini Training...")
+            self.mini_training_button.setToolTip(
+                "Mini training setup is running. Click to reopen the log window."
+            )
+        elif train_running:
+            self.mini_training_button.setText("Show Mini Training Log")
+            self.mini_training_button.setToolTip(
+                "Mini training is running. Click to reopen the log window; this will not start another training job."
+            )
+        else:
+            self.mini_training_button.setText("Run Mini Training")
+            self.mini_training_button.setToolTip(
+                "Export current in-memory labels to a timestamped snapshot under runs/, "
+                "build a separate online dataset, run short fine-tuning, and hot-load the resulting best.pt "
+                f"using the current frame mode '{frame_mode}'."
+            )
 
     def _mini_training_is_active(self) -> bool:
         setup_running = (
@@ -1270,6 +1286,65 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             and self.mini_training_thread.isRunning()
         )
         return setup_running or train_running
+
+    def _release_auto_label_model_for_mini_training(self) -> None:
+        if self.auto_label_model is None:
+            return
+        self.auto_label_model = None
+        self.auto_label_model_path = None
+        self.auto_label_model_mode = None
+        self.automatic_label_checkbox.blockSignals(True)
+        self.automatic_label_checkbox.setChecked(False)
+        self.automatic_label_checkbox.blockSignals(False)
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        self._refresh_model_button_state()
+
+    def _confirm_release_auto_label_model_for_mini_training(self) -> Optional[bool]:
+        if self.auto_label_model is None:
+            return False
+
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Free GPU memory?")
+        msg_box.setText(
+            "A YOLO model is currently loaded for automatic labeling.\n\n"
+            "Mini training needs GPU memory. Keeping the model loaded may cause "
+            "training to fail with CUDA out-of-memory.\n\n"
+            "Choose how to continue."
+        )
+        unload_button = msg_box.addButton("Unload Model and Train", QMessageBox.ButtonRole.AcceptRole)
+        keep_button = msg_box.addButton("Keep Model Loaded", QMessageBox.ButtonRole.ActionRole)
+        cancel_button = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg_box.setDefaultButton(unload_button)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == unload_button:
+            return True
+        if clicked == keep_button:
+            return False
+        if clicked == cancel_button:
+            return None
+        return None
+
+    def _mini_training_failed_from_oom(self, output_text: str) -> bool:
+        text = (output_text or "").lower()
+        oom_markers = (
+            "cuda out of memory",
+            "torch.cuda.outofmemoryerror",
+            "outofmemoryerror",
+            "cublas_status_alloc_failed",
+            "cudnn_status_alloc_failed",
+            "failed to allocate",
+            "not enough memory",
+        )
+        return any(marker in text for marker in oom_markers)
 
     def _ensure_mini_training_log_dialog(self) -> MiniTrainingLogDialog:
         if self.mini_training_log_dialog is None:
@@ -1386,6 +1461,9 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             current_video_name = self._current_video_name()
             if not current_video_name:
                 raise ValueError("Current project video name is not available.")
+            release_auto_label_model = self._confirm_release_auto_label_model_for_mini_training()
+            if release_auto_label_model is None:
+                return
             run_stamp = datetime.now().strftime("%y%m%d_%H%M%S")
             frame_mode = self._current_frame_mode()
             snapshot_df = self._snapshot_loaded_labels_dataframe()
@@ -1400,6 +1478,8 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             "frame_mode": frame_mode,
             "current_video_name": current_video_name,
             "run_stamp": run_stamp,
+            "release_auto_label_model": bool(release_auto_label_model),
+            "kept_auto_label_model": bool(self.auto_label_model is not None and not release_auto_label_model),
         }
 
         dialog = self._ensure_mini_training_log_dialog()
@@ -1471,8 +1551,17 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             f"epochs={requested_epochs}",
             f"project={(Path(self.project.project_dir) / 'runs').as_posix()}",
             f"name={run_name}",
+            "batch=1",
+            "cache=False",
+            "workers=0",
             "exist_ok=False",
         ]
+
+        if base_context.get("release_auto_label_model") and self.auto_label_model is not None:
+            self._append_mini_training_log("Auto-label model was unloaded to free GPU memory before training.")
+            self._release_auto_label_model_for_mini_training()
+        elif base_context.get("kept_auto_label_model"):
+            self._append_mini_training_log("Auto-label model remains loaded during mini training by user choice.")
 
         self._append_mini_training_log("Starting YOLO mini training...")
         self._append_mini_training_log("Command: " + " ".join(command))
@@ -1561,14 +1650,41 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             return
 
         if exit_code not in (None, 0):
-            dialog.set_status("Mini training failed.")
-            self._append_mini_training_log(f"Training failed with exit code {exit_code}.")
-            self._show_mini_training_log_dialog()
-            QMessageBox.critical(
-                self,
-                "Mini training failed",
-                f"YOLO training exited with code {exit_code}.\n\nCheck the mini training log for details.",
-            )
+            output_text = "" if thread is None else thread.output_text
+            oom_failed = self._mini_training_failed_from_oom(output_text)
+            if oom_failed:
+                kept_model_loaded = bool(context.get("kept_auto_label_model"))
+                extra_note = (
+                    "\n\nYou chose to keep the auto-label model loaded, which may have contributed "
+                    "to GPU memory pressure. Try again with 'Unload Model and Train' selected."
+                    if kept_model_loaded
+                    else ""
+                )
+                dialog.set_status("Mini training failed: insufficient GPU memory.")
+                self._append_mini_training_log(
+                    "Training failed because GPU memory was exhausted even with batch=1, cache=False, and workers=0."
+                )
+                self._show_mini_training_log_dialog()
+                QMessageBox.critical(
+                    self,
+                    "GPU memory is insufficient",
+                    "Mini training could not run on the current GPU memory budget.\n\n"
+                    "MovAl used a conservative mini-training configuration "
+                    "(batch=1, cache=False, workers=0)."
+                    f"{extra_note}\n\n"
+                    "This GPU is not suitable for mini training with the current model/data settings. "
+                    "Use a GPU with more VRAM, a smaller model, or fewer/lower-resolution training frames.",
+                )
+            else:
+                dialog.set_status("Mini training failed.")
+                self._append_mini_training_log(f"Training failed with exit code {exit_code}.")
+                self._show_mini_training_log_dialog()
+                QMessageBox.critical(
+                    self,
+                    "Mini training failed",
+                    f"YOLO training exited with code {exit_code}.\n\n"
+                    "Check the mini training log for details.",
+                )
             self.mini_training_run_context = None
             return
 

@@ -421,6 +421,40 @@ class DataLoader:
         return cls.loaded_data[cls.loaded_data["frame_idx"] == int(frame_idx)].copy()
 
     @classmethod
+    def snapshot_frame(cls, frame_idx: int) -> pd.DataFrame:
+        return cls._frame_df(frame_idx).reset_index(drop=True)
+
+    @classmethod
+    def restore_frame(cls, frame_idx: int, frame_df: pd.DataFrame) -> None:
+        if cls.loaded_data is None:
+            cls.loaded_data = frame_df.copy(deep=True).reset_index(drop=True)
+            cls._bump_label_version()
+            return
+
+        frame_idx = int(frame_idx)
+        restored = frame_df.copy(deep=True).reset_index(drop=True)
+        if not restored.empty:
+            restored["frame_idx"] = frame_idx
+
+        remaining = cls.loaded_data[cls.loaded_data["frame_idx"] != frame_idx].copy()
+        columns = list(dict.fromkeys([*remaining.columns, *restored.columns]))
+        remaining = remaining.reindex(columns=columns)
+        restored = restored.reindex(columns=columns)
+
+        if restored.empty:
+            merged = remaining.reset_index(drop=True)
+        elif remaining.empty:
+            merged = restored.reset_index(drop=True)
+        else:
+            merged = pd.concat([remaining, restored], ignore_index=True)
+
+        if merged.empty:
+            cls.loaded_data = merged.reindex(columns=columns).reset_index(drop=True)
+        else:
+            cls.loaded_data = cls._normalize_loaded_df(merged)
+        cls._bump_label_version()
+
+    @classmethod
     def _visible_frame_df(cls, frame_idx: int) -> pd.DataFrame:
         frame_df = cls._frame_df(frame_idx)
         if frame_df.empty:

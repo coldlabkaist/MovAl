@@ -420,7 +420,7 @@ class DataSplitDialog(QDialog):
         layout.addWidget(scroll)
 
         layout.addSpacing(40)
-        self.count_label = QLabel("0 files selected / 0 frames / 0 labels")
+        self.count_label = QLabel("0 files selected / 0 labels")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         count_font = QFont()
         count_font.setPointSize(11)
@@ -511,7 +511,7 @@ class DataSplitDialog(QDialog):
             frame_type = self.frame_type_combo.currentText()
             label_dir = Path(current_project.project_dir) / "labels" / video_name / "txt"
             if frame_type == "video":
-                frame_cnt = _count_video_frames(video_path)
+                frame_cnt = 0
             else:
                 frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_name, frame_type)
                 frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
@@ -526,7 +526,10 @@ class DataSplitDialog(QDialog):
             chk._file_entry = fe
 
             name_lbl = QLabel(video_path.name)
-            count_lbl = QLabel(f"({frame_cnt:,} frames, {label_cnt:,} labels)")
+            if frame_type == "video":
+                count_lbl = QLabel(f"({label_cnt:,} labels)")
+            else:
+                count_lbl = QLabel(f"({frame_cnt:,} frames, {label_cnt:,} labels)")
             count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
             row_lay.addWidget(chk)
@@ -622,6 +625,7 @@ class DataSplitDialog(QDialog):
         total_files = 0
         total_frames = 0
         total_labels = 0
+        frame_type = self.frame_type_combo.currentText()
 
         for i in range(self.files_lay.count() - 1):
             lay = self.files_lay.itemAt(i)
@@ -633,11 +637,17 @@ class DataSplitDialog(QDialog):
                 total_frames += getattr(chk, "_frame_cnt", 0)
                 total_labels += getattr(chk, "_label_cnt", 0)
 
-        self.count_label.setText(
-            f"{total_files} files selected / "
-            f"{total_frames:,} frames / "
-            f"{total_labels:,} labels"
-        )
+        if frame_type == "video":
+            self.count_label.setText(
+                f"{total_files} files selected / "
+                f"{total_labels:,} labels"
+            )
+        else:
+            self.count_label.setText(
+                f"{total_files} files selected / "
+                f"{total_frames:,} frames / "
+                f"{total_labels:,} labels"
+            )
 
     def get_selected_entries(self):
         selected_entries = []

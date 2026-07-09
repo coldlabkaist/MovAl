@@ -4,9 +4,10 @@ from PyQt6.QtCore import QObject, QEvent, QPoint, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent, QWheelEvent, QKeySequence
 from PyQt6.QtWidgets import QMenu
 from ..IO.data_loader import DataLoader
+from .edit_history import DEFAULT_EDIT_HISTORY_LIMIT, FrameEditHistory
 
 class MouseController(QObject):
-    def __init__(self, video_loader, video_viewer, kpt_list, parent=None):
+    def __init__(self, video_loader, video_viewer, kpt_list, parent=None, edit_history_limit=DEFAULT_EDIT_HISTORY_LIMIT):
         super().__init__(parent)
         self.video_loader = video_loader
         self.video_viewer = video_viewer
@@ -33,6 +34,10 @@ class MouseController(QObject):
         self._node_hit_margin_px = 10
         self._instance_handle_thresh = 16
         self._resize_handle_thresh = 12
+        self.edit_history = FrameEditHistory(limit=edit_history_limit)
+        self._pending_edit_frame: int | None = None
+        self._pending_edit_before = None
+        self._history_data_version = getattr(DataLoader, "_label_version", None)
 
     def eventFilter(self, obj, event) -> bool:
         if obj is not self.video_viewer:
@@ -82,6 +87,83 @@ class MouseController(QObject):
             self.video_viewer.setCSVPoints(coords)
             self.kpt_list.update_list_visibility(coords)
         self.video_viewer.update()
+
+    def clear_edit_history_if_frame_changed(self, frame_idx: int | None) -> None:
+        data_version = getattr(DataLoader, "_label_version", None)
+        if data_version != self._history_data_version:
+            self.edit_history.clear()
+            self._history_data_version = data_version
+        self.edit_history.clear_if_frame_changed(frame_idx)
+
+    def _begin_frame_edit(self, frame_idx: int | None = None) -> None:
+        if self._pending_edit_before is not None:
+            return
+        if frame_idx is None:
+            frame_idx = self._current_label_frame()
+        if frame_idx is None:
+            return
+        self._pending_edit_frame = int(frame_idx)
+        self._pending_edit_before = DataLoader.snapshot_frame(frame_idx)
+
+    def _finish_frame_edit(self, frame_idx: int | None = None) -> None:
+        if self._pending_edit_before is None:
+            return
+        if frame_idx is None:
+            frame_idx = self._pending_edit_frame
+        if frame_idx is None or frame_idx != self._pending_edit_frame:
+            self._discard_pending_frame_edit()
+            return
+        after = DataLoader.snapshot_frame(frame_idx)
+        self.edit_history.push(frame_idx, self._pending_edit_before, after)
+        self._discard_pending_frame_edit()
+
+    def _discard_pending_frame_edit(self) -> None:
+        self._pending_edit_frame = None
+        self._pending_edit_before = None
+
+    def _is_history_drag_kind(self, kind: str) -> bool:
+        return kind in ("csv", "instance", "rotate_instance", "resize_instance")
+
+    def can_undo_current_frame(self) -> bool:
+        return self.edit_history.can_undo(self._current_label_frame())
+
+    def can_redo_current_frame(self) -> bool:
+        return self.edit_history.can_redo(self._current_label_frame())
+
+    def undo_current_frame_edit(self) -> bool:
+        frame_idx = self._current_label_frame()
+        edit = self.edit_history.pop_undo(frame_idx)
+        if edit is None:
+            return False
+        DataLoader.restore_frame(edit.frame_idx, edit.before)
+        self._history_data_version = getattr(DataLoader, "_label_version", None)
+        self._normalize_selection_after_restore(edit.frame_idx)
+        self._refresh_visible_overlay()
+        self._sync_list_selection()
+        return True
+
+    def redo_current_frame_edit(self) -> bool:
+        frame_idx = self._current_label_frame()
+        edit = self.edit_history.pop_redo(frame_idx)
+        if edit is None:
+            return False
+        DataLoader.restore_frame(edit.frame_idx, edit.after)
+        self._history_data_version = getattr(DataLoader, "_label_version", None)
+        self._normalize_selection_after_restore(edit.frame_idx)
+        self._refresh_visible_overlay()
+        self._sync_list_selection()
+        return True
+
+    def _normalize_selection_after_restore(self, frame_idx: int) -> None:
+        coords = DataLoader.get_keypoint_coordinates_by_frame(frame_idx)
+        if self.selected_instance not in coords:
+            self.selected_instance = None
+            self.selected_node = None
+            return
+        if self.selected_node is not None:
+            track, kp = self.selected_node
+            if track not in coords or kp not in coords[track]:
+                self.selected_node = None
 
     def _press(self, e: QMouseEvent) -> bool:
         if not self.video_viewer.click_enabled:
@@ -215,6 +297,8 @@ class MouseController(QObject):
 
         elif self.video_viewer.dragging_target:
             kind = self.video_viewer.dragging_target[0]
+            if self._is_history_drag_kind(kind):
+                self._begin_frame_edit()
             if kind == "csv":
                 _, track, kp = self.video_viewer.dragging_target
                 nx = (pos.x() - self.video_viewer.translation.x()) / (act * self.video_viewer.original_pixmap.width())
@@ -269,8 +353,10 @@ class MouseController(QObject):
                     if track in self.video_viewer.csv_points:
                         for kp, (nx, ny, _) in self.video_viewer.csv_points[track].items():
                             DataLoader.update_point(track, frame_idx, kp, nx, ny)
+                if self._is_history_drag_kind(kind):
+                    self._finish_frame_edit(frame_idx)
         except KeyError:
-            pass
+            self._discard_pending_frame_edit()
 
         self._dragging = False
         self.video_viewer.dragging_target = None
@@ -320,6 +406,16 @@ class MouseController(QObject):
         pos = e.pos()
         menu = QMenu(self.video_viewer)
         self._active_menu = menu
+
+        act_undo = menu.addAction("Undo")
+        act_undo.setShortcut(QKeySequence("Ctrl+Z"))
+        act_undo.setShortcutVisibleInContextMenu(True)
+
+        act_redo = menu.addAction("Redo")
+        act_redo.setShortcut(QKeySequence("Ctrl+Shift+Z"))
+        act_redo.setShortcutVisibleInContextMenu(True)
+
+        menu.addSeparator()
 
         act_add = menu.addAction("Add New Instance")
         act_add.setShortcut(QKeySequence("Ctrl+A"))
@@ -388,12 +484,16 @@ class MouseController(QObject):
         current_frame = self._current_label_frame()
         if current_frame is None:
             current_frame = -1
+        act_undo.setEnabled(self.can_undo_current_frame())
+        act_redo.setEnabled(self.can_redo_current_frame())
         act_add.setEnabled(DataLoader.frame_has_capacity_for_new_instance(current_frame))
         act_replace.setEnabled(self.selected_instance is not None)
         act_delete.setEnabled(self.selected_instance is not None)
         act_change_num.setEnabled(self.selected_instance is not None)
         act_vis.setEnabled(self.selected_node is not None)
         
+        act_undo.triggered.connect(self.undo_current_frame_edit)
+        act_redo.triggered.connect(self.redo_current_frame_edit)
         act_add.triggered.connect(lambda: self._add_new_skeleton_label(context_pos=pos))
         act_replace.triggered.connect(lambda: self._replace_selected_instance(context_pos=pos))
         act_delete.triggered.connect(self._delete_selected_instance)

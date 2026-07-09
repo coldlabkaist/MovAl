@@ -492,12 +492,16 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
 
     def refresh_frame_bound_views(self) -> None:
         if not getattr(self.skeleton_video_viewer, "video_loaded", False):
+            if hasattr(self, "mouse_controller"):
+                self.mouse_controller.clear_edit_history_if_frame_changed(None)
             self.skeleton_video_viewer.setCSVPoints({})
             self.kpt_list.clear()
             self.kpt_list.update_list_visibility({})
             return
 
         label_frame = self.resolve_label_frame(self.video_loader.current_frame)
+        if hasattr(self, "mouse_controller"):
+            self.mouse_controller.clear_edit_history_if_frame_changed(label_frame)
         coords_dict = (
             DataLoader.get_keypoint_coordinates_by_frame(label_frame)
             if label_frame is not None

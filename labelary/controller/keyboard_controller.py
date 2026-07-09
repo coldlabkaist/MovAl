@@ -24,6 +24,15 @@ class KeyboardController(QObject):
             if self._is_typing_target_active(obj):
                 return super().eventFilter(obj, event)
             key = event.key()
+            modifiers = event.modifiers()
+            ctrl_pressed = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+            shift_pressed = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+            if key == Qt.Key.Key_Z and ctrl_pressed and shift_pressed:
+                self.mouse_controller.redo_current_frame_edit()
+                return True
+            elif key == Qt.Key.Key_Z and ctrl_pressed:
+                self.mouse_controller.undo_current_frame_edit()
+                return True
             if (
                 key in (Qt.Key.Key_Right, Qt.Key.Key_D)
                 and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)

@@ -145,9 +145,13 @@ def _save_csv(
     if csv_path is None:
         base_dir = Path(project.project_dir) / "labels" / video_name / "csv"
         base_dir.mkdir(parents=True, exist_ok=True)
+        default_name = f"{video_name}_{datetime.now().strftime('%Y%m%d')}"
 
         fname, ok = QInputDialog.getText(
-            parent, "Enter CSV file name", "File name (without extension):"
+            parent,
+            "Enter CSV file name",
+            "File name (without extension):",
+            text=default_name,
         )
         if not ok or not fname.strip():
             return False

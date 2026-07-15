@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .import_tools import auto_sort_import_entries, find_csv_files
 from .skeleton import SkeletonManagerDialog
 from pose.split_state import is_data_split_running
 from pose.task_state import pose_execution_state
@@ -205,14 +206,21 @@ class _CreateProjectTab(QWidget):
 
         self.step3_label = QLabel("<b>Step 3.</b> Load labels (Optional)")
         self.step3_button_csv = QPushButton("Load CSV Files...")
+        self.step3_button_csv_folder = QPushButton("Load CSV from Folder...")
         self.step3_button_txt = QPushButton("Load TXT Folders...")
         self.step3_button_csv.clicked.connect(self._on_select_csv_files)
+        self.step3_button_csv_folder.clicked.connect(self._on_select_csv_folder)
         self.step3_button_txt.clicked.connect(self._on_select_txt_folders)
-        step3_buttons = QHBoxLayout()
-        step3_buttons.addWidget(self.step3_button_csv)
-        step3_buttons.addWidget(self.step3_button_txt)
+        step3_csv_buttons = QHBoxLayout()
+        step3_csv_buttons.addWidget(self.step3_button_csv)
+        step3_csv_buttons.addWidget(self.step3_button_csv_folder)
         left_col.addWidget(self.step3_label)
-        left_col.addLayout(step3_buttons)
+        left_col.addLayout(step3_csv_buttons)
+        left_col.addWidget(self.step3_button_txt)
+        _set_tooltip(
+            self.step3_button_csv_folder,
+            "Add every CSV in the selected folder and all of its subfolders.",
+        )
 
         self.step4_label = QLabel("<b>Step 4.</b> Set skeleton")
         self.step4_combo = QComboBox(self)
@@ -263,12 +271,17 @@ class _CreateProjectTab(QWidget):
         list_buttons.addWidget(self.list_button_sort)
         list_buttons.addWidget(self.list_button_reset)
         right_col.addLayout(list_buttons)
+        _set_tooltip(
+            self.list_button_sort,
+            "Naturally sort video names and place labels below the matching video using filenames and folder names.",
+        )
         self._configure_focus_behavior()
 
     def _configure_focus_behavior(self) -> None:
         no_focus_buttons = [
             self.step2_button,
             self.step3_button_csv,
+            self.step3_button_csv_folder,
             self.step3_button_txt,
             self.step4_button,
             self.list_button_sort,
@@ -337,6 +350,26 @@ class _CreateProjectTab(QWidget):
         if previous_focus is not None and previous_focus is not self:
             previous_focus.setFocus(Qt.FocusReason.OtherFocusReason)
 
+    def _on_select_csv_folder(self) -> None:
+        previous_focus = QApplication.focusWidget()
+        folder = QFileDialog.getExistingDirectory(self, "Select CSV Folder")
+        if folder:
+            try:
+                files = find_csv_files(folder)
+            except OSError as err:
+                QMessageBox.critical(self, "CSV folder scan failed", str(err))
+            else:
+                if files:
+                    self._append_files([str(path) for path in files], "csv")
+                else:
+                    QMessageBox.information(
+                        self,
+                        "No CSV files",
+                        "No CSV files were found in the selected folder or its subfolders.",
+                    )
+        if previous_focus is not None and previous_focus is not self:
+            previous_focus.setFocus(Qt.FocusReason.OtherFocusReason)
+
     def _on_select_txt_folders(self) -> None:
         previous_focus = QApplication.focusWidget()
         while True:
@@ -371,26 +404,32 @@ class _CreateProjectTab(QWidget):
         self._load_skeleton_items(self.step4_combo.currentText())
 
     def _on_list_sort(self) -> None:
-        entries: list[tuple[str, str]] = [
-            (
-                self.file_list.item(index).text(),
-                self.file_list.item(index).data(Qt.ItemDataRole.UserRole),
-            )
-            for index in range(self.file_list.count())
-        ]
-
-        def sort_key(entry: tuple[str, str]) -> tuple[str, int, str]:
-            label, file_type = entry
+        entries: list[tuple[str, str]] = []
+        for index in range(self.file_list.count()):
+            item = self.file_list.item(index)
+            label = item.text()
             path_text = label.split("] ", 1)[1] if "] " in label else label
-            path = Path(path_text)
-            return (path.stem.lower(), 0 if file_type == "vid" else 1, path.suffix.lower())
+            entries.append((path_text, item.data(Qt.ItemDataRole.UserRole)))
 
-        entries.sort(key=sort_key)
+        entries, unmatched = auto_sort_import_entries(entries)
         self.file_list.clear()
-        for label, file_type in entries:
+        for path_text, file_type in entries:
+            label = f"[{file_type}] {path_text}"
             item = QListWidgetItem(label, self.file_list)
             item.setData(Qt.ItemDataRole.UserRole, file_type)
             self.file_list.style_item(item, file_type)
+
+        if unmatched:
+            preview = "\n".join(f"- {Path(path).name}" for path, _ in unmatched[:5])
+            more = f"\n- ... and {len(unmatched) - 5} more" if len(unmatched) > 5 else ""
+            QMessageBox.warning(
+                self,
+                "Some labels need manual placement",
+                f"Could not confidently match {len(unmatched)} label item(s) to a video. "
+                "They were moved above the videos so they cannot be imported into the wrong one. "
+                "Drag each item below its target video before creating the project.\n\n"
+                f"{preview}{more}",
+            )
 
     def _validate_inputs(self) -> tuple[str, list[str], int, str] | None:
         title = self.title_edit.text().strip()
@@ -413,6 +452,12 @@ class _CreateProjectTab(QWidget):
 
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "No files", "Please add at least one video file.")
+            return None
+        if not any(
+            self.file_list.item(index).data(Qt.ItemDataRole.UserRole) == "vid"
+            for index in range(self.file_list.count())
+        ):
+            QMessageBox.warning(self, "No videos", "Please add at least one video file.")
             return None
 
         return title, instance_names, int(self.instance_limit_spin.value()), skeleton_name
@@ -636,10 +681,13 @@ class _ManageProjectTab(QWidget):
         self.csv_video_combo.currentIndexChanged.connect(self.refresh_csv_list)
         csv_row.addWidget(self.csv_video_combo, 1)
         self.add_csv_button = QPushButton("Add CSV")
+        self.add_csv_folder_button = QPushButton("Add CSV Folder")
         self.remove_csv_button = QPushButton("Remove Selected CSVs")
         self.add_csv_button.clicked.connect(self._add_csvs)
+        self.add_csv_folder_button.clicked.connect(self._add_csv_folder)
         self.remove_csv_button.clicked.connect(self._remove_selected_csvs)
         csv_row.addWidget(self.add_csv_button)
+        csv_row.addWidget(self.add_csv_folder_button)
         csv_row.addWidget(self.remove_csv_button)
         csv_panel_layout.addLayout(csv_row)
 
@@ -648,6 +696,10 @@ class _ManageProjectTab(QWidget):
         csv_panel_layout.addWidget(self.csv_list, 1)
         _set_tooltip(self.csv_video_combo, "Choose which video's labels/<video>/csv folder you want to manage.")
         _set_tooltip(self.csv_list, "CSV label files currently stored inside this project.")
+        _set_tooltip(
+            self.add_csv_folder_button,
+            "Import every CSV in a folder and all of its subfolders for the selected video.",
+        )
 
         self.txt_label = QLabel()
         self.txt_label.setWordWrap(True)
@@ -757,6 +809,7 @@ class _ManageProjectTab(QWidget):
             self.compress_button,
             self.csv_video_combo,
             self.add_csv_button,
+            self.add_csv_folder_button,
             self.remove_csv_button,
             self.csv_list,
         ]
@@ -1087,6 +1140,41 @@ class _ManageProjectTab(QWidget):
             "CSV Files (*.csv)",
         )
         if not paths:
+            return
+
+        self._import_csv_paths(video_name, paths)
+
+    def _add_csv_folder(self) -> None:
+        if self.project is None:
+            QMessageBox.warning(self, "No project selected", "Load a project first.")
+            return
+
+        video_name = self.current_video_name()
+        if video_name is None:
+            QMessageBox.warning(self, "No video selected", "Select a video first.")
+            return
+
+        folder = QFileDialog.getExistingDirectory(self, "Add CSV Folder")
+        if not folder:
+            return
+
+        try:
+            paths = find_csv_files(folder)
+        except OSError as err:
+            QMessageBox.critical(self, "CSV folder scan failed", str(err))
+            return
+        if not paths:
+            QMessageBox.information(
+                self,
+                "No CSV files",
+                "No CSV files were found in the selected folder or its subfolders.",
+            )
+            return
+
+        self._import_csv_paths(video_name, paths)
+
+    def _import_csv_paths(self, video_name: str, paths: list[str | Path]) -> None:
+        if self.project is None:
             return
 
         try:

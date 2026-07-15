@@ -1328,6 +1328,7 @@ class TrackMatchDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Track mapping")
         self.comboboxes: dict[str, QComboBox] = {}
+        has_single_mapping = len(tracks) == 1 and len(animal_names) == 1
 
         layout = QVBoxLayout(self)
         for track in tracks:
@@ -1338,6 +1339,8 @@ class TrackMatchDialog(QDialog):
             cb.addItems(animal_names)
             if track in animal_names:
                 cb.setCurrentIndex(animal_names.index(track))
+            elif has_single_mapping:
+                cb.setCurrentIndex(0)
             else:
                 cb.setEditable(True)
                 cb.setPlaceholderText("select name")
@@ -1353,6 +1356,8 @@ class TrackMatchDialog(QDialog):
         cancel_btn = QPushButton("Cancel")
         ok_btn.clicked.connect(self._validate_and_accept)
         cancel_btn.clicked.connect(self.reject)
+        ok_btn.setDefault(True)
+        ok_btn.setAutoDefault(True)
         btn_row.addWidget(ok_btn)
         btn_row.addWidget(cancel_btn)
 
@@ -1363,10 +1368,14 @@ class TrackMatchDialog(QDialog):
         )
         layout.addWidget(note)
         layout.addLayout(btn_row)
+        ok_btn.setFocus()
 
     def _validate_and_accept(self):
         mapping = {track: cb.currentText() for track, cb in self.comboboxes.items()}
         names = list(mapping.values())
+        if any(not name for name in names):
+            QMessageBox.warning(self, "Warning", "Please select a name for every track")
+            return
         if len(names) != len(set(names)):
             QMessageBox.warning(self, "Warning", "Please select without duplication")
             return

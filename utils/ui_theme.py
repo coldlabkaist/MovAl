@@ -92,6 +92,14 @@ def build_app_stylesheet(theme_colors: Mapping[str, str] | None = None) -> str:
         min-height: 20px;
         max-height: 20px;
     }
+    QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+        background: @SURFACE_SOFT@;
+        color: @TEXT_MUTED@;
+        border-color: @BORDER_SOFT@;
+    }
+    QLabel:disabled, QGroupBox:disabled, QCheckBox:disabled, QRadioButton:disabled {
+        color: @TEXT_MUTED@;
+    }
     QComboBox {
         padding-right: 20px;
     }
@@ -180,6 +188,15 @@ def build_app_stylesheet(theme_colors: Mapping[str, str] | None = None) -> str:
         border: 1px solid @ACCENT@;
         border-radius: 7px;
         background: @SURFACE@;
+    }
+    QSlider::groove:horizontal:disabled,
+    QSlider::sub-page:horizontal:disabled,
+    QSlider::add-page:horizontal:disabled {
+        background: @BORDER_SOFT@;
+    }
+    QSlider::handle:horizontal:disabled {
+        border-color: @BORDER@;
+        background: @SURFACE_SOFT@;
     }
     QTabWidget::pane {
         border: 1px solid @BORDER_SOFT@;

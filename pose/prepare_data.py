@@ -249,8 +249,8 @@ def create_dataset_split(
     selected_entries,
     frame_type: str,
     dataset_dir: str | Path,
-    train_ratio: float = 0.7,
-    val_ratio: float = 0.2,
+    train_ratio: float = 0.85,
+    val_ratio: float = 0.10,
     *,
     clear_existing: bool = True,
     seed: int | None = None,
@@ -452,32 +452,34 @@ class DataSplitDialog(QDialog):
 
         self.train_slider = QSlider(Qt.Orientation.Horizontal)
         self.train_slider.setRange(40, 90)
-        self.train_slider.setValue(70)
+        self.train_slider.setValue(85)
         self.train_spin = QSpinBox()
         self.train_spin.setRange(40, 90)
-        self.train_spin.setValue(70)
+        self.train_spin.setValue(85)
         self.train_slider.valueChanged.connect(self.train_spin.setValue)
         self.train_spin.valueChanged.connect(self.train_slider.setValue)
         ratio_layout.addRow("Train %", self.create_slider_spinbox_layout(self.train_slider, self.train_spin))
 
         self.valid_slider = QSlider(Qt.Orientation.Horizontal)
         self.valid_slider.setRange(5, 55)
-        self.valid_slider.setValue(20)
+        self.valid_slider.setValue(10)
         self.valid_spin = QSpinBox()
         self.valid_spin.setRange(5, 55)
-        self.valid_spin.setValue(20)
+        self.valid_spin.setValue(10)
         self.valid_slider.valueChanged.connect(self.valid_spin.setValue)
         self.valid_spin.valueChanged.connect(self.valid_slider.setValue)
         ratio_layout.addRow("Valid %", self.create_slider_spinbox_layout(self.valid_slider, self.valid_spin))
 
         self.test_slider = QSlider(Qt.Orientation.Horizontal)
         self.test_slider.setRange(5, 55)
-        self.test_slider.setValue(10)
+        self.test_slider.setValue(5)
         self.test_spin = QSpinBox()
         self.test_spin.setRange(5, 55)
-        self.test_spin.setValue(10)
+        self.test_spin.setValue(5)
         self.test_slider.valueChanged.connect(self.test_spin.setValue)
         self.test_spin.valueChanged.connect(self.test_slider.setValue)
+        self.test_slider.setToolTip("Calculated automatically from Train and Valid percentages")
+        self.test_spin.setToolTip("Calculated automatically from Train and Valid percentages")
         self.test_slider.setEnabled(False)
         self.test_spin.setEnabled(False)
         ratio_layout.addRow("Test %", self.create_slider_spinbox_layout(self.test_slider, self.test_spin))

@@ -5,8 +5,17 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QAbstractItemView
 )
 from PyQt6.QtCore import Qt
+import cv2
 import os
-from .thread import TrainThread, InferenceThread
+import time
+from .thread import FunctionProgressThread, TrainThread, InferenceThread
+from .progress_parsing import (
+    format_training_metrics,
+    parse_inference_frame,
+    parse_training_epoch,
+    read_training_results,
+)
+from .progress_ui import TaskProgressPanel
 from .task_state import pose_execution_state
 from utils.runtime_locks import is_project_compression_running
 from datetime import datetime
@@ -108,11 +117,15 @@ class YOLODialog(QDialog):
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("YOLO Train Config")
-        self.setFixedSize(1000, 800)
+        self.setMinimumSize(1000, 800)
+        self.resize(1000, 860)
 
         self.current_project = current_project
         self.train_thread = None
         self._training_running = False
+        self._training_total_epochs = 0
+        self._training_run_dir: Optional[Path] = None
+        self._last_results_check = 0.0
 
         main_layout = QVBoxLayout(self)
 
@@ -157,6 +170,9 @@ class YOLODialog(QDialog):
         middle_layout.addLayout(right_layout, 1)
         main_layout.addLayout(middle_layout)
 
+        self.training_progress_panel = TaskProgressPanel(self, show_log=True)
+        main_layout.addWidget(self.training_progress_panel)
+
         self.run_btn = QPushButton("Run Training")
         self.run_btn.setProperty("primary", True)
         self.run_btn.clicked.connect(self._on_run_button_clicked)
@@ -197,6 +213,8 @@ class YOLODialog(QDialog):
         if not self._is_training_running() and active_task != "training":
             return
         print("[Training] Stop requested by user.", flush=True)
+        self.training_progress_panel.set_stopping("Stopping training...")
+        pose_execution_state.update_progress(0, 0, "Stopping training...")
         self.run_btn.setEnabled(False)
         self.run_btn.setText("Stopping training...")
         if self.train_thread is not None:
@@ -363,6 +381,9 @@ class YOLODialog(QDialog):
         ts_time = ts.strftime("%H%M%S")
         params["project"] = os.path.join(self.current_project.project_dir, "runs")
         params["name"]    = f"train_{ts_date}_{ts_time}"
+        self._training_total_epochs = max(1, int(params.get("epochs", 1)))
+        self._training_run_dir = Path(params["project"]) / str(params["name"])
+        self._last_results_check = 0.0
 
         command = ["yolo", "pose", "train"]
         for key, value in params.items():
@@ -384,16 +405,57 @@ class YOLODialog(QDialog):
             )
             return
 
-        pose_execution_state.update_progress(0, 0, "Training running...")
+        pose_execution_state.update_progress(0, self._training_total_epochs, "Training starting...")
+        self.training_progress_panel.reset("Training starting...")
+        self.training_progress_panel.update_progress(
+            0,
+            self._training_total_epochs,
+            "Training starting...",
+            f"Run: {self._training_run_dir.name if self._training_run_dir else ''}",
+        )
         self._training_running = True
         self.train_thread = TrainThread(command)
+        self.train_thread.log_signal.connect(self._on_train_log)
         self.train_thread.finished_signal.connect(self._on_train_finished)
         self._set_training_parameter_controls_enabled(False)
         self.train_thread.start()
         self._on_pose_task_busy_changed(True, "training")
 
+    def _on_train_log(self, line: str) -> None:
+        self.training_progress_panel.append_log(line)
+        parsed_epoch = parse_training_epoch(line, self._training_total_epochs)
+        if parsed_epoch is not None:
+            done, total = parsed_epoch
+            message = f"Training epoch {done}/{total}"
+            self.training_progress_panel.update_progress(done, total, message)
+            pose_execution_state.update_progress(done, total, message)
+        self._refresh_training_results()
+
+    def _refresh_training_results(self, *, force: bool = False) -> None:
+        if self._training_run_dir is None:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_results_check < 0.5:
+            return
+        self._last_results_check = now
+        result = read_training_results(self._training_run_dir / "results.csv")
+        if result is None:
+            return
+        epoch = min(int(result.get("epoch", 0)), self._training_total_epochs)
+        metrics = result.get("metrics", {})
+        detail = format_training_metrics(metrics) if isinstance(metrics, dict) else ""
+        message = f"Training epoch {epoch}/{self._training_total_epochs}"
+        self.training_progress_panel.update_progress(
+            epoch,
+            self._training_total_epochs,
+            message,
+            detail,
+        )
+        pose_execution_state.update_progress(epoch, self._training_total_epochs, message)
+
     def _on_train_finished(self):
         thread = self.train_thread
+        self._refresh_training_results(force=True)
         was_stopped = thread.was_stopped if thread is not None else False
         exit_code = thread.exit_code if thread is not None else None
         command = thread.command if thread is not None else []
@@ -409,9 +471,19 @@ class YOLODialog(QDialog):
         )
         if was_stopped:
             print("[Training] Stopped.", flush=True)
+            self.training_progress_panel.set_result(
+                "Training stopped",
+                success=False,
+                cancelled=True,
+            )
             QMessageBox.information(self, "Stopped", "Training stopped.")
         elif exit_code != 0:
             print("[Training] Failed.", flush=True)
+            self.training_progress_panel.set_result(
+                "Training failed",
+                success=False,
+                detail=f"Exit code: {exit_code}",
+            )
             QMessageBox.critical(
                 self,
                 "Training failed",
@@ -419,6 +491,11 @@ class YOLODialog(QDialog):
             )
         else:
             print("[Training] Completed.", flush=True)
+            self.training_progress_panel.set_result(
+                "Training completed",
+                success=True,
+                detail=f"{self._training_total_epochs} epochs",
+            )
             QMessageBox.information(self, "Done", "Training Completed")
 
     def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
@@ -459,10 +536,16 @@ class YoloInferenceDialog(QDialog):
         self.command_queue = []
         self.current_run_item = None
         self.infer_thread = None
+        self.postprocess_thread = None
         self._inference_running = False
         self._stop_requested = False
         self._completed_commands = 0
         self._total_commands = 0
+        self._completed_work = 0
+        self._total_work = 0
+        self._all_work_known = False
+        self._current_frame_done = 0
+        self._current_frame_total = 0
         self.build_ui()
         pose_execution_state.busy_changed.connect(self._on_pose_task_busy_changed)
         self._on_pose_task_busy_changed(
@@ -499,6 +582,8 @@ class YoloInferenceDialog(QDialog):
         self.grid.setColumnStretch(1, 1)
 
         main_layout.addLayout(self.grid)
+        self.inference_progress_panel = TaskProgressPanel(self, show_log=True)
+        main_layout.addWidget(self.inference_progress_panel)
         self.run_btn = QPushButton("Run Inference", clicked=self._on_run_button_clicked)
         self.run_btn.setProperty("primary", True)
         self.run_btn.setFixedHeight(30)
@@ -1076,26 +1161,41 @@ class YoloInferenceDialog(QDialog):
         keep_txt: bool,
         want_csv: bool,
         csv_output_mode: str,
+        *,
+        progress_callback=None,
     ) -> None:
+        if progress_callback is not None:
+            progress_callback(0, 0, "Locating inference outputs...")
         txt_dir = self._resolve_inference_txt_dir(run_root_name, source_name)
         converted = False
 
         if want_csv and txt_dir is not None:
-            csv_path = self._convert_txt_result_to_csv(run_root_name, source_name, txt_dir=txt_dir)
+            csv_path = self._convert_txt_result_to_csv(
+                run_root_name,
+                source_name,
+                txt_dir=txt_dir,
+                progress_callback=progress_callback,
+            )
             converted = True
             if (
                 csv_path is not None
                 and csv_output_mode == "Raw + interpolated CSV"
             ):
+                if progress_callback is not None:
+                    progress_callback(0, 0, "Interpolating CSV...")
                 interpolate_pose_csv(
                     csv_path,
                     self._inference_source_interpolated_csv_path(run_root_name, source_name),
                 )
 
+        if progress_callback is not None:
+            progress_callback(0, 0, "Cleaning inference outputs...")
         if keep_txt:
             self._flatten_inference_txt_outputs(run_root_name, source_name)
         elif not want_csv or converted or txt_dir is None:
             self._delete_inference_txt_outputs(run_root_name, source_name)
+        if progress_callback is not None:
+            progress_callback(1, 1, "Inference outputs finalized")
 
     def _update_visualization_option_states(self):
         if hasattr(self, "show_tracking_checkbox"):
@@ -1109,6 +1209,40 @@ class YoloInferenceDialog(QDialog):
             self.convert_txt_to_csv_checkbox.setEnabled(True)
         if hasattr(self, "csv_output_mode_combo") and hasattr(self, "convert_txt_to_csv_checkbox"):
             self.csv_output_mode_combo.setEnabled(self.convert_txt_to_csv_checkbox.isChecked())
+
+    @staticmethod
+    def _estimate_source_work(source: str | Path) -> int:
+        source_path = Path(source)
+        if source_path.is_dir():
+            image_suffixes = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+            return sum(
+                1
+                for item in source_path.iterdir()
+                if item.is_file() and item.suffix.casefold() in image_suffixes
+            )
+        if not source_path.is_file():
+            return 0
+        capture = cv2.VideoCapture(str(source_path))
+        try:
+            if not capture.isOpened():
+                return 0
+            return max(0, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+        finally:
+            capture.release()
+
+    def _update_global_inference_progress(
+        self,
+        message: str,
+        *,
+        current_done: int = 0,
+    ) -> None:
+        if self._all_work_known and self._total_work > 0:
+            done = min(self._completed_work + max(0, int(current_done)), self._total_work)
+            total = self._total_work
+        else:
+            done = self._completed_commands
+            total = self._total_commands
+        pose_execution_state.update_progress(done, total, message)
 
     def run_inference(self):
         if is_project_compression_running():
@@ -1210,6 +1344,8 @@ class YoloInferenceDialog(QDialog):
                     "command": cmd,
                     "run_root_name": run_root_name,
                     "source_name": name,
+                    "source_path": src,
+                    "work_total": self._estimate_source_work(src),
                     "keep_txt": keep_txt,
                     "want_csv": want_csv,
                     "csv_output_mode": csv_output_mode,
@@ -1232,12 +1368,17 @@ class YoloInferenceDialog(QDialog):
         self._stop_requested = False
         self._completed_commands = 0
         self._total_commands = len(self.command_queue)
+        self._completed_work = 0
+        work_totals = [int(item.get("work_total", 0) or 0) for item in self.command_queue]
+        self._all_work_known = bool(work_totals) and all(total > 0 for total in work_totals)
+        self._total_work = sum(work_totals) if self._all_work_known else 0
+        self._current_frame_done = 0
+        self._current_frame_total = 0
+        self.inference_progress_panel.reset("Inference queued...")
         self._set_inference_config_controls_enabled(False)
         self._on_pose_task_busy_changed(True, "inference")
-        pose_execution_state.update_progress(
-            self._completed_commands,
-            self._total_commands,
-            f"Inference queued ({self._completed_commands}/{self._total_commands})",
+        self._update_global_inference_progress(
+            f"Inference queued ({self._completed_commands}/{self._total_commands})"
         )
 
         try:
@@ -1264,16 +1405,52 @@ class YoloInferenceDialog(QDialog):
         self.current_run_item = self.command_queue.pop(0)
         command = self.current_run_item["command"]
         source_name = self.current_run_item.get("source_name", "")
-        pose_execution_state.update_progress(
-            self._completed_commands,
-            self._total_commands,
-            f"Inference running: {source_name} ({self._completed_commands + 1}/{self._total_commands})",
+        self._current_frame_done = 0
+        self._current_frame_total = int(self.current_run_item.get("work_total", 0) or 0)
+        message = (
+            f"Inference: {source_name} "
+            f"({self._completed_commands + 1}/{self._total_commands})"
         )
+        self.inference_progress_panel.update_progress(
+            0,
+            self._current_frame_total,
+            message,
+            "Waiting for YOLO frame progress...",
+        )
+        self._update_global_inference_progress(message)
         print("Executing:", command)
+        self.inference_progress_panel.append_log(f"Executing: {' '.join(map(str, command))}")
 
         self.infer_thread = InferenceThread(command)
+        self.infer_thread.log_signal.connect(self._on_inference_log)
         self.infer_thread.finished_signal.connect(self._on_inference_command_finished)
         self.infer_thread.start()
+
+    def _on_inference_log(self, line: str) -> None:
+        self.inference_progress_panel.append_log(line)
+        frame_progress = parse_inference_frame(line)
+        if frame_progress is None:
+            return
+        frame_done, frame_total = frame_progress
+        self._current_frame_done = frame_done
+        self._current_frame_total = frame_total
+        run_item = self.current_run_item or {}
+        source_name = str(run_item.get("source_name", ""))
+        message = (
+            f"Inference: {source_name} "
+            f"({self._completed_commands + 1}/{self._total_commands})"
+        )
+        detail = f"Frame {frame_done:,} / {frame_total:,}"
+        self.inference_progress_panel.update_progress(
+            frame_done,
+            frame_total,
+            message,
+            detail,
+        )
+        self._update_global_inference_progress(
+            f"{source_name}: {detail}",
+            current_done=frame_done,
+        )
 
     def _on_inference_command_finished(self):
         thread = self.infer_thread
@@ -1295,10 +1472,9 @@ class YoloInferenceDialog(QDialog):
             print("[Inference] Failed.", flush=True)
             self.command_queue.clear()
             self.current_run_item = None
-            pose_execution_state.update_progress(
-                self._completed_commands,
-                self._total_commands,
+            self._update_global_inference_progress(
                 f"Inference failed: {source_name}" if source_name else "Inference failed",
+                current_done=self._current_frame_done,
             )
             self._finish_inference_run(success=False)
             QMessageBox.critical(
@@ -1315,25 +1491,70 @@ class YoloInferenceDialog(QDialog):
         want_csv = bool(run_item.get("want_csv"))
         csv_output_mode = str(run_item.get("csv_output_mode", "Raw CSV only"))
         if run_root_name and source_name and (keep_txt or want_csv):
-            try:
+            self.inference_progress_panel.update_progress(
+                0,
+                0,
+                f"Finalizing outputs: {source_name}",
+                "TXT/CSV conversion and cleanup",
+            )
+
+            def finalize(progress_callback):
                 self._finalize_inference_outputs(
                     run_root_name,
                     source_name,
                     keep_txt,
                     want_csv,
                     csv_output_mode,
+                    progress_callback=progress_callback,
                 )
-            except Exception as err:
-                QMessageBox.warning(
-                    self,
-                    "Inference output finalization failed",
-                    f"Run: {run_root_name}\nSource: {source_name}\n{err}",
-                )
+
+            self.postprocess_thread = FunctionProgressThread(finalize)
+            self.postprocess_thread.progress.connect(self._on_inference_postprocess_progress)
+            self.postprocess_thread.success.connect(self._on_inference_postprocess_finished)
+            self.postprocess_thread.failure.connect(self._on_inference_postprocess_failed)
+            self.postprocess_thread.finished.connect(self._clear_finished_postprocess_thread)
+            self.postprocess_thread.start()
+            return
+        self._complete_current_inference_item()
+
+    def _on_inference_postprocess_progress(self, done: int, total: int, message: str) -> None:
+        source_name = str((self.current_run_item or {}).get("source_name", ""))
+        detail = f"Source: {source_name}" if source_name else ""
+        self.inference_progress_panel.update_progress(done, total, message, detail)
+
+    def _on_inference_postprocess_finished(self) -> None:
+        if self._stop_requested:
+            self.current_run_item = None
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+        self._complete_current_inference_item()
+
+    def _on_inference_postprocess_failed(self, error_text: str) -> None:
+        run_item = self.current_run_item or {}
+        QMessageBox.warning(
+            self,
+            "Inference output finalization failed",
+            f"Run: {run_item.get('run_root_name', '')}\n"
+            f"Source: {run_item.get('source_name', '')}\n{error_text}",
+        )
+        if self._stop_requested:
+            self.current_run_item = None
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+        self._complete_current_inference_item()
+
+    def _clear_finished_postprocess_thread(self) -> None:
+        thread = self.sender()
+        if self.postprocess_thread is thread:
+            self.postprocess_thread = None
+
+    def _complete_current_inference_item(self) -> None:
+        run_item = self.current_run_item or {}
+        completed_item_work = int(run_item.get("work_total", 0) or self._current_frame_total)
+        self._completed_work += completed_item_work
         self._completed_commands += 1
-        pose_execution_state.update_progress(
-            self._completed_commands,
-            self._total_commands,
-            f"Inference completed {self._completed_commands}/{self._total_commands}",
+        self._update_global_inference_progress(
+            f"Inference completed {self._completed_commands}/{self._total_commands}"
         )
         self.current_run_item = None
         self.run_next_command()
@@ -1361,17 +1582,19 @@ class YoloInferenceDialog(QDialog):
         if not self._inference_running and active_task != "inference":
             return
         print("[Inference] Stop requested by user.", flush=True)
+        self.inference_progress_panel.set_stopping("Stopping inference...")
         self._stop_requested = True
         self.command_queue.clear()
         self.run_btn.setEnabled(False)
         self.run_btn.setText("Stopping inference...")
-        pose_execution_state.update_progress(
-            self._completed_commands,
-            self._total_commands,
+        self._update_global_inference_progress(
             "Stopping inference...",
+            current_done=self._current_frame_done,
         )
         if self.infer_thread is not None and self.infer_thread.isRunning():
             self.infer_thread.stop()
+            return
+        if self.postprocess_thread is not None and self.postprocess_thread.isRunning():
             return
 
         owner = pose_execution_state.active_owner()
@@ -1401,10 +1624,22 @@ class YoloInferenceDialog(QDialog):
         )
         if cancelled:
             print("[Inference] Stopped.", flush=True)
+            self.inference_progress_panel.set_result(
+                "Inference stopped",
+                success=False,
+                cancelled=True,
+            )
             QMessageBox.information(self, "Stopped", "Inference stopped.")
         elif success:
             print("[Inference] Completed.", flush=True)
+            self.inference_progress_panel.set_result(
+                "Inference completed",
+                success=True,
+                detail=f"{self._total_commands} source(s)",
+            )
             QMessageBox.information(self, "Done", "Inference Completed")
+        else:
+            self.inference_progress_panel.set_result("Inference failed", success=False)
 
     def _on_pose_task_busy_changed(self, busy: bool, task_name: str):
         if not hasattr(self, "run_btn"):
@@ -1455,6 +1690,8 @@ class YoloInferenceDialog(QDialog):
         run_root_name: str,
         source_name: str,
         txt_dir: Optional[Path] = None,
+        *,
+        progress_callback=None,
     ) -> Optional[Path]:
         if txt_dir is None:
             txt_dir = self._resolve_inference_txt_dir(run_root_name, source_name)
@@ -1518,6 +1755,12 @@ class YoloInferenceDialog(QDialog):
                 if remapped_id is not None:
                     row["instance.id"] = remapped_id
                 rows.append(row)
+            if progress_callback is not None:
+                progress_callback(
+                    idx + 1,
+                    len(txt_files),
+                    f"Converting TXT to CSV ({idx + 1}/{len(txt_files)})",
+                )
 
         if not rows:
             return None

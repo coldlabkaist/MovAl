@@ -29,6 +29,7 @@ from utils import __version__
 from utils.ui_theme import get_theme_colors
 from utils.project import ProjectInformation
 from pose.task_state import pose_execution_state
+from pose.split_state import data_split_state
 
 
 class AdditionalToolsDialog(QDialog):
@@ -154,6 +155,8 @@ class MainWindow(QMainWindow):
         self.controller.main_window_load_project = self.on_load_project_clicked
         pose_execution_state.busy_changed.connect(self._on_pose_busy_changed)
         pose_execution_state.progress_changed.connect(self._on_pose_progress_changed)
+        data_split_state.busy_changed.connect(self._on_data_split_busy_changed)
+        data_split_state.progress_changed.connect(self._on_data_split_progress_changed)
 
         main_layout = QHBoxLayout()
         main_layout.setSpacing(12)
@@ -232,31 +235,30 @@ class MainWindow(QMainWindow):
             self.preprocess_btn.setEnabled(not is_train_or_infer)
 
         if not is_train_or_infer:
-            self.pose_progress_label.setVisible(False)
-            self.pose_progress_bar.setVisible(False)
-            self.pose_progress_label.setText("Pose task running...")
-            self.pose_progress.setRange(0, 1)
-            self.pose_progress.setValue(0)
-            self.pose_progress.setTextVisible(True)
-            self.pose_progress.setFormat("Running...")
+            if data_split_state.is_running():
+                done, total, message = data_split_state.snapshot()
+                self._render_task_progress(done, total, message or "Data split running...")
+                return
+            self._hide_task_progress()
             return
 
         self.pose_progress_label.setVisible(True)
         self.pose_progress_bar.setVisible(True)
         self.pose_progress_label.setText(f"{active_task.capitalize()} running...")
 
-    def _on_pose_progress_changed(self, task_name: str, done: int, total: int, message: str) -> None:
-        if not task_name:
-            return
-        active_task = task_name.lower()
-        if active_task not in ("training", "inference"):
-            return
+    def _hide_task_progress(self) -> None:
+        self.pose_progress_label.setVisible(False)
+        self.pose_progress_bar.setVisible(False)
+        self.pose_progress_label.setText("Pose task running...")
+        self.pose_progress.setRange(0, 1)
+        self.pose_progress.setValue(0)
+        self.pose_progress.setTextVisible(True)
+        self.pose_progress.setFormat("Running...")
 
+    def _render_task_progress(self, done: int, total: int, message: str) -> None:
         self.pose_progress_label.setVisible(True)
         self.pose_progress_bar.setVisible(True)
-        label_text = message if message else f"{task_name.capitalize()} running..."
-        self.pose_progress_label.setText(label_text)
-
+        self.pose_progress_label.setText(message or "Task running...")
         if total > 0:
             self.pose_progress.setRange(0, total)
             self.pose_progress.setValue(min(done, total))
@@ -266,6 +268,31 @@ class MainWindow(QMainWindow):
             self.pose_progress.setRange(0, 0)
             self.pose_progress.setTextVisible(True)
             self.pose_progress.setFormat("Running...")
+
+    def _on_pose_progress_changed(self, task_name: str, done: int, total: int, message: str) -> None:
+        if not task_name:
+            return
+        active_task = task_name.lower()
+        if active_task not in ("training", "inference"):
+            return
+        label_text = message if message else f"{task_name.capitalize()} running..."
+        self._render_task_progress(done, total, label_text)
+
+    def _on_data_split_busy_changed(self, busy: bool) -> None:
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task in ("training", "inference"):
+            return
+        if busy:
+            done, total, message = data_split_state.snapshot()
+            self._render_task_progress(done, total, message or "Data split running...")
+        else:
+            self._hide_task_progress()
+
+    def _on_data_split_progress_changed(self, done: int, total: int, message: str) -> None:
+        active_task = (pose_execution_state.active_task() or "").lower()
+        if pose_execution_state.is_busy() and active_task in ("training", "inference"):
+            return
+        self._render_task_progress(done, total, message or "Data split running...")
 
     def _restore_last_project(self) -> None:
         last_path = self._read_last_project_path()

@@ -12,7 +12,7 @@ import cv2
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QCheckBox,
+    QAbstractItemView,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -20,14 +20,20 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSlider,
     QSpinBox,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+from pose.progress_ui import TaskProgressPanel
 from pose.task_state import pose_execution_state
-from pose.split_state import is_data_split_running, set_data_split_running
+from pose.split_state import (
+    is_data_split_running,
+    set_data_split_running,
+    update_data_split_progress,
+)
 from utils.runtime_locks import is_project_compression_running
 
 ONLINE_DATASET_ROOT = "online_datasets"
@@ -388,38 +394,51 @@ def create_online_training_dataset(
 
 
 class DataSplitDialog(QDialog):
+    FRAME_COUNT_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+    LABEL_COUNT_ROLE = int(Qt.ItemDataRole.UserRole) + 2
+
     def __init__(self, current_project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Data Split")
-        self.setFixedSize(500, 400)
+        self.setMinimumSize(700, 580)
+        self.resize(760, 640)
 
         self.current_project = current_project
         self.files = current_project.files
+        self._entries_by_name = {entry.name: entry for entry in self.files}
         self.split_worker = None
         self._ratio_guard = False
 
         layout = QVBoxLayout(self)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            """
-            QScrollArea {
-                background: #ffffff;
-                border: 1px solid #d1d5db;
-                border-radius: 8px;
-            }
-            QScrollArea > QWidget > QWidget {
-                background: #ffffff;
-            }
-            """
-        )
-        inner_widget = QWidget()
-        self.files_lay = QVBoxLayout(inner_widget)
-        self.files_lay.setContentsMargins(8, 8, 8, 8)
-        scroll.setWidget(inner_widget)
-        layout.addWidget(scroll)
+        selection_hint = QLabel("Select videos for the dataset. Use Ctrl or Shift to select multiple rows.")
+        selection_hint.setObjectName("SubtleText")
+        selection_hint.setWordWrap(True)
+        layout.addWidget(selection_hint)
 
-        layout.addSpacing(40)
+        self.file_tree = QTreeWidget()
+        self.file_tree.setColumnCount(3)
+        self.file_tree.setHeaderLabels(["Video", "Frames", "Labels"])
+        self.file_tree.setRootIsDecorated(False)
+        self.file_tree.setAlternatingRowColors(True)
+        self.file_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.file_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.file_tree.setColumnWidth(0, 390)
+        self.file_tree.setColumnWidth(1, 100)
+        self.file_tree.itemSelectionChanged.connect(self._update_selection_count)
+        layout.addWidget(self.file_tree, 1)
+
+        selection_buttons = QHBoxLayout()
+        self.select_all_button = QPushButton("Select All")
+        self.clear_selection_button = QPushButton("Clear Selection")
+        self.invert_selection_button = QPushButton("Invert Selection")
+        self.select_all_button.clicked.connect(self.file_tree.selectAll)
+        self.clear_selection_button.clicked.connect(self.file_tree.clearSelection)
+        self.invert_selection_button.clicked.connect(self._invert_selection)
+        selection_buttons.addWidget(self.select_all_button)
+        selection_buttons.addWidget(self.clear_selection_button)
+        selection_buttons.addWidget(self.invert_selection_button)
+        selection_buttons.addStretch(1)
+        layout.addLayout(selection_buttons)
         self.count_label = QLabel("0 files selected / 0 labels")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         count_font = QFont()
@@ -478,10 +497,13 @@ class DataSplitDialog(QDialog):
             self.frame_type_combo.setCurrentIndex(preferred_index)
         layout.addWidget(self.frame_type_combo)
 
+        self.progress_panel = TaskProgressPanel(self)
+        layout.addWidget(self.progress_panel)
+
         self.run_btn = QPushButton("Run")
         self.run_btn.setProperty("primary", True)
         layout.addWidget(self.run_btn)
-        self.run_btn.clicked.connect(self.run_split)
+        self.run_btn.clicked.connect(self._on_run_button_clicked)
 
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -503,55 +525,41 @@ class DataSplitDialog(QDialog):
 
     def _populate_file_items(self, selected_names: set[str] | None = None) -> None:
         selected_names = selected_names or set()
-        self._clear_file_items()
-        for fe in self.files:
-            current_project = self.current_project
-            video_path = Path(fe.video)
-            video_name = fe.name
-            frame_type = self.frame_type_combo.currentText()
+        self.file_tree.clear()
+        current_project = self.current_project
+        frame_type = self.frame_type_combo.currentText()
+        for file_entry in self.files:
+            video_path = Path(file_entry.video)
+            video_name = file_entry.name
             label_dir = Path(current_project.project_dir) / "labels" / video_name / "txt"
             if frame_type == "video":
-                frame_cnt = 0
+                frame_count = 0
+                frame_text = "—"
             else:
                 frame_dir = _resolve_frame_dir(Path(current_project.project_dir), video_name, frame_type)
-                frame_cnt = sum(1 for _ in frame_dir.glob("*.jpg"))
-            label_cnt = sum(1 for _ in label_dir.glob("*.txt"))
+                frame_count = sum(1 for _ in frame_dir.glob("*.jpg"))
+                frame_text = f"{frame_count:,}"
+            label_count = sum(1 for _ in label_dir.glob("*.txt"))
 
-            row_lay = QHBoxLayout()
-            chk = QCheckBox()
-            chk.setChecked(video_name in selected_names)
-            chk.stateChanged.connect(self._update_selection_count)
-            chk._frame_cnt = frame_cnt
-            chk._label_cnt = label_cnt
-            chk._file_entry = fe
-
-            name_lbl = QLabel(video_path.name)
-            if frame_type == "video":
-                count_lbl = QLabel(f"({label_cnt:,} labels)")
-            else:
-                count_lbl = QLabel(f"({frame_cnt:,} frames, {label_cnt:,} labels)")
-            count_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-            row_lay.addWidget(chk)
-            row_lay.addWidget(name_lbl, 1)
-            row_lay.addWidget(count_lbl)
-
-            self.files_lay.addLayout(row_lay)
-
-        self.files_lay.addStretch(1)
+            item = QTreeWidgetItem([video_path.name, frame_text, f"{label_count:,}"])
+            item.setData(0, Qt.ItemDataRole.UserRole, video_name)
+            item.setData(0, self.FRAME_COUNT_ROLE, frame_count)
+            item.setData(0, self.LABEL_COUNT_ROLE, label_count)
+            item.setToolTip(0, str(video_path))
+            self.file_tree.addTopLevelItem(item)
+            item.setSelected(video_name in selected_names)
+        self._update_selection_count()
 
     def _selected_video_names(self) -> set[str]:
-        selected: set[str] = set()
-        for i in range(self.files_lay.count() - 1):
-            lay = self.files_lay.itemAt(i)
-            if not isinstance(lay, QHBoxLayout):
-                continue
-            chk = lay.itemAt(0).widget()
-            if isinstance(chk, QCheckBox) and chk.isChecked():
-                fe = getattr(chk, "_file_entry", None)
-                if fe is not None:
-                    selected.add(fe.name)
-        return selected
+        return {
+            str(item.data(0, Qt.ItemDataRole.UserRole))
+            for item in self.file_tree.selectedItems()
+        }
+
+    def _invert_selection(self) -> None:
+        for index in range(self.file_tree.topLevelItemCount()):
+            item = self.file_tree.topLevelItem(index)
+            item.setSelected(not item.isSelected())
 
     def _on_ratio_input_changed(self, source: str, value: int) -> None:
         if self._ratio_guard:
@@ -609,56 +617,50 @@ class DataSplitDialog(QDialog):
         finally:
             self._ratio_guard = False
 
-    def _clear_file_items(self) -> None:
-        while self.files_lay.count():
-            item = self.files_lay.takeAt(0)
-
-            if widget := item.widget():
-                widget.deleteLater()
-            elif child_lay := item.layout():
-                while child_lay.count():
-                    sub_item = child_lay.takeAt(0)
-                    if w := sub_item.widget():
-                        w.deleteLater()
-
     def _update_selection_count(self):
-        total_files = 0
-        total_frames = 0
-        total_labels = 0
+        selected_items = self.file_tree.selectedItems()
+        total_files = len(selected_items)
+        total_frames = sum(int(item.data(0, self.FRAME_COUNT_ROLE) or 0) for item in selected_items)
+        total_labels = sum(int(item.data(0, self.LABEL_COUNT_ROLE) or 0) for item in selected_items)
         frame_type = self.frame_type_combo.currentText()
 
-        for i in range(self.files_lay.count() - 1):
-            lay = self.files_lay.itemAt(i)
-            if not isinstance(lay, QHBoxLayout):
-                continue
-            chk = lay.itemAt(0).widget()
-            if isinstance(chk, QCheckBox) and chk.isChecked():
-                total_files += 1
-                total_frames += getattr(chk, "_frame_cnt", 0)
-                total_labels += getattr(chk, "_label_cnt", 0)
-
         if frame_type == "video":
-            self.count_label.setText(
-                f"{total_files} files selected / "
-                f"{total_labels:,} labels"
-            )
+            self.count_label.setText(f"{total_files} files selected / {total_labels:,} labels")
         else:
             self.count_label.setText(
-                f"{total_files} files selected / "
-                f"{total_frames:,} frames / "
-                f"{total_labels:,} labels"
+                f"{total_files} files selected / {total_frames:,} frames / {total_labels:,} labels"
             )
 
     def get_selected_entries(self):
-        selected_entries = []
-        for i in range(self.files_lay.count() - 1):
-            lay = self.files_lay.itemAt(i)
-            if not isinstance(lay, QHBoxLayout):
-                continue
-            chk = lay.itemAt(0).widget()
-            if isinstance(chk, QCheckBox) and chk.isChecked():
-                selected_entries.append(chk._file_entry)
-        return selected_entries
+        selected_names = self._selected_video_names()
+        return [
+            self._entries_by_name[name]
+            for name in self._entries_by_name
+            if name in selected_names
+        ]
+
+    def _set_split_controls_enabled(self, enabled: bool) -> None:
+        for widget in (
+            self.file_tree,
+            self.select_all_button,
+            self.clear_selection_button,
+            self.invert_selection_button,
+            self.train_slider,
+            self.train_spin,
+            self.valid_slider,
+            self.valid_spin,
+            self.frame_type_combo,
+        ):
+            widget.setEnabled(enabled)
+
+    def _on_run_button_clicked(self) -> None:
+        if self.split_worker is not None and self.split_worker.isRunning():
+            self.split_worker.request_cancel()
+            self.progress_panel.set_stopping("Stopping data split...")
+            self.run_btn.setEnabled(False)
+            self.run_btn.setText("Stopping...")
+            return
+        self.run_split()
 
     def create_slider_spinbox_layout(self, slider, spinbox):
         hlayout = QHBoxLayout()
@@ -696,7 +698,10 @@ class DataSplitDialog(QDialog):
             )
             return
 
-        self.run_btn.setEnabled(False)
+        self._set_split_controls_enabled(False)
+        self.run_btn.setEnabled(True)
+        self.run_btn.setText("Stop")
+        self.progress_panel.reset("Collecting labeled frames...")
 
         dataset_dir = Path(self.current_project.project_dir) / "runs" / "dataset"
         self.split_worker = DataSplitWorker(
@@ -717,14 +722,23 @@ class DataSplitDialog(QDialog):
             self.split_worker.start()
         except Exception:
             set_data_split_running(False)
+            self._set_split_controls_enabled(True)
             self.run_btn.setEnabled(True)
+            self.run_btn.setText("Run")
             self.split_worker = None
             raise
 
     def _on_split_progress(self, done: int, total: int, message: str):
-        _ = (done, total, message)
+        detail = f"{done:,} / {total:,} samples" if total > 0 else ""
+        self.progress_panel.update_progress(done, total, message, detail)
+        update_data_split_progress(done, total, message)
 
     def _on_split_success(self, split_counts: dict):
+        detail = (
+            f"Train {split_counts['train']:,} · Val {split_counts['val']:,} · "
+            f"Test {split_counts['test']:,}"
+        )
+        self.progress_panel.set_result("Dataset split complete", success=True, detail=detail)
         QMessageBox.information(
             self,
             "Success",
@@ -735,17 +749,25 @@ class DataSplitDialog(QDialog):
         )
 
     def _on_split_failure(self, error_text: str):
+        self.progress_panel.set_result("Data split failed", success=False, detail=error_text)
         if error_text.startswith("ValueError: "):
             QMessageBox.warning(self, "Error", error_text[len("ValueError: "):])
         else:
             QMessageBox.critical(self, "Error", f"Failed to create dataset split:\n{error_text}")
 
     def _on_split_cancelled(self):
+        self.progress_panel.set_result(
+            "Data split cancelled",
+            success=False,
+            cancelled=True,
+        )
         QMessageBox.information(self, "Cancelled", "Data split was cancelled.")
 
     def _on_split_finished(self):
         set_data_split_running(False)
+        self._set_split_controls_enabled(True)
         self.run_btn.setEnabled(True)
+        self.run_btn.setText("Run")
         self.split_worker = None
 
     def closeEvent(self, event):

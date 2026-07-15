@@ -221,8 +221,6 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.install_controller()
 
         self.play_button.clicked.connect(self.play_or_pause)
-        self.minimize_button.clicked.connect(self.showMinimized)
-        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
         self.speed_spin.valueChanged.connect(self.set_playback_rate)
         self.frame_slider.valueChanged.connect(self.video_loader.move_to_frame)
         self.frame_jump_spin.valueChanged.connect(self.on_frame_jump_changed)
@@ -252,23 +250,11 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self._refresh_mini_training_button_state()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    def _refresh_fullscreen_button_text(self) -> None:
-        if self.isFullScreen():
-            self.fullscreen_button.setText("Exit Full Screen")
-        else:
-            self.fullscreen_button.setText("Full Screen")
-
     def toggle_fullscreen(self) -> None:
         if self.isFullScreen():
             self.showNormal()
         else:
             self.showFullScreen()
-        self._refresh_fullscreen_button_text()
-
-    def changeEvent(self, event) -> None:
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.WindowStateChange:
-            self._refresh_fullscreen_button_text()
 
     def load_skeleton_model(self):
         self.skeleton = SkeletonModel()

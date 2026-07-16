@@ -15,7 +15,6 @@ class VideoLoader:
                 skeleton_video_viewer, 
                 kpt_list, 
                 frame_slider, 
-                frame_number_label, 
                 frame_jump_spin=None,
                 frame_display_mode = "video"):
 
@@ -24,7 +23,6 @@ class VideoLoader:
         self.skeleton_video_viewer = skeleton_video_viewer
         self.kpt_list = kpt_list
         self.frame_slider = frame_slider
-        self.frame_number_label = frame_number_label
         self.frame_jump_spin = frame_jump_spin
         self.frame_display_mode = frame_display_mode
 
@@ -197,7 +195,6 @@ class VideoLoader:
             self.frame_jump_spin.blockSignals(True)
             self.frame_jump_spin.setValue(self.current_frame)
             self.frame_jump_spin.blockSignals(False)
-        self.frame_number_label.setText(f"{self.current_frame} (total frames : {self.total_frames})")
         if hasattr(self.parent, "refresh_frame_bound_views"):
             self.parent.refresh_frame_bound_views()
 

@@ -155,12 +155,11 @@ class UI_LabelaryDialog(object):
         self.frame_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.frame_slider.setObjectName("frame_slider")
         self.gridLayout.addWidget(self.frame_slider, 7, 0, 1, 1)
-        self.frame_number_label = QtWidgets.QLabel(parent=Dialog)
-        self.frame_number_label.setMaximumSize(QtCore.QSize(200, 16777215))
-        self.frame_number_label.setAlignment(
+        self.label_stats_label = QtWidgets.QLabel(parent=Dialog)
+        self.label_stats_label.setAlignment(
             QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
         )
-        self.frame_number_label.setObjectName("frame_number_label")
+        self.label_stats_label.setObjectName("label_stats_label")
         self.save_csv_button = QtWidgets.QPushButton(parent=Dialog)
         self.save_csv_button.setFixedWidth(200)
         self.save_csv_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -212,7 +211,7 @@ class UI_LabelaryDialog(object):
         self.horizontalLayout_2.addWidget(self.skeleton_delay_spin)
         spacerItem = QtWidgets.QSpacerItem(427, 20, QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem)
-        self.horizontalLayout_2.addWidget(self.frame_number_label)
+        self.horizontalLayout_2.addWidget(self.label_stats_label)
         self.gridLayout.addLayout(self.horizontalLayout_2, 8, 0, 1, 1)
 
         self.retranslateUi(Dialog)
@@ -231,7 +230,9 @@ class UI_LabelaryDialog(object):
         self.mini_training_epochs_label.setText(_translate("Dialog", "Epochs"))
         self.mini_training_button.setText(_translate("Dialog", "Run Mini Training"))
         self.kpt_list_title.setText(_translate("Dialog", "Keypoint List"))
-        self.frame_number_label.setText(_translate("Dialog", "0 /  total"))
+        self.label_stats_label.setText(
+            _translate("Dialog", "Labeled frames : 0 (Fully labelled frames : 0)")
+        )
         self.save_csv_button.setText(_translate("Dialog", "Save CSV"))
         self.save_options_button.setText(_translate("Dialog", "Save Options"))
         self.play_button.setText(_translate("Dialog", "play"))

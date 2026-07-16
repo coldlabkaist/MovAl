@@ -210,13 +210,20 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
                                         self.skeleton_video_viewer, 
                                         self.kpt_list, 
                                         self.frame_slider, 
-                                        self.frame_number_label,
                                         self.frame_jump_spin)
         DataLoader.parent = self
         DataLoader.max_animals = self.project.num_animals
         DataLoader.max_instances_per_id = self.project.get_max_instances_per_id()
         DataLoader.animals_name = self.project.animals_name
         self.skeleton_video_viewer.current_project = project
+
+        self._label_stats_display_version = -1
+        self._label_stats_pending_version = -1
+        self._label_stats_timer = QTimer(self)
+        self._label_stats_timer.setSingleShot(True)
+        self._label_stats_timer.setInterval(80)
+        self._label_stats_timer.timeout.connect(self._refresh_label_statistics)
+        self._refresh_label_statistics()
 
         self.install_controller()
 
@@ -511,6 +518,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         return True
 
     def refresh_frame_bound_views(self) -> None:
+        self._schedule_label_statistics_refresh()
         if not getattr(self.skeleton_video_viewer, "video_loaded", False):
             if hasattr(self, "mouse_controller"):
                 self.mouse_controller.clear_edit_history_if_frame_changed(None)
@@ -530,6 +538,38 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         self.skeleton_video_viewer.setCSVPoints(coords_dict)
         self.update_keypoint_list()
         self.kpt_list.update_list_visibility(coords_dict)
+
+    def _schedule_label_statistics_refresh(self) -> None:
+        version = DataLoader._label_version
+        if version == self._label_stats_display_version:
+            return
+        if (
+            self._label_stats_timer.isActive()
+            and version == self._label_stats_pending_version
+        ):
+            return
+        self._label_stats_pending_version = version
+        self._label_stats_timer.start()
+
+    def _refresh_label_statistics(self) -> None:
+        labeled_frames, full_frames = DataLoader.get_label_frame_statistics()
+        animal_count = len(
+            tuple(dict.fromkeys(str(name) for name in self.project.animals_name))
+        )
+        instance_limit = self.project.get_max_instances_per_id()
+        total_capacity = animal_count * instance_limit
+
+        self.label_stats_label.setText(
+            f"Labeled frames : {labeled_frames:,} "
+            f"(Fully labelled frames : {full_frames:,})"
+        )
+        self.label_stats_label.setToolTip(
+            "A fully labelled frame contains every project ID at the configured maximum: "
+            f"{animal_count} ID(s) × {instance_limit} instance(s) "
+            f"= {total_capacity} total instance(s)."
+        )
+        self._label_stats_display_version = DataLoader._label_version
+        self._label_stats_pending_version = -1
 
     def _snapshot_loaded_data(self) -> Optional[pd.DataFrame]:
         if DataLoader.loaded_data is None:
@@ -714,8 +754,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         loaded = DataLoader.load_csv_data(path, inference_mode=inference_mode)
         if not loaded:
             DataLoader.loaded_data = None
+            DataLoader._bump_label_version()
             self.skeleton_video_viewer.setCSVPoints({})
             self.kpt_list.clear()
+            self._schedule_label_statistics_refresh()
             return loaded
         self._apply_loaded_label_delay(inference_mode=inference_mode)
         return loaded
@@ -724,8 +766,10 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         loaded = DataLoader.load_txt_data(path, inference_mode=inference_mode)
         if not loaded:
             DataLoader.loaded_data = None
+            DataLoader._bump_label_version()
             self.skeleton_video_viewer.setCSVPoints({})
             self.kpt_list.clear()
+            self._schedule_label_statistics_refresh()
             return loaded
         self._apply_loaded_label_delay(inference_mode=inference_mode)
         return loaded

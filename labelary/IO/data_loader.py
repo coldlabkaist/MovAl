@@ -48,6 +48,8 @@ class DataLoader:
     _label_version: int = 0
     _label_frames_cache: Optional[list] = None
     _label_cache_version: int = -1
+    _label_stats_cache_key: Optional[tuple] = None
+    _label_stats_cache: tuple[int, int] = (0, 0)
     _inference_mode: bool = False
 
     INSTANCE_ID_COL = "instance.id"
@@ -91,6 +93,45 @@ class DataLoader:
         return labeled
 
     @classmethod
+    def get_label_frame_statistics(cls) -> tuple[int, int]:
+        animal_names = tuple(
+            dict.fromkeys(str(name) for name in (cls.animals_name or []))
+        )
+        instance_limit = cls.get_max_instances_per_id()
+        cache_key = (cls._label_version, animal_names, instance_limit)
+        if cls._label_stats_cache_key == cache_key:
+            return cls._label_stats_cache
+
+        df = cls.loaded_data
+        if df is None or df.empty or "frame_idx" not in df.columns:
+            result = (0, 0)
+        else:
+            frame_tracks = df.loc[:, ["frame_idx", "track"]].copy()
+            frame_tracks["frame_idx"] = pd.to_numeric(
+                frame_tracks["frame_idx"], errors="coerce"
+            )
+            frame_tracks.dropna(subset=["frame_idx"], inplace=True)
+            labeled_frames = int(frame_tracks["frame_idx"].nunique())
+
+            full_frames = 0
+            if labeled_frames and animal_names:
+                frame_tracks["track"] = frame_tracks["track"].astype(str)
+                project_tracks = frame_tracks[frame_tracks["track"].isin(animal_names)]
+                if not project_tracks.empty:
+                    per_track_counts = project_tracks.groupby(
+                        ["frame_idx", "track"], sort=False
+                    ).size()
+                    full_track_counts = (
+                        per_track_counts.ge(instance_limit).groupby(level=0).sum()
+                    )
+                    full_frames = int((full_track_counts >= len(animal_names)).sum())
+            result = (labeled_frames, full_frames)
+
+        cls._label_stats_cache_key = cache_key
+        cls._label_stats_cache = result
+        return result
+
+    @classmethod
     def _init_txt_schema(cls, sample_fp: Path, sep: str) -> None:
         if cls._expected_cols is not None:
             return
@@ -110,6 +151,7 @@ class DataLoader:
         cls.loaded_data = None
         cls.csv_path = None
         cls._coords_normalized = False
+        cls._bump_label_version()
 
     @classmethod
     def _ensure_skeleton(cls) -> None:

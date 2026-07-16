@@ -15,7 +15,14 @@ class KeyboardController(QObject):
         self.video_loader = video_loader
         self.mouse_controller = mouse_controller
 
+    def detach(self) -> None:
+        self.main_dialog = None
+        self.video_loader = None
+        self.mouse_controller = None
+
     def eventFilter(self, obj, event):
+        if self.main_dialog is None:
+            return super().eventFilter(obj, event)
         if not getattr(self.main_dialog, "shortcuts_enabled", True):
             return super().eventFilter(obj, event)
         if event.type() == QEvent.Type.KeyPress:

@@ -342,15 +342,49 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
         return super().eventFilter(obj, event)
     
     def install_controller(self):
-        mouse_controller = MouseController(self.video_loader, self.skeleton_video_viewer, self.kpt_list)
+        mouse_controller = MouseController(
+            self.video_loader,
+            self.skeleton_video_viewer,
+            self.kpt_list,
+            parent=self,
+        )
         self.mouse_controller = mouse_controller
         self.skeleton_video_viewer.mouse_controller = mouse_controller
         self.skeleton_video_viewer.installEventFilter(mouse_controller)
         self.kpt_list.mouse_controller = mouse_controller
 
-        keyboard_controller = KeyboardController(self, self.video_loader, mouse_controller=mouse_controller)
+        keyboard_controller = KeyboardController(
+            self,
+            self.video_loader,
+            mouse_controller=mouse_controller,
+            parent=self,
+        )
         self.keyboard_controller = keyboard_controller
-        QApplication.instance().installEventFilter(keyboard_controller)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(keyboard_controller)
+        self._controllers_installed = True
+        self.finished.connect(self._uninstall_controllers)
+
+    def _uninstall_controllers(self, *_args) -> None:
+        if not getattr(self, "_controllers_installed", False):
+            return
+        self._controllers_installed = False
+
+        keyboard_controller = getattr(self, "keyboard_controller", None)
+        app = QApplication.instance()
+        if app is not None and keyboard_controller is not None:
+            app.removeEventFilter(keyboard_controller)
+        if keyboard_controller is not None:
+            keyboard_controller.detach()
+
+        mouse_controller = getattr(self, "mouse_controller", None)
+        video_viewer = getattr(self, "skeleton_video_viewer", None)
+        if video_viewer is not None and mouse_controller is not None:
+            try:
+                video_viewer.removeEventFilter(mouse_controller)
+            except RuntimeError:
+                pass
 
     def load_video_combo(self):
         self.video_combo.clear()

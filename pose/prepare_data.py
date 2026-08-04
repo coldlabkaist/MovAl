@@ -525,12 +525,41 @@ def _materialize_video_samples(
         target_frames = sorted(targets)
         max_target = target_frames[-1] if target_frames else -1
         current_idx = 0
+
+        def write_target_frame(frame_idx: int, frame) -> None:
+            nonlocal written
+            for split, sample in targets[frame_idx]:
+                img_dst = dataset_dir / split / "images" / f"{sample.base_name}.jpg"
+                lbl_dst = dataset_dir / split / "labels" / f"{sample.base_name}.txt"
+                _write_image_checked(frame, img_dst)
+                shutil.copy(sample.label_path, lbl_dst)
+                written += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        written,
+                        total,
+                        f"Writing video frames ({written}/{total})",
+                    )
+
         try:
             while current_idx <= max_target:
                 _raise_if_cancelled(should_cancel)
                 ok, frame = cap.read()
                 if not ok or frame is None:
-                    missing = [idx for idx in target_frames if idx >= current_idx]
+                    missing = []
+                    for target_idx in target_frames:
+                        if target_idx < current_idx:
+                            continue
+                        _raise_if_cancelled(should_cancel)
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, target_idx)
+                        recovered, recovered_frame = cap.read()
+                        if not recovered or recovered_frame is None:
+                            missing.append(target_idx)
+                            continue
+                        write_target_frame(target_idx, recovered_frame)
+
+                    if not missing:
+                        break
                     preview = ", ".join(str(idx) for idx in missing[:20])
                     more = "" if len(missing) <= 20 else f", ... and {len(missing) - 20} more"
                     raise RuntimeError(
@@ -539,18 +568,7 @@ def _materialize_video_samples(
                     )
 
                 if current_idx in targets:
-                    for split, sample in targets[current_idx]:
-                        img_dst = dataset_dir / split / "images" / f"{sample.base_name}.jpg"
-                        lbl_dst = dataset_dir / split / "labels" / f"{sample.base_name}.txt"
-                        _write_image_checked(frame, img_dst)
-                        shutil.copy(sample.label_path, lbl_dst)
-                        written += 1
-                        if progress_callback is not None:
-                            progress_callback(
-                                written,
-                                total,
-                                f"Writing video frames ({written}/{total})",
-                            )
+                    write_target_frame(current_idx, frame)
                 current_idx += 1
         finally:
             cap.release()

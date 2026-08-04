@@ -20,6 +20,107 @@ def extract_frame_number(filename):
     match = re.search(r'(\d+)\.txt$', filename)
     return int(match.group(1)) if match else -1
 
+
+def _direct_txt_files(directory: Path) -> list[str]:
+    if not directory.is_dir():
+        return []
+    return [
+        str(path)
+        for path in sorted(directory.iterdir())
+        if path.is_file() and path.suffix.lower() == ".txt"
+    ]
+
+
+def _infer_video_name_from_txt_dir(txt_dir: Path) -> str:
+    if txt_dir.name.lower() in {"txt", "labels"} and txt_dir.parent.name:
+        return txt_dir.parent.name
+    return txt_dir.name
+
+
+def _infer_video_name_from_file(txt_path: Path) -> str:
+    name_part = "_".join(txt_path.name.split("_")[:-1])
+    if name_part:
+        return name_part
+    return _infer_video_name_from_txt_dir(txt_path.parent)
+
+
+def _sort_txt_paths(paths: list[str]) -> list[str]:
+    return sorted(
+        dict.fromkeys(paths),
+        key=lambda path: (extract_frame_number(os.path.basename(path)), path),
+    )
+
+
+def discover_video_txts(folders: list[str]) -> dict[str, list[str]]:
+    video_to_txts: dict[str, list[str]] = {}
+
+    def add_txts(video_name: str, txts: list[str]) -> bool:
+        if not video_name or not txts:
+            return False
+        video_to_txts.setdefault(video_name, []).extend(txts)
+        return True
+
+    for folder in folders:
+        folder_path = Path(folder)
+        collected_any = False
+
+        def add_txt_dir(video_name: str, txt_dir: Path) -> None:
+            nonlocal collected_any
+            if add_txts(video_name, _direct_txt_files(txt_dir)):
+                collected_any = True
+
+        # <video>/labels/*.txt, <some_folder>/labels/*.txt
+        if folder_path.name.lower() == "labels":
+            add_txt_dir(folder_path.parent.name, folder_path)
+
+        labels_dir = folder_path / "labels"
+        add_txt_dir(folder_path.name, labels_dir)
+
+        # labels/<video>/txt/*.txt, project_root/labels/<video>/txt/*.txt
+        labels_root = folder_path if folder_path.name.lower() == "labels" else labels_dir
+        if labels_root.is_dir():
+            for video_dir in sorted(labels_root.iterdir()):
+                if video_dir.is_dir():
+                    add_txt_dir(video_dir.name, video_dir / "txt")
+
+        # <video>/txt/*.txt, or directly selected txt folder
+        add_txt_dir(folder_path.name, folder_path / "txt")
+        if folder_path.name.lower() == "txt":
+            add_txt_dir(folder_path.parent.name, folder_path)
+
+        # <selected folder>/<some folders>/*.txt and nested labels/txt folders.
+        for root, _dirs, files in os.walk(folder):
+            root_path = Path(root)
+            direct_txts = [filename for filename in files if filename.lower().endswith(".txt")]
+            if not direct_txts:
+                continue
+
+            for filename in direct_txts:
+                txt_path = root_path / filename
+                if root_path.name.lower() in {"txt", "labels"}:
+                    video_name = root_path.parent.name
+                else:
+                    video_name = _infer_video_name_from_file(txt_path)
+                if add_txts(video_name, [str(txt_path)]):
+                    collected_any = True
+
+        # videoName_000001.txt style: prefer filename prefix when no known folder layout matched.
+        if not collected_any:
+            for root, _dirs, files in os.walk(folder):
+                root_path = Path(root)
+                for filename in files:
+                    if not filename.lower().endswith(".txt"):
+                        continue
+                    txt_path = root_path / filename
+                    add_txts(_infer_video_name_from_file(txt_path), [str(txt_path)])
+
+    return {
+        video_name: _sort_txt_paths(txts)
+        for video_name, txts in video_to_txts.items()
+        if txts
+    }
+
+
 class TxtToCsvDialog(QDialog):
     def __init__(self, current_project=None, parent=None):
         super().__init__(parent)
@@ -192,40 +293,7 @@ class TxtToCsvDialog(QDialog):
         if not self.txt_folders:
             return
 
-        self.video_to_txts = {}
-        for folder in self.txt_folders:
-            collected_any = False
-            if os.path.basename(folder).lower() == 'labels':
-                video_name = os.path.basename(os.path.dirname(folder))
-                txts = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith('.txt')]
-                if txts:
-                    self.video_to_txts.setdefault(video_name, []).extend(txts)
-                    collected_any = True
-            labels_dir = os.path.join(folder, 'labels')
-            if os.path.isdir(labels_dir):
-                video_name = os.path.basename(folder)
-                txts = [os.path.join(labels_dir, f) for f in os.listdir(labels_dir) if f.endswith('.txt')]
-                if txts:
-                    self.video_to_txts.setdefault(video_name, []).extend(txts)
-                    collected_any = True
-            for root, dirs, files in os.walk(folder):
-                if os.path.basename(root).lower() == 'labels':
-                    video_name = os.path.basename(os.path.dirname(root))
-                    txts = [os.path.join(root, f) for f in files if f.endswith('.txt')]
-                    if txts:
-                        self.video_to_txts.setdefault(video_name, []).extend(txts)
-                        collected_any = True
-            if not collected_any:
-                for root, dirs, files in os.walk(folder):
-                    for f in files:
-                        if f.endswith('.txt'):
-                            name_part = "_".join(f.split("_")[:-1])
-                            if name_part:
-                                self.video_to_txts.setdefault(name_part, []).append(os.path.join(root, f))
-
-        for k, v in list(self.video_to_txts.items()):
-            self.video_to_txts[k] = list(set(v))
-
+        self.video_to_txts = discover_video_txts(self.txt_folders)
         video_names = set(self.video_to_txts.keys())
 
         for i in reversed(range(self.inner_layout.count())):
@@ -409,3 +477,4 @@ class TxtToCsvDialog(QDialog):
             save_path = os.path.join(output_dir, f"{video_name}.csv")
             df.to_csv(save_path, index=False)
             print(f"Saved: {save_path}")
+

@@ -95,7 +95,7 @@ class CutieDialog(QDialog):
 
         self.log.append("Frame extraction started. This task may take some time. Check terminal for detailed information.")
 
-        overwrite_policy = False
+        existing_folder_policy = None
         num_objects = self.current_project.num_animals
         for idx_vid in range(self.video_list.count()):
             video_path    = self.video_list.item(idx_vid).data(Qt.ItemDataRole.UserRole)
@@ -106,20 +106,28 @@ class CutieDialog(QDialog):
             workspace_dir = os.path.join(self.frame_dir, video_name)
 
             if os.path.exists(workspace_dir):
-                if not overwrite_policy:
+                if existing_folder_policy is None:
                     ans = QMessageBox.question(
                         self, "Folder exists",
-                        f"Do you want to overwrite frames?",
+                        "One or more workspace folders already exist.\n\n"
+                        "Overwrite existing folders for this batch?\n"
+                        "Yes: overwrite every existing workspace.\n"
+                        "No: skip every existing workspace and create only missing ones.",
                         QMessageBox.StandardButton.Yes |
-                        QMessageBox.StandardButton.No
+                        QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
                     )
-                    if ans == QMessageBox.StandardButton.Yes:
-                        overwrite_policy = True
-                        self.log.append("Overwrite: True")
+                    existing_folder_policy = (
+                        "overwrite"
+                        if ans == QMessageBox.StandardButton.Yes
+                        else "skip"
+                    )
+                    self.log.append(f"Existing workspace policy: {existing_folder_policy}")
 
-                if overwrite_policy:
+                if existing_folder_policy == "overwrite":
                     shutil.rmtree(workspace_dir)
                 else:
+                    self.log.append(f"[SKIP] {video_name} - workspace already exists.")
                     continue
 
             cmd = [

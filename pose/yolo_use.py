@@ -1396,7 +1396,7 @@ class YoloInferenceDialog(QDialog):
 
         self.infer_thread = InferenceThread(command)
         self.infer_thread.log_signal.connect(self._on_inference_log)
-        self.infer_thread.finished_signal.connect(self._on_inference_command_finished)
+        self.infer_thread.finished.connect(self._on_inference_command_finished)
         self.infer_thread.start()
 
     def _on_inference_log(self, line: str) -> None:
@@ -1470,8 +1470,7 @@ class YoloInferenceDialog(QDialog):
 
             self.postprocess_thread = FunctionProgressThread(finalize)
             self.postprocess_thread.progress.connect(self._on_inference_postprocess_progress)
-            self.postprocess_thread.success.connect(self._on_inference_postprocess_finished)
-            self.postprocess_thread.failure.connect(self._on_inference_postprocess_failed)
+            self.postprocess_thread.finished.connect(self._on_inference_postprocess_finished)
             self.postprocess_thread.finished.connect(self._clear_finished_postprocess_thread)
             self.postprocess_thread.start()
             return
@@ -1486,6 +1485,11 @@ class YoloInferenceDialog(QDialog):
         )
 
     def _on_inference_postprocess_finished(self) -> None:
+        thread = self.sender()
+        error_text = getattr(thread, "error_text", None)
+        if error_text:
+            self._on_inference_postprocess_failed(error_text)
+            return
         if self._stop_requested:
             self.current_run_item = None
             self._finish_inference_run(success=False, cancelled=True)

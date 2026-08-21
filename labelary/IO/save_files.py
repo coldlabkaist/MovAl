@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np   
 import shutil 
 
-ONLINE_TXT_EXPORT_ROOT = "online_label_exports"
+MINI_TXT_EXPORT_ROOT = "mini_label_exports"
 
 class _SaveActionDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -241,7 +241,7 @@ def export_current_labels_to_txt_snapshot(
         target_dir = (
             Path(project.project_dir)
             / "runs"
-            / ONLINE_TXT_EXPORT_ROOT
+            / MINI_TXT_EXPORT_ROOT
             / video_name
             / f"txt_snapshot_{stamp}"
         )

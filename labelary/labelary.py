@@ -14,7 +14,7 @@ from .IO.save_files import save_modified_data, quick_save_csv, export_loaded_dat
 from .controller.keyboard_controller import KeyboardController
 from .controller.mouse_controller import MouseController
 from utils.skeleton import SkeletonModel
-from pose.prepare_data import create_online_training_dataset
+from pose.prepare_data import create_mini_training_dataset
 from pose.thread import TrainThread
 
 from typing import Union, Optional, List
@@ -132,7 +132,7 @@ class MiniTrainingSetupWorker(QThread):
             snapshot_dir = (
                 project_dir
                 / "runs"
-                / "online_label_exports"
+                / "mini_label_exports"
                 / self.current_video_name
                 / f"txt_snapshot_{self.run_stamp}"
             )
@@ -146,7 +146,7 @@ class MiniTrainingSetupWorker(QThread):
 
             self._raise_if_cancelled()
             self.progress.emit(0, 0, "Preparing training dataset...")
-            dataset_dir, split_counts = create_online_training_dataset(
+            dataset_dir, split_counts = create_mini_training_dataset(
                 self.project,
                 frame_type=self.frame_mode,
                 label_dirs={self.current_video_name: snapshot_dir},
@@ -1340,7 +1340,7 @@ class LabelaryDialog(QDialog, UI_LabelaryDialog):
             self.mini_training_button.setText("Run Mini Training")
             self.mini_training_button.setToolTip(
                 "Export current in-memory labels to a timestamped snapshot under runs/, "
-                "build a separate online dataset, run short fine-tuning, and hot-load the resulting best.pt "
+                "build a separate mini training dataset, run short fine-tuning, and hot-load the resulting best.pt "
                 f"using the current frame mode '{frame_mode}'."
             )
 

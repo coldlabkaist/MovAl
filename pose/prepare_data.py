@@ -39,9 +39,10 @@ from pose.split_state import (
 )
 from utils.runtime_locks import is_project_compression_running
 
-ONLINE_DATASET_ROOT = "online_datasets"
+MINI_DATASET_ROOT = "mini_datasets"
 LABEL_SOURCE_TXT = "txt"
 LABEL_SOURCE_RECENT_CSV = "recent_csv"
+LABEL_FRAME_STEM_RE = re.compile(r"(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -117,8 +118,27 @@ def _most_recent_csv_path(project_dir: Path, video_name: str) -> Path | None:
 
 def _count_csv_labeled_frames(csv_path: Path) -> int:
     frame_data = pd.read_csv(csv_path, usecols=["frame_idx"])
-    frame_numbers = pd.to_numeric(frame_data["frame_idx"], errors="coerce")
-    return int(frame_numbers.dropna().nunique())
+    frame_numbers = pd.to_numeric(frame_data["frame_idx"], errors="coerce").dropna()
+    valid_frames = frame_numbers[(frame_numbers >= 0) & (frame_numbers % 1 == 0)]
+    return int(valid_frames.astype(int).nunique())
+
+
+def _label_frame_match(label_path: Path):
+    return LABEL_FRAME_STEM_RE.search(label_path.stem)
+
+
+def _sample_progress_key(sample: "DatasetSample") -> tuple[Path, str, int, Path]:
+    return sample.video_path, sample.video_name, sample.frame_idx, sample.label_path
+
+
+def _count_unique_split_samples(split_map: dict[str, list["DatasetSample"]]) -> int:
+    return len(
+        {
+            _sample_progress_key(sample)
+            for samples in split_map.values()
+            for sample in samples
+        }
+    )
 
 
 def _project_keypoint_names(current_project) -> list[str]:
@@ -415,7 +435,6 @@ def _collect_training_samples(
     should_cancel=None,
 ) -> list[DatasetSample]:
     project_dir = Path(current_project.project_dir)
-    digit_re = re.compile(r"(\d+)$")
     samples: list[DatasetSample] = []
     missing_images: list[str] = []
     label_dirs = label_dirs or {}
@@ -432,7 +451,7 @@ def _collect_training_samples(
 
         for lbl_file in sorted(label_dir.glob("*.txt")):
             _raise_if_cancelled(should_cancel)
-            match = digit_re.search(lbl_file.stem)
+            match = _label_frame_match(lbl_file)
             if not match:
                 continue
 
@@ -484,8 +503,9 @@ def _materialize_image_samples(
     progress_callback=None,
     should_cancel=None,
 ) -> None:
-    copied = 0
-    total = sum(len(samples) for samples in split_map.values())
+    reported = 0
+    reported_keys = set()
+    total = _count_unique_split_samples(split_map)
     for split, samples in split_map.items():
         img_dst_root = dataset_dir / split / "images"
         lbl_dst_root = dataset_dir / split / "labels"
@@ -497,9 +517,16 @@ def _materialize_image_samples(
                 )
             shutil.copy(sample.label_path, lbl_dst_root / f"{sample.base_name}.txt")
             shutil.copy(sample.image_path, img_dst_root / f"{sample.base_name}{sample.image_path.suffix.lower()}")
-            copied += 1
-            if progress_callback is not None:
-                progress_callback(copied, total, f"Copying {split} split ({copied}/{total})")
+            key = _sample_progress_key(sample)
+            if key not in reported_keys:
+                reported_keys.add(key)
+                reported += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        reported,
+                        total,
+                        f"Copying dataset samples ({reported}/{total})",
+                    )
 
 
 def _materialize_video_samples(
@@ -514,8 +541,9 @@ def _materialize_video_samples(
         for sample in samples:
             targets_by_video.setdefault(sample.video_path, {}).setdefault(sample.frame_idx, []).append((split, sample))
 
-    written = 0
-    total = sum(len(samples) for samples in split_map.values())
+    reported = 0
+    reported_keys = set()
+    total = _count_unique_split_samples(split_map)
     for video_path, targets in targets_by_video.items():
         _raise_if_cancelled(should_cancel)
         cap = _open_video_capture(video_path)
@@ -527,19 +555,22 @@ def _materialize_video_samples(
         current_idx = 0
 
         def write_target_frame(frame_idx: int, frame) -> None:
-            nonlocal written
+            nonlocal reported
             for split, sample in targets[frame_idx]:
                 img_dst = dataset_dir / split / "images" / f"{sample.base_name}.jpg"
                 lbl_dst = dataset_dir / split / "labels" / f"{sample.base_name}.txt"
                 _write_image_checked(frame, img_dst)
                 shutil.copy(sample.label_path, lbl_dst)
-                written += 1
-                if progress_callback is not None:
-                    progress_callback(
-                        written,
-                        total,
-                        f"Writing video frames ({written}/{total})",
-                    )
+                key = _sample_progress_key(sample)
+                if key not in reported_keys:
+                    reported_keys.add(key)
+                    reported += 1
+                    if progress_callback is not None:
+                        progress_callback(
+                            reported,
+                            total,
+                            f"Writing video frames ({reported}/{total})",
+                        )
 
         try:
             while current_idx <= max_target:
@@ -644,7 +675,7 @@ def create_dataset_split(
             "test": shuffled_samples[val_end:],
         }
 
-    materialize_total = sum(len(items) for items in split_map.values())
+    materialize_total = _count_unique_split_samples(split_map)
     if progress_callback is not None:
         progress_callback(0, materialize_total, "Preparing dataset split files...")
 
@@ -691,7 +722,7 @@ def create_dataset_split(
     return {split: len(items) for split, items in split_map.items()}
 
 
-def create_online_training_dataset(
+def create_mini_training_dataset(
     current_project,
     frame_type: str = "video",
     train_ratio: float = 0.8,
@@ -704,9 +735,9 @@ def create_online_training_dataset(
     should_cancel=None,
 ) -> tuple[Path, dict[str, int]]:
     project_dir = Path(current_project.project_dir)
-    dataset_root = Path(dataset_root) if dataset_root is not None else project_dir / "runs" / ONLINE_DATASET_ROOT
+    dataset_root = Path(dataset_root) if dataset_root is not None else project_dir / "runs" / MINI_DATASET_ROOT
     stamp = datetime.now().strftime("%y%m%d_%H%M%S")
-    dataset_dir = dataset_root / f"online_training_dataset_{stamp}"
+    dataset_dir = dataset_root / f"mini_training_dataset_{stamp}"
     counts = create_dataset_split(
         current_project,
         list(current_project.files),
@@ -748,7 +779,7 @@ class DataSplitDialog(QDialog):
 
         self.file_tree = QTreeWidget()
         self.file_tree.setColumnCount(3)
-        self.file_tree.setHeaderLabels(["Video", "Frames", "Labels"])
+        self.file_tree.setHeaderLabels(["Video", "Source frames", "Labeled samples"])
         self.file_tree.setRootIsDecorated(False)
         self.file_tree.setAlternatingRowColors(True)
         self.file_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -770,7 +801,7 @@ class DataSplitDialog(QDialog):
         selection_buttons.addWidget(self.invert_selection_button)
         selection_buttons.addStretch(1)
         layout.addLayout(selection_buttons)
-        self.count_label = QLabel("0 files selected / 0 labels")
+        self.count_label = QLabel("0 files selected / 0 labeled samples")
         self.count_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         count_font = QFont()
         count_font.setPointSize(11)
@@ -1010,10 +1041,13 @@ class DataSplitDialog(QDialog):
         frame_type = self.frame_type_combo.currentText()
 
         if frame_type == "video":
-            self.count_label.setText(f"{total_files} files selected / {total_labels:,} labels")
+            self.count_label.setText(
+                f"{total_files} files selected / {total_labels:,} labeled samples"
+            )
         else:
             self.count_label.setText(
-                f"{total_files} files selected / {total_frames:,} frames / {total_labels:,} labels"
+                f"{total_files} files selected / {total_labels:,} labeled samples / "
+                f"{total_frames:,} source frames"
             )
 
     def get_selected_entries(self):

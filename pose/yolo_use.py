@@ -741,6 +741,24 @@ class YoloInferenceDialog(QDialog):
         self.csv_output_mode_combo = QComboBox()
         self.csv_output_mode_combo.addItems(["Raw CSV only", "Raw + interpolated CSV"])
         self.csv_output_mode_combo.setStyleSheet(DISABLED_COMBOBOX_STYLESHEET)
+        self.csv_abs_coord_checkbox = QCheckBox(checked=False)
+        self.csv_abs_coord_checkbox.setToolTip(
+            "Save CSV keypoint x/y as absolute coordinates by multiplying normalized values by width/height."
+        )
+        default_abs_width, default_abs_height = self._default_abs_coord_size()
+        self.csv_abs_width_spin = QSpinBox()
+        self.csv_abs_width_spin.setRange(1, 100000)
+        self.csv_abs_width_spin.setValue(default_abs_width)
+        self.csv_abs_height_spin = QSpinBox()
+        self.csv_abs_height_spin.setRange(1, 100000)
+        self.csv_abs_height_spin.setValue(default_abs_height)
+        csv_abs_size_box = QWidget()
+        csv_abs_size_layout = QHBoxLayout(csv_abs_size_box)
+        csv_abs_size_layout.setContentsMargins(0, 0, 0, 0)
+        csv_abs_size_layout.addWidget(QLabel("W"))
+        csv_abs_size_layout.addWidget(self.csv_abs_width_spin)
+        csv_abs_size_layout.addWidget(QLabel("H"))
+        csv_abs_size_layout.addWidget(self.csv_abs_height_spin)
 
         form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
         form.addRow(QLabel("save image/video"), self.save_media_checkbox)
@@ -750,9 +768,12 @@ class YoloInferenceDialog(QDialog):
         form.addRow(QLabel("save result as txt"), self.save_txt_checkbox)
         form.addRow(QLabel("save result as csv"), self.convert_txt_to_csv_checkbox)
         form.addRow(QLabel("csv output mode"), self.csv_output_mode_combo)
+        form.addRow(QLabel("csv abs coord mode"), self.csv_abs_coord_checkbox)
+        form.addRow(QLabel("csv abs coord size"), csv_abs_size_box)
 
         self.save_txt_checkbox.toggled.connect(self._update_visualization_option_states)
         self.convert_txt_to_csv_checkbox.toggled.connect(self._update_visualization_option_states)
+        self.csv_abs_coord_checkbox.toggled.connect(self._update_visualization_option_states)
         self.image_input_video_checkbox.toggled.connect(self._on_image_input_video_toggled)
         self._update_visualization_option_states()
         return group
@@ -1128,6 +1149,27 @@ class YoloInferenceDialog(QDialog):
     ) -> Path:
         return default_video_path(self._inference_input_video_dir(run_root_name), source_name, reference_video)
 
+    def _default_abs_coord_size(self) -> tuple[int, int]:
+        for file_entry in getattr(self.current_project, "files", []) or []:
+            try:
+                video_path = self.current_project.resolve_video_path(file_entry)
+            except Exception:
+                video_path = Path(getattr(file_entry, "video", ""))
+            if not video_path or not Path(video_path).exists():
+                continue
+            capture = cv2.VideoCapture(str(video_path))
+            if not capture.isOpened():
+                capture.release()
+                continue
+            try:
+                width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            finally:
+                capture.release()
+            if width > 0 and height > 0:
+                return width, height
+        return 1920, 1080
+
     def _dir_has_txt_files(self, path: Path) -> bool:
         if not path.is_dir():
             return False
@@ -1184,6 +1226,8 @@ class YoloInferenceDialog(QDialog):
         keep_txt: bool,
         want_csv: bool,
         csv_output_mode: str,
+        csv_abs_coord_width: Optional[int] = None,
+        csv_abs_coord_height: Optional[int] = None,
         *,
         progress_callback=None,
     ) -> None:
@@ -1197,6 +1241,8 @@ class YoloInferenceDialog(QDialog):
                 run_root_name,
                 source_name,
                 txt_dir=txt_dir,
+                abs_coord_width=csv_abs_coord_width,
+                abs_coord_height=csv_abs_coord_height,
                 progress_callback=progress_callback,
             )
             converted = True
@@ -1233,7 +1279,21 @@ class YoloInferenceDialog(QDialog):
         if hasattr(self, "convert_txt_to_csv_checkbox"):
             self.convert_txt_to_csv_checkbox.setEnabled(True)
         if hasattr(self, "csv_output_mode_combo") and hasattr(self, "convert_txt_to_csv_checkbox"):
-            self.csv_output_mode_combo.setEnabled(self.convert_txt_to_csv_checkbox.isChecked())
+            csv_enabled = self.convert_txt_to_csv_checkbox.isChecked()
+            self.csv_output_mode_combo.setEnabled(csv_enabled)
+            if hasattr(self, "csv_abs_coord_checkbox"):
+                self.csv_abs_coord_checkbox.setEnabled(csv_enabled)
+                if not csv_enabled:
+                    self.csv_abs_coord_checkbox.setChecked(False)
+            abs_enabled = (
+                csv_enabled
+                and hasattr(self, "csv_abs_coord_checkbox")
+                and self.csv_abs_coord_checkbox.isChecked()
+            )
+            if hasattr(self, "csv_abs_width_spin"):
+                self.csv_abs_width_spin.setEnabled(abs_enabled)
+            if hasattr(self, "csv_abs_height_spin"):
+                self.csv_abs_height_spin.setEnabled(abs_enabled)
 
     @staticmethod
     def _estimate_source_work(source: str | Path) -> int:
@@ -1317,6 +1377,13 @@ class YoloInferenceDialog(QDialog):
         keep_txt = self.save_txt_checkbox.isChecked()
         want_csv = self.convert_txt_to_csv_checkbox.isChecked()
         csv_output_mode = self.csv_output_mode_combo.currentText()
+        csv_abs_coord_enabled = (
+            want_csv
+            and hasattr(self, "csv_abs_coord_checkbox")
+            and self.csv_abs_coord_checkbox.isChecked()
+        )
+        csv_abs_coord_width = self.csv_abs_width_spin.value() if csv_abs_coord_enabled else None
+        csv_abs_coord_height = self.csv_abs_height_spin.value() if csv_abs_coord_enabled else None
         use_image_input_video = (
             self.image_radio.isChecked()
             and hasattr(self, "image_input_video_checkbox")
@@ -1392,6 +1459,8 @@ class YoloInferenceDialog(QDialog):
                     "keep_txt": keep_txt,
                     "want_csv": want_csv,
                     "csv_output_mode": csv_output_mode,
+                    "csv_abs_coord_width": csv_abs_coord_width,
+                    "csv_abs_coord_height": csv_abs_coord_height,
                 }
             )
 
@@ -1591,6 +1660,8 @@ class YoloInferenceDialog(QDialog):
         keep_txt = bool(run_item.get("keep_txt"))
         want_csv = bool(run_item.get("want_csv"))
         csv_output_mode = str(run_item.get("csv_output_mode", "Raw CSV only"))
+        csv_abs_coord_width = run_item.get("csv_abs_coord_width")
+        csv_abs_coord_height = run_item.get("csv_abs_coord_height")
         if run_root_name and source_name and (keep_txt or want_csv):
             self._update_global_inference_progress(
                 f"Finalizing outputs: {source_name}",
@@ -1604,6 +1675,8 @@ class YoloInferenceDialog(QDialog):
                     keep_txt,
                     want_csv,
                     csv_output_mode,
+                    csv_abs_coord_width,
+                    csv_abs_coord_height,
                     progress_callback=progress_callback,
                 )
 
@@ -1786,6 +1859,8 @@ class YoloInferenceDialog(QDialog):
         source_name: str,
         txt_dir: Optional[Path] = None,
         *,
+        abs_coord_width: Optional[int] = None,
+        abs_coord_height: Optional[int] = None,
         progress_callback=None,
     ) -> Optional[Path]:
         if txt_dir is None:
@@ -1867,6 +1942,37 @@ class YoloInferenceDialog(QDialog):
             columns.append("instance.id")
 
         df = pd.DataFrame(rows, columns=columns)
+        if abs_coord_width is not None or abs_coord_height is not None:
+            df = self._scale_csv_to_abs_coords(
+                df,
+                kpt_names,
+                abs_coord_width,
+                abs_coord_height,
+            )
         csv_path = self._inference_source_csv_path(run_root_name, source_name)
         df.to_csv(csv_path, index=False)
         return csv_path
+
+    @staticmethod
+    def _scale_csv_to_abs_coords(
+        df: pd.DataFrame,
+        kpt_names: list[str],
+        width: Optional[int],
+        height: Optional[int],
+    ) -> pd.DataFrame:
+        if width is None or height is None:
+            raise ValueError("Absolute coordinate CSV mode requires both width and height.")
+        width = int(width)
+        height = int(height)
+        if width <= 0 or height <= 0:
+            raise ValueError("Absolute coordinate CSV width and height must be positive.")
+
+        scaled = df.copy()
+        for kp_name in kpt_names:
+            x_col = f"{kp_name}.x"
+            y_col = f"{kp_name}.y"
+            if x_col in scaled.columns:
+                scaled[x_col] = pd.to_numeric(scaled[x_col], errors="coerce") * width
+            if y_col in scaled.columns:
+                scaled[y_col] = pd.to_numeric(scaled[y_col], errors="coerce") * height
+        return scaled

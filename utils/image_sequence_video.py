@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence, Union
 import os
 import re
 import shutil
@@ -16,7 +16,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 VIDEO_SUFFIXES = {".avi", ".mp4", ".mov", ".m4v", ".mkv"}
 ProgressCallback = Callable[[int, int, str], None]
 CancelCallback = Callable[[], bool]
-ValidationMode = str | bool
+ValidationMode = Union[str, bool]
 
 
 @dataclass(frozen=True)

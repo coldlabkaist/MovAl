@@ -233,12 +233,14 @@ class FunctionProgressThread(QThread):
     def __init__(self, function):
         super().__init__()
         self._function = function
+        self.result = None
         self.error_text = None
 
     def run(self):
+        self.result = None
         self.error_text = None
         try:
-            self._function(self.progress.emit)
+            self.result = self._function(self.progress.emit)
             self.success.emit()
         except Exception as err:
             self.error_text = str(err)

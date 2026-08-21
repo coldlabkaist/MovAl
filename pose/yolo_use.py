@@ -28,6 +28,11 @@ from utils.csv_interpolation import interpolate_pose_csv
 from utils.skeleton.skeleton_model import SkeletonModel
 from utils.ui_theme import build_list_widget_stylesheet
 from utils.txt_conversion import parse_txt_pose_detections, resolve_frame_track_data
+from utils.image_sequence_video import (
+    default_video_path,
+    encode_image_sequence_to_video,
+    natural_image_files,
+)
 
 class BrowseOnlyLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -520,6 +525,7 @@ class YoloInferenceDialog(QDialog):
         self.current_run_item = None
         self.infer_thread = None
         self.postprocess_thread = None
+        self.preprocess_thread = None
         self._inference_running = False
         self._stop_requested = False
         self._completed_commands = 0
@@ -724,6 +730,12 @@ class YoloInferenceDialog(QDialog):
 
         self.show_tracking_checkbox = QCheckBox(checked=False)
         self.save_media_checkbox = QCheckBox(checked=False)
+        self.image_input_video_checkbox = QCheckBox(checked=False)
+        image_video_tooltip = (
+            "Image frame mode only. 조금 더 오래 걸리지만 중간 input video와 "
+            "최종 YOLO output video를 함께 저장합니다."
+        )
+        self.image_input_video_checkbox.setToolTip(image_video_tooltip)
         self.save_txt_checkbox = QCheckBox(checked=False)
         self.convert_txt_to_csv_checkbox = QCheckBox(checked=True)
         self.csv_output_mode_combo = QComboBox()
@@ -732,12 +744,16 @@ class YoloInferenceDialog(QDialog):
 
         form.addRow(QLabel("show tracking result"), self.show_tracking_checkbox)
         form.addRow(QLabel("save image/video"), self.save_media_checkbox)
+        image_video_label = QLabel("run image frames as video")
+        image_video_label.setToolTip(image_video_tooltip)
+        form.addRow(image_video_label, self.image_input_video_checkbox)
         form.addRow(QLabel("save result as txt"), self.save_txt_checkbox)
         form.addRow(QLabel("save result as csv"), self.convert_txt_to_csv_checkbox)
         form.addRow(QLabel("csv output mode"), self.csv_output_mode_combo)
 
         self.save_txt_checkbox.toggled.connect(self._update_visualization_option_states)
         self.convert_txt_to_csv_checkbox.toggled.connect(self._update_visualization_option_states)
+        self.image_input_video_checkbox.toggled.connect(self._on_image_input_video_toggled)
         self._update_visualization_option_states()
         return group
 
@@ -781,6 +797,11 @@ class YoloInferenceDialog(QDialog):
             self.track_method_combo.setEnabled(True)
         else:
             self.track_method_combo.setEnabled(False)
+
+    def _on_image_input_video_toggled(self, checked: bool) -> None:
+        if checked:
+            self.save_media_checkbox.setChecked(True)
+        self._update_visualization_option_states()
 
     def update_source_mode_ui(self):
         if self.image_radio.isChecked():
@@ -1086,6 +1107,27 @@ class YoloInferenceDialog(QDialog):
     def _inference_source_interpolated_csv_path(self, run_root_name: str, source_name: str) -> Path:
         return self._inference_run_root_dir(run_root_name) / f"{source_name}.interpolated.csv"
 
+    def _inference_input_video_dir(self, run_root_name: str) -> Path:
+        return self._inference_run_root_dir(run_root_name) / "input_videos"
+
+    def _reference_video_for_source_name(self, source_name: str) -> Optional[Path]:
+        try:
+            record = self.current_project.get_video_record(source_name)
+            if record is None:
+                return None
+            video_path = self.current_project.resolve_video_path(record)
+            return video_path if video_path.exists() else None
+        except Exception:
+            return None
+
+    def _image_input_video_path(
+        self,
+        run_root_name: str,
+        source_name: str,
+        reference_video: Optional[Path],
+    ) -> Path:
+        return default_video_path(self._inference_input_video_dir(run_root_name), source_name, reference_video)
+
     def _dir_has_txt_files(self, path: Path) -> bool:
         if not path.is_dir():
             return False
@@ -1186,6 +1228,8 @@ class YoloInferenceDialog(QDialog):
             else:
                 self.show_tracking_checkbox.setEnabled(True)
 
+        if hasattr(self, "image_input_video_checkbox"):
+            self.image_input_video_checkbox.setEnabled(self.image_radio.isChecked())
         if hasattr(self, "convert_txt_to_csv_checkbox"):
             self.convert_txt_to_csv_checkbox.setEnabled(True)
         if hasattr(self, "csv_output_mode_combo") and hasattr(self, "convert_txt_to_csv_checkbox"):
@@ -1273,17 +1317,31 @@ class YoloInferenceDialog(QDialog):
         keep_txt = self.save_txt_checkbox.isChecked()
         want_csv = self.convert_txt_to_csv_checkbox.isChecked()
         csv_output_mode = self.csv_output_mode_combo.currentText()
+        use_image_input_video = (
+            self.image_radio.isChecked()
+            and hasattr(self, "image_input_video_checkbox")
+            and self.image_input_video_checkbox.isChecked()
+        )
         need_txt_output = keep_txt or want_csv
 
         def norm(p):
             return str(p).replace("\\", "/")
         
         model_path = norm(model_path)
-        base_out.mkdir(parents=True, exist_ok=True)
-        base_out = norm(base_out)
+        base_out_path = base_out
+        base_out_path.mkdir(parents=True, exist_ok=True)
+        base_out = norm(base_out_path)
 
         for name, src in sources:
-            src = norm(src)
+            source_path = Path(src)
+            yolo_source_path = source_path
+            reference_video_path = None
+            input_video_path = None
+            if use_image_input_video:
+                reference_video_path = self._reference_video_for_source_name(name)
+                input_video_path = self._image_input_video_path(run_root_name, name, reference_video_path)
+                yolo_source_path = input_video_path
+            src = norm(yolo_source_path)
 
             if self.tracking_radio.isChecked():
                 tracker_name = self.track_method_combo.currentText() + ".yaml"
@@ -1315,7 +1373,7 @@ class YoloInferenceDialog(QDialog):
 
             if self.show_tracking_checkbox.isChecked():
                 cmd.append("show=True")
-            if self.save_media_checkbox.isChecked():
+            if self.save_media_checkbox.isChecked() or use_image_input_video:
                 cmd.append("save=True")
             if need_txt_output:
                 cmd.append("save_txt=True")
@@ -1325,8 +1383,12 @@ class YoloInferenceDialog(QDialog):
                     "command": cmd,
                     "run_root_name": run_root_name,
                     "source_name": name,
-                    "source_path": src,
-                    "work_total": self._estimate_source_work(src),
+                    "source_path": norm(source_path),
+                    "work_total": self._estimate_source_work(source_path),
+                    "prepare_input_video": bool(input_video_path),
+                    "source_image_dir": norm(source_path) if input_video_path else "",
+                    "input_video_path": norm(input_video_path) if input_video_path else "",
+                    "reference_video_path": norm(reference_video_path) if reference_video_path else "",
                     "keep_txt": keep_txt,
                     "want_csv": want_csv,
                     "csv_output_mode": csv_output_mode,
@@ -1392,12 +1454,89 @@ class YoloInferenceDialog(QDialog):
             f"({self._completed_commands + 1}/{self._total_commands})"
         )
         self._update_global_inference_progress(message)
+        if self.current_run_item.get("prepare_input_video") and not self.current_run_item.get("input_video_ready"):
+            self._prepare_current_input_video()
+            return
+        self._start_current_inference_command()
+
+    def _start_current_inference_command(self) -> None:
+        if not self.current_run_item:
+            return
+        command = self.current_run_item["command"]
         print("Executing:", command)
 
         self.infer_thread = InferenceThread(command)
         self.infer_thread.log_signal.connect(self._on_inference_log)
         self.infer_thread.finished.connect(self._on_inference_command_finished)
         self.infer_thread.start()
+
+    def _prepare_current_input_video(self) -> None:
+        run_item = self.current_run_item or {}
+        source_name = str(run_item.get("source_name", ""))
+        source_image_dir = Path(str(run_item.get("source_image_dir", "")))
+        input_video_path = Path(str(run_item.get("input_video_path", "")))
+        reference_video_text = str(run_item.get("reference_video_path", ""))
+        reference_video_path = Path(reference_video_text) if reference_video_text else None
+
+        self._update_global_inference_progress(
+            f"Preparing input video: {source_name}",
+            current_done=0,
+        )
+
+        def prepare(progress_callback):
+            image_files = natural_image_files(source_image_dir)
+            if not image_files:
+                raise FileNotFoundError(f"No image frames found in: {source_image_dir}")
+            return encode_image_sequence_to_video(
+                image_files,
+                input_video_path,
+                reference_video=reference_video_path,
+                validate="container",
+                progress_callback=progress_callback,
+                should_cancel=lambda: self._stop_requested,
+            )
+
+        self.preprocess_thread = FunctionProgressThread(prepare)
+        self.preprocess_thread.progress.connect(self._on_inference_preprocess_progress)
+        self.preprocess_thread.finished.connect(self._on_inference_preprocess_finished)
+        self.preprocess_thread.finished.connect(self._clear_finished_preprocess_thread)
+        self.preprocess_thread.start()
+
+    def _on_inference_preprocess_progress(self, done: int, total: int, message: str) -> None:
+        source_name = str((self.current_run_item or {}).get("source_name", ""))
+        status = f"{source_name}: {message}" if source_name else message
+        self._update_global_inference_progress(status, current_done=done)
+
+    def _on_inference_preprocess_finished(self) -> None:
+        thread = self.sender()
+        if self._stop_requested:
+            self.current_run_item = None
+            self.command_queue.clear()
+            self._finish_inference_run(success=False, cancelled=True)
+            return
+        error_text = getattr(thread, "error_text", None)
+        if error_text:
+            run_item = self.current_run_item or {}
+            self.command_queue.clear()
+            self.current_run_item = None
+            self._finish_inference_run(success=False)
+            QMessageBox.critical(
+                self,
+                "Input video preparation failed",
+                f"Source: {run_item.get('source_name', '')}\n{error_text}",
+            )
+            return
+        run_item = self.current_run_item or {}
+        result = getattr(thread, "result", None)
+        if result is not None:
+            run_item["input_video_result"] = result
+        run_item["input_video_ready"] = True
+        self._start_current_inference_command()
+
+    def _clear_finished_preprocess_thread(self) -> None:
+        thread = self.sender()
+        if self.preprocess_thread is thread:
+            self.preprocess_thread = None
 
     def _on_inference_log(self, line: str) -> None:
         frame_progress = parse_inference_frame(line)
@@ -1557,6 +1696,8 @@ class YoloInferenceDialog(QDialog):
             "Stopping inference...",
             current_done=self._current_frame_done,
         )
+        if self.preprocess_thread is not None and self.preprocess_thread.isRunning():
+            return
         if self.infer_thread is not None and self.infer_thread.isRunning():
             self.infer_thread.stop()
             return

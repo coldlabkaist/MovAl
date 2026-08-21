@@ -12,6 +12,11 @@ from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QImage, QPainter, QPen
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog, QWidget
 
 from utils.skeleton import SkeletonModel
+from utils.image_sequence_video import (
+    encode_frame_sequence_to_video,
+    natural_image_files,
+    read_video_metadata,
+)
 
 from ..widget.image_label import CUTIE_COLOR_BASE, SKELETON_COLOR_SET
 from .data_loader import DataLoader
@@ -154,7 +159,6 @@ class _VideoExportThread(QThread):
         width: int,
         height: int,
         fps: float,
-        fourcc: int,
         frame_delay: int,
     ) -> None:
         super().__init__()
@@ -168,25 +172,18 @@ class _VideoExportThread(QThread):
         self.width = width
         self.height = height
         self.fps = fps
-        self.fourcc = fourcc
         self.frame_delay = int(frame_delay)
 
     def run(self) -> None:
         skeleton_model = SkeletonModel()
         skeleton_model.load_from_dict(self.skeleton_data)
+        total = len(self.image_files)
 
-        writer = cv2.VideoWriter(self.out_path, self.fourcc, self.fps, (self.width, self.height))
-        if not writer.isOpened():
-            self.error_signal.emit("Could not open video writer for output file.")
-            return
-
-        try:
-            total = len(self.image_files)
+        def rendered_frames():
             for index, img_path in enumerate(self.image_files):
                 frame_img = cv2.imread(str(img_path))
                 if frame_img is None:
-                    self.progress_signal.emit(index + 1, total)
-                    continue
+                    raise FileNotFoundError(f"Failed to read frame image: {img_path}")
 
                 frame_num = index - self.frame_delay
                 frame_df = self.frame_groups.get(frame_num)
@@ -221,14 +218,22 @@ class _VideoExportThread(QThread):
                         )
                         frame_img = cv2.cvtColor(rendered_rgb, cv2.COLOR_RGB2BGR)
 
-                writer.write(frame_img)
-                self.progress_signal.emit(index + 1, total)
+                yield frame_img
+
+        try:
+            encode_frame_sequence_to_video(
+                rendered_frames(),
+                self.out_path,
+                fps=self.fps,
+                frame_count=total,
+                validate="container",
+                progress_callback=lambda done, total, _message: self.progress_signal.emit(done, total),
+                progress_label="Exporting video",
+            )
         except Exception as exc:
-            writer.release()
             self.error_signal.emit(str(exc))
             return
 
-        writer.release()
         self.finished_signal.emit(self.out_path)
 
 
@@ -278,11 +283,7 @@ def _export_video_stub(parent: QWidget) -> None:
         QMessageBox.critical(parent, "Error", f"Frames directory not found:\n{frames_dir}")
         return
 
-    image_files = sorted(frames_dir.glob("*.png"))
-    if not image_files:
-        image_files = sorted(frames_dir.glob("*.jpg"))
-    if not image_files:
-        image_files = sorted(frames_dir.glob("*.jpeg"))
+    image_files = natural_image_files(frames_dir)
     if not image_files:
         QMessageBox.critical(parent, "Error", f"No frame images found in {frames_dir}")
         return
@@ -320,9 +321,6 @@ def _export_video_stub(parent: QWidget) -> None:
     if Path(out_path).suffix == "":
         out_path += ".mp4"
 
-    ext = Path(out_path).suffix.lower()
-    fourcc = cv2.VideoWriter_fourcc(*("XVID" if ext == ".avi" else "mp4v"))
-
     sample_img = cv2.imread(str(image_files[0]))
     if sample_img is None:
         QMessageBox.critical(parent, "Error", f"Failed to read frame image: {image_files[0].name}")
@@ -341,17 +339,15 @@ def _export_video_stub(parent: QWidget) -> None:
     if video_path is None or not video_path.exists():
         vid_path = parent.video_combo.currentData(Qt.ItemDataRole.UserRole) if hasattr(parent, "video_combo") else None
         if vid_path is None:
-            vid_path = Path(parent.video_combo.currentText()) if hasattr(parent, "video_combo") else None
-        if vid_path and vid_path.exists():
-            video_path = vid_path
+            vid_path = parent.video_combo.currentText() if hasattr(parent, "video_combo") else None
+        if vid_path:
+            candidate_path = Path(vid_path)
+            if candidate_path.exists():
+                video_path = candidate_path
 
     if video_path and video_path.exists():
-        try:
-            cap = cv2.VideoCapture(str(video_path))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            cap.release()
-        except Exception:
-            fps = 0.0
+        metadata = read_video_metadata(video_path)
+        fps = metadata.fps if metadata is not None else 0.0
     if fps is None or fps <= 0:
         warnings.warn(
             f"Unable to read original fps from project file: {video_path}. Video playback fps is fixed to 30.",
@@ -388,7 +384,6 @@ def _export_video_stub(parent: QWidget) -> None:
         width=width,
         height=height,
         fps=fps,
-        fourcc=fourcc,
         frame_delay=frame_delay,
     )
 

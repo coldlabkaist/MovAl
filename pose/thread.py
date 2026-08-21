@@ -23,6 +23,7 @@ def _make_env():
 
 _ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _ANSI_OSC_RE = re.compile(r"\x1b\].*?(?:\x07|\x1b\\)")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _decode_console_bytes(data: bytes) -> str:
@@ -44,24 +45,62 @@ def _sanitize_console_text(text: str) -> str:
     clean = _ANSI_OSC_RE.sub("", text)
     clean = _ANSI_CSI_RE.sub("", clean)
     clean = clean.replace("\r", "")
+    clean = _CONTROL_CHARS_RE.sub("", clean)
     return clean
 
 
-def _iter_clean_lines(stream):
-    """Yield records separated by either newline or carriage return."""
+def _iter_clean_lines(stream, *, collapse_carriage_returns=False):
+    """Yield clean visual console lines from a subprocess stream."""
     pending = b""
+
+    if not collapse_carriage_returns:
+        while True:
+            chunk = os.read(stream.fileno(), 4096)
+            if not chunk:
+                break
+            pending += chunk
+            records = re.split(br"[\r\n]+", pending)
+            pending = records.pop()
+            for raw_record in records:
+                if raw_record:
+                    clean = _sanitize_console_text(_decode_console_bytes(raw_record)).strip()
+                    if clean:
+                        yield clean
+        if pending:
+            clean = _sanitize_console_text(_decode_console_bytes(pending)).strip()
+            if clean:
+                yield clean
+        return
+
+    carriage_record = None
     while True:
         chunk = os.read(stream.fileno(), 4096)
         if not chunk:
             break
         pending += chunk
-        records = re.split(br"[\r\n]+", pending)
-        pending = records.pop()
-        for raw_record in records:
-            if raw_record:
-                yield _sanitize_console_text(_decode_console_bytes(raw_record))
-    if pending:
-        yield _sanitize_console_text(_decode_console_bytes(pending))
+        parts = re.split(br"(\r\n|\r|\n)", pending)
+        pending = parts.pop()
+        for index in range(0, len(parts), 2):
+            raw_record = parts[index]
+            delimiter = parts[index + 1]
+
+            if delimiter == b"\r":
+                if raw_record:
+                    carriage_record = raw_record
+                continue
+
+            record = raw_record or carriage_record
+            carriage_record = None
+            if record:
+                clean = _sanitize_console_text(_decode_console_bytes(record)).strip()
+                if clean:
+                    yield clean
+
+    record = pending or carriage_record
+    if record:
+        clean = _sanitize_console_text(_decode_console_bytes(record)).strip()
+        if clean:
+            yield clean
 
 
 _OUTPUT_TAIL_LIMIT = 200
@@ -128,7 +167,7 @@ class TrainThread(QThread):
             )
             self._process = process
 
-            for line in _iter_clean_lines(process.stdout):
+            for line in _iter_clean_lines(process.stdout, collapse_carriage_returns=True):
                 if line:
                     _append_output_tail(self.output_lines, line)
                     sys.stdout.write(f"{line}\n")

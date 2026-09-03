@@ -1,6 +1,6 @@
 ## MovAl v1.2.x
 
-**26.06.01.** MovAl v1.2.1 released
+**26.09.03.** MovAl v1.2.1 released
 - Add project-level per-ID skeleton limit configuration for multi-instance workflows.
 - Add absolute-coordinate CSV export for YOLO inference and support CSV-only output cleanup.
 - Add recent CSV data splitting and Labelary labeling-progress feedback.

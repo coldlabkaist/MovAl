@@ -4,8 +4,8 @@
 **MovAl:** Move Altogether is an integrated pipeline of YOLO (pose) and Cutie (Instance segmentation) for multi animal key point detection. 
 This pipeline overcomes the Id-switching problem of existing multi-animal tracking methods and give better key point detection quality. Try it for your multi-instance!
 
-![그림2](https://github.com/user-attachments/assets/c5652ecb-3ee8-402a-8a71-4e1059db3ea8)
-![그림3](https://github.com/user-attachments/assets/c4d4b78c-3bfe-4d05-8835-f48ba638381d)
+![tracking result 1](https://github.com/user-attachments/assets/c5652ecb-3ee8-402a-8a71-4e1059db3ea8)
+![tracking result 2](https://github.com/user-attachments/assets/c4d4b78c-3bfe-4d05-8835-f48ba638381d)
 
 [🔗 See more tracking results!](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Tracking_Result.md)
 

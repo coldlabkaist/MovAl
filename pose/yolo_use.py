@@ -99,15 +99,15 @@ def _format_yolo_failure_message(command, output_text, exit_code):
 
     if _looks_like_model_load_failure(output_text):
         lines = [
-            "YOLO가 선택한 모델 파일을 불러오지 못했습니다.",
+            "YOLO could not load the selected model file.",
             "",
-            "모델 파일이 손상되었거나, 복사/다운로드가 완료되지 않았거나, 올바른 .pt 파일이 아닐 수 있습니다.",
-            "모델을 재검토한 뒤 다시 선택해 주세요.",
+            "The model file may be corrupted, incompletely copied or downloaded, or not a valid .pt file.",
+            "Please check the model and select it again.",
         ]
     else:
         lines = [
-            "YOLO 실행이 실패했습니다.",
-            "콘솔 로그를 확인한 뒤 설정과 입력 파일을 다시 확인해 주세요.",
+            "YOLO execution failed.",
+            "Please check the console log, then review your settings and input files.",
         ]
 
     if model_path:
@@ -732,8 +732,8 @@ class YoloInferenceDialog(QDialog):
         self.save_media_checkbox = QCheckBox(checked=False)
         self.image_input_video_checkbox = QCheckBox(checked=False)
         image_video_tooltip = (
-            "Image frame mode only. 조금 더 오래 걸리지만 중간 input video와 "
-            "최종 YOLO output video를 함께 저장합니다."
+            "Image frame mode only. This takes a little longer, but saves both the intermediate input video "
+            "and the final YOLO output video."
         )
         self.image_input_video_checkbox.setToolTip(image_video_tooltip)
         self.save_txt_checkbox = QCheckBox(checked=False)

@@ -1,12 +1,16 @@
 ## MovAl v1.2.x
 
-**26.06.01.** MovAl v1.2.1-dev updates
-- Add project-level per-ID skeleton limit configuration and improve multi-instance labeling/review flows.
-- Improve Labelary frame alignment with delay-based sync and corrected CSV index saving.
-- Standardize inference TXT loading to zero-based indexing and improve frame matching behavior.
-- Improve Labelary safety when reloading or closing with unsaved changes.
-- Reorganize inference outputs by run root and support CSV-only inference export without keeping TXT files.
+**26.06.01.** MovAl v1.2.1 released
+- Add project-level per-ID skeleton limit configuration for multi-instance workflows.
+- Add absolute-coordinate CSV export for YOLO inference and support CSV-only output cleanup.
+- Add recent CSV data splitting and Labelary labeling-progress feedback.
+- Improve YOLO inference by running image inputs through generated videos and organizing outputs by run root.
+- Improve Labelary frame alignment, delay-based sync, CSV index saving, and unsaved-change safety.
+- Improve preprocessing by reusing the selected workspace overwrite choice.
+- Improve YOLO training progress parsing and log display.
+- Fix inference TXT scanning/loading, zero-based frame indexing, and TXT-to-CSV postprocessing stability.
 - Add a YOLO-only updater in Installation Manager and share YOLO model download helpers.
+- Clean up minor UI and workflow inconsistencies.
 
 **26.05.19.** MovAl v1.2.0 released
 - Add video-based pipeline support and improve inference workflow convenience.
@@ -24,7 +28,7 @@
 - Add update assistant
 
 **26.04.08.** MovAl v1.1.3 released
-- Add “Select All” option for video frames in inference
+- Add "Select All" option for video frames in inference
 
 **26.04.09.** MovAl v1.1.2 released
 - Fix frame misalignment issue in Labelary

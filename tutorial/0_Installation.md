@@ -1,8 +1,8 @@
 # 0. Installation
 
-## Requirements
+## Requirements and Recommendations
 - CUDA 11.8 (or 12.1/12.8)
-- Supports Windows 11, Ubuntu 22.04 environment (Ubuntu 24.04 is not compatible)
+- Supports Windows 11, Ubuntu 22.04 environment (Ubuntu 24.04 may not compatible)
 - We recommend using Conda for setting up the environment.
 - numpy (>=1.23.0,<2.0) is required to operate Cutie.
 
@@ -11,10 +11,10 @@ Check your CUDA version from terminal.
 ```bash
 nvcc --version
 ```
-We recommend to use cuda 11.8, at the same time we support 12.1, 12.8.
+We recommend to use cuda 11.8, 12.1, 12.8.
 
 **If the command still doesn’t detect the correct CUDA version**, set the system environment variables 
-(System Properties → Environment Variables) or set them temporarily with the command below.
+**(System Properties → Environment Variables)** or set them temporarily with the command below.
 ```bash
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8"  # for CUDA 11.8 only
 set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"  # for CUDA 12.1 only
@@ -52,11 +52,13 @@ Now you can run MovAl UI.
 python moval.py
 ```
 
+
 ## 3. One-click installation of Cutie/YOLO dependency
-<img width="884" height="602" alt="image" src="https://github.com/user-attachments/assets/cc934834-acac-4529-86a8-26d190afcfba" />
+<img width="1455" height="979" alt="image" src="https://github.com/user-attachments/assets/b73dd5f4-0a40-4b59-9cd5-473f7994c90e" />
 
 Click the One Click Install button in the Installation (Cutie/YOLO) tab to easily install dependencies and required models.
-<img width="558" height="263" alt="image" src="https://github.com/user-attachments/assets/803a8381-deb7-4c56-a3e0-f65798ba8333" />
+
+If there are any issues, you can install the manual, and when a newer version of the YOLO model is released, you can use the update YOLO button for automatic updates.
 
 ## 4. MovAl Update
 If your local MovAl version is outdated compared to the latest release version on github, you can see a message recommending an update when running the code. 
@@ -73,6 +75,6 @@ If no version is provided, MovAl updates to the latest release tag. If a version
 
 **Now you are ready to use MovAl.**
 
-**Troubleshooting**: https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Troubleshooting.md
+**Troubleshooting**: [Troubleshooting](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Troubleshooting.md)
 
 Next step: [1. Create Project](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/1_Create_Project.md)

@@ -54,7 +54,9 @@ python moval.py
 
 
 ## 3. One-click installation of Cutie/YOLO dependency
-<img width="1455" height="979" alt="image" src="https://github.com/user-attachments/assets/b73dd5f4-0a40-4b59-9cd5-473f7994c90e" />
+<img width="1498" height="793" alt="image" src="https://github.com/user-attachments/assets/e0ad200b-6540-473b-8384-319948cf430b" />
+
+
 
 Click the One Click Install button in the Installation (Cutie/YOLO) tab to easily install dependencies and required models.
 

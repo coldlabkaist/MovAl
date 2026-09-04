@@ -9,27 +9,22 @@ With your project loaded, click Preprocess to split the video into individual im
 
 Clicking Preprocess opens the GUI shown below.
 
-<img width="1655" height="938" alt="step2_1" src="https://github.com/user-attachments/assets/fae0c320-913c-479b-b396-03ce940a7a14" />
+<img width="1063" height="953" alt="image" src="https://github.com/user-attachments/assets/8a31d75a-1098-4468-a412-0b092082e8e1" />
 
 
 ## Segmentation
 
 <br>
 
-<img width="2225" height="1017" alt="step2_2" src="https://github.com/user-attachments/assets/9f1e2388-5fbf-44e6-8665-fcb950fbe4bc" />
+<img width="1864" height="1031" alt="image" src="https://github.com/user-attachments/assets/be62b244-d337-45de-b1af-9dae017d0be0" />
+
 
 <br><br>
 
 In the **Segment** tab, you can split your video into frames and run segmentation with Cutie.
 Clicking **Create Image Frames** will extract frames from all project videos at once and set up the Cutie workspace. You don’t need to use this button to proceed, but without it, the first Cutie launch for each video will take longer.
 
-This process can be time‑consuming. You can monitor progress in the terminal.
-
-<br>
-<img width="2056" height="1018" alt="step2_3" src="https://github.com/user-attachments/assets/8bd44ef8-0740-4d01-bafc-c7826d44c31a" />
-<br><br>
-
-Select a video from the list at the top and click Run Segmentation to launch Cutie.
+After frame extraction, select a video from the list at the top and click Run Segmentation to launch Cutie.
 
 - If you encounter a dependency error at this stage, it’s likely due to your NumPy version.
 We recommend rerunning the installation steps to recreate your environment.
@@ -89,9 +84,7 @@ To speed up and stabilize your Cutie labeling workflow, please review the follow
 → See: [Cutie Labeling Assist Panel Add-On](https://github.com/coldlabkaist/Labeling-Assist-Panel-Injection-Code)
 
 ## (Optional) How to Create Contour
-<br>
-<img width="1098" height="429" alt="step2_8" src="https://github.com/user-attachments/assets/56c297db-9bb7-4397-8b37-35e706dbe4c2" />
-<br><br>
+<img width="1745" height="959" alt="image" src="https://github.com/user-attachments/assets/fc37e225-dc70-4858-a504-7f9332c558cb" />
 
 To sharpen boundaries between objects, you can convert the segmentation mask into a contour. 
 After completing segmentation, click Contour in the previous tab to automatically generate the contoured image.

@@ -1,16 +1,21 @@
 # MovAl (Move Altogether)
-![background_image](https://github.com/user-attachments/assets/d3af7702-ae83-4f63-95d7-0907b87eeac7)
+<img width="852" height="769" alt="image" src="https://github.com/user-attachments/assets/adc432b5-40ac-4cb0-a86b-d844879c5b45" />
 
-**MovAl:** Move Altogether is an integrated pipeline of YOLO (pose) and Cutie (Instance segmentation) for multi animal key point detection. 
+<br>
+<br>
+
+## **Welcome to MovAl!** 
+Move Altogether is an integrated pipeline of YOLO (pose) and Cutie (Instance segmentation) for multi animal key point detection. 
 This pipeline overcomes the Id-switching problem of existing multi-animal tracking methods and give better key point detection quality. Try it for your multi-instance!
 
-![tracking result 1](https://github.com/user-attachments/assets/c5652ecb-3ee8-402a-8a71-4e1059db3ea8)
-![tracking result 2](https://github.com/user-attachments/assets/c4d4b78c-3bfe-4d05-8835-f48ba638381d)
+<br>
+
+https://github.com/user-attachments/assets/1bc6e167-f11e-4508-b8ee-5eac7ec70539
 
 [🔗 See more tracking results!](https://github.com/coldlabkaist/MovAl/blob/main/tutorial/Tracking_Result.md)
 
 ## Requirement
-- CUDA 11.8 (or 12.1, 12.8)
+- CUDA (11.8, 12.1, 12.8)
 - Supports Windows 11, Ubuntu 22.04 environment.
 
 ### Installation Tutorial

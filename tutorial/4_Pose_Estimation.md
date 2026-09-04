@@ -3,63 +3,118 @@
 MovAl GUI supports YOLO‑based pose estimation.
 From the main page, click Step 4: Pose Estimation to proceed through the YOLO training process step by step.
 
-<img width="1623" height="938" alt="step4_1" src="https://github.com/user-attachments/assets/ee79cd58-1c54-4400-863a-6d1648bbce27" />
 
-<br>
 
 ## Prepare Dataset
 
-<img width="1649" height="705" alt="step4_3" src="https://github.com/user-attachments/assets/75fca8bb-4592-459b-aef1-276088d769bb" />
-<br><br>
+<img width="1799" height="834" alt="image" src="https://github.com/user-attachments/assets/ebe55db7-3172-4f56-854c-cf6ff15623c2" />
 
-To begin YOLO training, first split your data. Click Prepare Dataset to see the number of labeled frames for each video and TXT file in your project.
 
-<br>
-<img width="1649" height="705" alt="step4_3" src="https://github.com/user-attachments/assets/984f02fd-0a71-48f8-8c59-c39b8e3bad86" />
-<br><br>
+Before training a YOLO pose model, first prepare the labeled dataset by splitting it into training, validation, and test sets.
+Click Prepare Dataset to view the available labeled data for each video and its corresponding TXT labels in the current project.
+- Select the video(s) to include, then set the train / validation / test split ratios and choose the visualization mode that matches the label data.
+- For most cases, the default split ratio is recommended. If the total amount of labeled data is limited, you may increase the proportion assigned to the training set so that more labeled frames are used for model learning.
+- After confirming the settings, click Run to generate the dataset split automatically.
 
-Select a video from the list, set your train/validation/test split ratios, and choose a visualization method.
+Note: Each project stores only one dataset split. Running Prepare Dataset again will overwrite the existing split.
 
-Click Run to automatically split the data.
-
-Note: Each project stores only one split—running this will overwrite any existing split.
 
 ## Model Training
 
-<img width="1548" height="804" alt="step4_4" src="https://github.com/user-attachments/assets/b2eef5fb-eeb4-45d3-8186-bb34d9fe1682" />
-<br><br>
+<img width="2104" height="928" alt="image" src="https://github.com/user-attachments/assets/a76b1a3b-fa41-41f5-910d-62e00a701d06" />
 
-Click Train Model to configure YOLO training options and begin training.
+Click Train Model to configure the YOLO pose training settings and start model training.
 
-- In the Model section, enable Use **Pretrained Model** to resume training on new data from an existing checkpoint. If you wish to use a model from the distribution, download the appropriate model and select the model you want from this window. For a list of currently available models and detailed manuals, please refer to the following link.
-  https://github.com/coldlabkaist/MovAl/blob/main/tutorial/How_to_use_pretrained_tracking_model.md
+**1. Choose the training model**
 
-- For multi‑GPU training, specify the device IDs under Training Options.
+In the Model section, select the YOLO model architecture or checkpoint to use for training. 
+If you want to continue training from an existing checkpoint, enable Use Pretrained Model and select the corresponding .pt file.
+You can also use one of the pretrained models distributed with MovAl. Download the model that matches your experimental setup and skeleton configuration, then select it from this window.
 
-View training progress in the terminal. All training logs and model checkpoints are saved in your project’s runs folder.
+**Important**: A pretrained model should use the same skeleton definition and node order as the current project. Models trained with a different skeleton configuration may not work correctly.
+
+**2. Configure training hyperparameters**
+
+Adjust the training parameters according to the size of your dataset and available hardware.
+
+Common settings include:
+
+- epochs: Maximum number of training epochs.
+- batch: Number of samples processed at once. Setting batch too high may cause an Out-of-Memory (OOM) error. Choose an appropriate value based on your dataset and available GPU memory. If training fails with an OOM error, reduce the batch value.
+- patience: Number of epochs to wait for improvement before early stopping. If patience is set, training may stop automatically before reaching the maximum number of epochs when validation performance no longer improves. Set patience = 0 if you want training to continue for the full configured training schedule without early stopping.
+- Other YOLO training parameters can be adjusted as needed.
+
+**3. Select the training device**
+
+Under Training Options, specify the device used for training.
+For a single GPU, select or enter the desired GPU device. For multi-GPU training, enter the GPU device IDs that should participate in training. Make sure the selected GPUs have sufficient available memory before starting training.
+
+**4. Start training**
+
+Training progress, loss values, and status messages can be monitored in the terminal while the model is running. Also, the progress is displayed on the main page of the hair.
+
+The best-performing checkpoint is typically stored in `runs/train_.../weights/best.pt`
 
 For detailed information, refer to the [YOLO documentation](https://docs.ultralytics.com/ko/modes/train/)
 
 ## Inference
 
-<img width="1588" height="688" alt="step4_5" src="https://github.com/user-attachments/assets/39d373eb-c2b2-46ce-9868-0512b732031f" />
-<br><br>
+<img width="1873" height="929" alt="image" src="https://github.com/user-attachments/assets/f07189a0-d204-4dd7-bbb5-cb8d980e7be3" />
 
-Click Pose Estimation to run inference with your trained YOLO model.
+**1. Select a model**
 
-- In the Video Selection tab, pick the video and set the Visualization Mode.
-Tip: Use the same mode you trained on to maximize accuracy.
+Click Browse Model and select the trained YOLO model (.pt) you want to use.
+For the best performance, use a model trained with the same skeleton configuration and visualization mode as the current project.
 
-- Under Inference Target, check only the objects you want to track.
+**2. Select the inference source**
 
-- In the Visualization tab:
+Under Video Selection, choose the input source:
 
-  - Select Show to display results live (not recommended for long runs).
+- video: run inference directly on the selected video. Videos that were not included in the project can also be subject to it.
+- image frames: run inference on previously generated image frames.
 
-  - Select Save to export results as images or a video (saved to your project’s predicts folder).
+Tip: Use the same visualization mode used during training whenever possible. For example, if the model was trained on contour images, run inference using the corresponding visualization input.
 
-Watch inference progress in your terminal. To correct any inference errors or to acquire additional data via inference, 
-reload the results in Labelary for editing.
+**3. Select inference targets**
+
+Under Inference Target, check the animal IDs or classes you want to detect.
+
+Only the selected targets will be included in the inference results.
+
+**4. Configure inference and output options**
+**Inference Config**
+
+You can adjust the main YOLO inference parameters:
+
+-  imgsz: input image size used for inference.
+-  conf: minimum confidence threshold for accepting detections.
+-  iou: IoU threshold used during detection filtering.
+-  augment: enables augmented inference.
+-  half: uses FP16 inference when supported.
+-  device: specifies the GPU or CPU device to use.
+
+If detection sensitivity is too low, you may reduce the confidence threshold, but this can also increase false-positive detections.
+
+**Visualization / Save Options**
+
+Use the Visualization section to choose what should be displayed or saved:
+
+-  show tracking result: display inference results live during processing.
+-  This is useful for quick inspection but is not recommended for long videos, as displaying every frame may slow down processing.
+-  save image/video: save rendered frames or videos with predicted skeletons overlaid.
+-  run image frames as video: process a sequence of image frames as a video-like input.
+-  save result as txt: export predictions in TXT format.
+-  save result as csv: export prediction results as CSV.
+
+Additional CSV options allow you to configure the output format and coordinate representation.
+
+**5. Run inference**
+
+After checking the model, input videos, targets, and output settings, click Run Inference.
+
+Inference progress and processing messages can be monitored in the terminal.
+
+Generated prediction files are saved in the project's prediction/output directories according to the selected save options.
 
 For detailed information, refer to the [YOLO documentation](https://docs.ultralytics.com/ko/modes/predict/)
 

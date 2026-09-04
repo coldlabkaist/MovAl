@@ -100,7 +100,7 @@ If detection sensitivity is too low, you may reduce the confidence threshold, bu
 Use the Visualization section to choose what should be displayed or saved:
 
 -  show tracking result: display inference results live during processing.
--  This is useful for quick inspection but is not recommended for long videos, as displaying every frame may slow down processing.
+   This is useful for quick inspection but is not recommended for long videos, as displaying every frame may slow down processing.
 -  save image/video: save rendered frames or videos with predicted skeletons overlaid.
 -  run image frames as video: process a sequence of image frames as a video-like input.
 -  save result as txt: export predictions in TXT format.

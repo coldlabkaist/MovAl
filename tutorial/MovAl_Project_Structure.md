@@ -104,7 +104,6 @@ predicts/
 `-- run_YYMMDD_HHMMSS/
     |-- video_01.csv
     |-- video_01.interpolated.csv
-    |-- skeletal_output.mp4
     |-- input_videos/
     |   `-- video_01.mp4
     `-- video_01/
@@ -118,8 +117,6 @@ predicts/
 - `video_01/`: YOLO media output folder for that source.
 
 - `input_videos/`: Temporary or saved videos generated when image frames are run through YOLO as a video.
-
-- `skeletal_output.mp4`: A rendered pose-estimation result video when video export is enabled.
 
 If TXT output is enabled during inference, TXT files may also appear inside the run folder. If CSV-only output is selected, MovAl may remove intermediate TXT files after CSV conversion.
 
